@@ -77,6 +77,11 @@ APP=$DD/Build/Products/Release-iphoneos/DmIOS.app; [ -d "$APP" ] || APP=$(grep -
 # the app sets DM_AOC_DIR at launch, the host reports them as owned and mounts them from it) and the RomFS
 rm -rf "$APP/msl" "$O/Payload" "$O/out.ipa"   # (the last two: what the copy-and-zip packing left behind)
 P=Payload/DmIOS.app; MAPS=("$P=$APP" "$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR")
+# Increased Memory Limit: the build is unsigned, so Xcode never merges Sources/DmIOS.entitlements into
+# a signature. Ship the file inside the app bundle anyway so a sideloader that looks for it there can
+# pick it up. See dm/ios/ENTITLEMENTS.md.
+cp Sources/DmIOS.entitlements "$APP/DmIOS.entitlements" || die "copy entitlements into the app bundle"
+t "entitlements: com.apple.developer.kernel.increased-memory-limit requested (see dm/ios/ENTITLEMENTS.md)"
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 # DM_NO_ROMFS=1: leave the RomFS out of the package. The app then reads it from Documents/romfs
 # (a directory tree, or a ROMFSARC archive: romfs.idx + romfs.NN shards, see dm/host/romfs_arc.h).
