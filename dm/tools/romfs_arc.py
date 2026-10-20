@@ -66,7 +66,7 @@ def plan_shards(files, shard_bytes):
     """Assign every file to a shard. Files are grouped by their top-level directory so one shard
     holds one kind of content, and each group is cut greedily into shards of at most shard_bytes.
     A single file larger than shard_bytes gets a shard of its own (the cap is a packing target, not
-    a hard limit)."""
+    a hard limit), so a shard can exceed it when it holds such a file alone."""
     by_top = collections.OrderedDict()
     for rel, size in files:
         parts = rel.split("/", 1)
@@ -74,17 +74,26 @@ def plan_shards(files, shard_bytes):
         by_top.setdefault(top, []).append((rel, size))
     # Big groups first, so the shard count stays close to size total / shard_bytes
     order = sorted(by_top.items(), key=lambda kv: -sum(s for _, s in kv[1]))
-    assign, shard = {}, 0
+    assign = {}
+    shard = 0                    # the shard currently being filled
+    cur = 0                      # bytes placed in it
+    used_any = False             # whether the current shard holds anything
     for _top, items in order:
-        cur = 0
         for rel, size in items:
-            if cur and cur + size > shard_bytes:
+            # Start a new shard when the next file would overflow this one. A file that is itself
+            # larger than the cap still goes into a fresh shard, alone.
+            if used_any and cur + size > shard_bytes:
                 shard += 1
                 cur = 0
+                used_any = False
             assign[rel] = (shard, cur)
             cur += size
-        if cur:            # only consume a shard number when something was placed in it
+            used_any = True
+        # A group boundary ends the current shard, so one shard never mixes two top-level directories
+        if used_any:
             shard += 1
+            cur = 0
+            used_any = False
     return assign, shard
 
 
@@ -122,7 +131,10 @@ def pack(romfs, base, shard_mib):
                         out.write(buf)
                         left -= len(buf)
                 written += size
-        print(f"\r  shard {i + 1}/{nshard}: {os.path.getsize(path) / 2**20:.0f} MiB", end="", flush=True)
+        sz = os.path.getsize(path)
+        # Sub-MiB shards are real (a group of tiny files); show KiB so they do not read as empty
+        shown = f"{sz / 2**20:.0f} MiB" if sz >= (1 << 20) else f"{sz / 1024:.0f} KiB"
+        print(f"\r  shard {i + 1}/{nshard}: {shown}", end="", flush=True)
     print(f"\n  wrote {written / 2**30:.2f} GiB in {nshard} shards", flush=True)
 
     # Name pool
