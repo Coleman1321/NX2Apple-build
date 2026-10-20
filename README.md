@@ -171,12 +171,23 @@ The mount is recognised by its **directory**, not its name: titles differ (`rom`
 - **Tears of the Kingdom** (0100F2C0115B6000, v1.0.0 + update 1.4.3): 304,243 files packed into 127
   files; all 304,243 byte-compared against the source (`verify: OK`); the game runs from the archive
   on macOS (1,905 frames at 30 fps).
-- The C reader walks all 304,243 files and 2,667 directories in 7.6 s.
+- **Hades II** (0100A00019DE0000, base + update 1.0.137848): 5,258 files packed into 33 files,
+  byte-compare OK, and the game runs from the archive on macOS (2,100 frames, 1,772 archive reads).
+  The update needs no special handling: `nx_extract` already layers the update NCA over the base
+  with `OpenFileSystemWithPatch`, so the extracted RomFS — and therefore the archive — is the merge.
+- The C reader walks all 304,243 Tears of the Kingdom files and 2,667 directories in 7.6 s.
 
 **On an iPhone, Tears of the Kingdom currently stops at the world map.** Its resident memory reaches
 ~3.34 GB, which is the per-app jetsam budget on a 12 GB device (measured headroom: 33 MB), and the
 open world needs more. Lowering the render scale to 0.5 does not change it, so the limit is the
 guest heap, not the GPU. Games from upstream's tested list (4–6 GB) are far below that budget.
+
+The app requests `com.apple.developer.kernel.increased-memory-limit`, which raises that budget to
+6–8 GB. Whether it takes effect depends on the sideloader: it has to keep unknown entitlements and
+enable the capability on the App ID with Apple. **AltStore Classic 2.2+**, **Impactor** and **Xcode
+with a Personal Team** do; **SideStore** with a free Apple ID needs a one-time App ID fix;
+**Sideloadly** does not. See [dm/ios/ENTITLEMENTS.md](dm/ios/ENTITLEMENTS.md) for the steps and for
+how to tell from `Documents/log.txt` whether it took effect.
 
 ## Limitations
 
