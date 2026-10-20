@@ -116,6 +116,32 @@ The index may sit at any of these places; the reader tries them in order:
 <DM_ROMFS>/romfs/romfs.idx
 ```
 
+## Using it for another game
+
+The archive format has nothing game-specific in it: the packer walks whatever directory you give it
+and the reader looks paths up in that tree. To switch games:
+
+1. Extract the new game's NSPs with `nx_extract` as usual (upstream's script does this).
+2. Pack that game's `RomFS` with `romfs_arc.py`.
+3. Rebuild the IPA with `DM_NO_ROMFS=1` and the new `GAME=` profile.
+4. Copy the new archive into `Documents/romfs/`.
+
+Three things to watch for:
+
+- **The shard count must stay at or below 256.** The reader keeps one fd slot per shard
+  (`MAX_SHARDS` in `romfs_arc.h`). The packer now refuses to write an index above that and tells you
+  which `--shard-mib` would fit. Tears of the Kingdom needs 126 at 200 MiB; a game about twice its
+  size would need 256 MiB shards.
+- **DLC is not archived.** Add-on content still goes into the package (`DmIOS.app/aoc/<index>/`) and
+  is mounted as a directory. Most DLC is small enough that this does not affect installation; if you
+  hit the installer limit again, drop the DLC from the package and it stays unowned.
+- **`zip_store` is per game.** The profile lists extensions that are already compressed and should be
+  stored rather than deflated (`.zs`, `.bwav`, `.mc`, `.webm`, `.metallib` for Tears of the Kingdom).
+  This only affects the package the shader libraries and tables go into, not the archive.
+
+Games from upstream's tested list (4–6 GB) need roughly 20–30 shards at 200 MiB, well inside the
+limit, and their memory footprint is far below the per-app budget that stops Tears of the Kingdom.
+
 ## What changed against upstream
 
 Five files added, four modified. The fs layer keeps its normal path handling: when an archive is
