@@ -84,8 +84,42 @@ final class BuildModel: ObservableObject {
     private var lineBuf = ""
     private var staging: String?
 
-    // TODO: discover relative to the app bundle (walk up from Bundle.main.bundleURL to dm/tools/)
-    static let repo = "/Users/hejie/ZCodeProject/nxnative-romfs-archive"
+    /// The checkout of this repository the app drives. A released .app ships on its own,
+    /// so the path is not known at build time: look next to the app bundle, walk up from
+    /// it, then fall back to a saved choice. A repository is identified by
+    /// dm/tools/nx_extract/Program.cs, which only exists in a real checkout.
+    @Published var repoPath: String = BuildModel.findRepo() {
+        didSet { UserDefaults.standard.set(repoPath, forKey: "repoPath") }
+    }
+
+    nonisolated static func isRepo(_ dir: String) -> Bool {
+        FileManager.default.fileExists(atPath: dir + "/dm/tools/nx_extract/Program.cs")
+    }
+
+    nonisolated static func findRepo() -> String {
+        if let saved = UserDefaults.standard.string(forKey: "repoPath"), isRepo(saved) { return saved }
+        var seeds: [String] = []
+        // the app bundle: …/frontend/NS Port Builder.app/Contents/MacOS
+        let bundle = Bundle.main.bundleURL.standardizedFileURL
+        seeds.append(bundle.deletingLastPathComponent().deletingLastPathComponent()
+                         .deletingLastPathComponent().deletingLastPathComponent().path)
+        seeds.append(FileManager.default.currentDirectoryPath)
+        seeds.append(NSHomeDirectory() + "/ZCodeProject/nxnative-romfs-archive")
+        seeds.append(NSHomeDirectory() + "/nxnative-romfs-archive")
+        seeds.append(NSHomeDirectory() + "/Documents/nxnative-romfs-archive")
+        seeds.append(NSHomeDirectory() + "/Desktop/nxnative-romfs-archive")
+        var seen = Set<String>()
+        for s in seeds where !s.isEmpty && seen.insert(s).inserted {
+            var d = s
+            for _ in 0..<5 {                       // walk up a few levels from each seed
+                if isRepo(d) { return d }
+                let up = (d as NSString).deletingLastPathComponent
+                if up == d || up == "/" { break }
+                d = up
+            }
+        }
+        return ""
+    }
 
     var basePath: String { slot("base").paths.first ?? "" }
     var keysPath: String { slot("keys").paths.first ?? "" }
@@ -157,12 +191,14 @@ final class BuildModel: ObservableObject {
         return UInt64(ns.substring(with: m.range(at: 1)), radix: 16)
     }
 
-    var canBuild: Bool { !basePath.isEmpty && !keysPath.isEmpty && allDepsPresent && !running }
+    var repoOK: Bool { Self.isRepo(repoPath) }
+    var canBuild: Bool { repoOK && !basePath.isEmpty && !keysPath.isEmpty && allDepsPresent && !running }
 
     // MARK: Build
 
     func startBuild() {
         running = true; done = false; doneNote = ""; stages = []; logTail = ""; lineBuf = ""
+        guard repoOK else { fail("仓库路径无效：\(repoPath.isEmpty ? "未选择" : repoPath)——用上方的「选择仓库…」指向本项目的 clone"); return }
         let py = pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath
 
         // One folder when everything lives together; otherwise a staging folder of symlinks.
@@ -184,7 +220,7 @@ final class BuildModel: ObservableObject {
 
         let tidHex = Self.titleID(basePath).map { String(format: "%016llX", $0) } ?? "game"
         let workDir = (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + "_build"
-        var args = [Self.repo + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
+        var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
                     "--work-dir", workDir, "--progress", "lines"]
         if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
         say("运行：\(py) " + args.joined(separator: " "))
@@ -192,7 +228,7 @@ final class BuildModel: ObservableObject {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: py)
         p.arguments = args
-        p.currentDirectoryURL = URL(fileURLWithPath: Self.repo)
+        p.currentDirectoryURL = URL(fileURLWithPath: repoPath)
         p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
                          "DOTNET_ROOT": NSHomeDirectory() + "/.dotnet",
                          "USER": NSUserName(), "HOME": NSHomeDirectory(), "LANG": "en_US.UTF-8"]
@@ -329,8 +365,8 @@ final class BuildModel: ObservableObject {
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath)
-        p.arguments = [Self.repo + "/dm/tools/romfs_arc.py", "pack", romfs, dest + "/romfs", "--shard-mib", "200"]
-        p.environment = ["PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "PYTHONPATH": Self.repo + "/dm/tools"]
+        p.arguments = [repoPath + "/dm/tools/romfs_arc.py", "pack", romfs, dest + "/romfs", "--shard-mib", "200"]
+        p.environment = ["PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "PYTHONPATH": repoPath + "/dm/tools"]
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let d = h.availableData
@@ -532,6 +568,7 @@ struct ContentView: View {
     var sections: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            repository
             inputs
             dependencies
             stagesView
@@ -560,6 +597,13 @@ struct ContentView: View {
         }
     }
 
+    /// Show the home directory as ~ — shorter in a one-line row, and it keeps the
+    /// account name out of screenshots.
+    private func short(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
     private func sectionHeader(_ symbol: String, _ title: String, note: String = "") -> some View {
         HStack(spacing: 8) {
             Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
@@ -567,6 +611,39 @@ struct ContentView: View {
             if !note.isEmpty { Text(note).font(.system(size: 11.5)).foregroundStyle(.tertiary) }
             Spacer(minLength: 0)
         }
+    }
+
+    // ---- 仓库 ----
+
+    private var repository: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    sectionHeader("shippingbox", "项目仓库", note: "App 调用这里的构建脚本")
+                    Button("选择仓库…") { pickRepo() }
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: m.repoOK ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(m.repoOK ? Color.green : Color.red)
+                        .frame(width: 20)
+                    Text(m.repoOK ? short(m.repoPath)
+                         : (m.repoPath.isEmpty ? "未找到本项目——点右侧选择 clone 的位置" : "不是本项目的仓库：\(short(m.repoPath))"))
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .foregroundStyle(m.repoOK ? Color.secondary : Color.orange)
+                        .lineLimit(1).truncationMode(.head)
+                        .help(m.repoPath)
+                    Spacer(minLength: 8)
+                }
+            }.padding(8)
+        }
+    }
+
+    private func pickRepo() {
+        let d = NSOpenPanel()
+        d.canChooseDirectories = true; d.canChooseFiles = false
+        d.message = "选择本项目（含 dm/tools/nx_extract/Program.cs）的文件夹"
+        if d.runModal() == .OK, let u = d.url { m.repoPath = u.path }
     }
 
     // ---- 游戏数据 ----
@@ -578,7 +655,7 @@ struct ContentView: View {
                     sectionHeader("folder", "游戏数据", note: "四项可以分开选")
                     Button("选整个文件夹…") { pickFolder() }
                 }
-                Text(m.gameDir.isEmpty ? "同一个文件夹里都有时，用右上角一次选好" : m.gameDir)
+                Text(m.gameDir.isEmpty ? "同一个文件夹里都有时，用右上角一次选好" : short(m.gameDir))
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                 VStack(spacing: 9) {
@@ -641,7 +718,7 @@ struct ContentView: View {
                                     .frame(width: 20)
                             }
                             Text(d.name).font(.system(size: 13.5)).frame(width: 140, alignment: .leading)
-                            Text(d.detail.isEmpty ? d.hint : d.detail)
+                            Text(short(d.detail.isEmpty ? d.hint : d.detail))
                                 .font(.system(size: 11.5, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1).truncationMode(.middle).help(d.hint)
@@ -763,10 +840,12 @@ struct ContentView: View {
             Text("正在检测依赖…").font(.system(size: 12)).foregroundStyle(.secondary)
         } else if !m.allDepsPresent {
             Text("先安装上方缺失的依赖").font(.system(size: 12)).foregroundStyle(.orange)
+        } else if !m.repoOK {
+            Text("先选择项目仓库").font(.system(size: 12)).foregroundStyle(.orange)
         } else if m.basePath.isEmpty || m.keysPath.isEmpty {
             Text("还需要选择游戏本体和 prod.keys").font(.system(size: 12)).foregroundStyle(.orange)
         } else {
-            Text("输出：\(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir)")
+            Text("输出：\(short(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir))")
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
         }
