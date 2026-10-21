@@ -3,7 +3,12 @@
 A macOS front end that walks a new user through building a playable IPA from
 their own Switch game files — the GUI counterpart of the repository's scripts.
 
-![NS Port Builder](screenshots/main-window.png)
+<details>
+<summary>界面截图（点开）</summary>
+
+<img src="screenshots/main-window.png" width="620" alt="NS Port Builder">
+
+</details>
 
 ## What it does
 

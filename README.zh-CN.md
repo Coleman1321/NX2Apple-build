@@ -50,7 +50,12 @@ romfs.00 ... .125        126 个分片，每片 200 MiB，源文件字节原样
 分开选（本体、更新包、DLC、`prod.keys`）、依赖面板自动检测并一键安装缺失项、直接显示脚本自己的
 阶段列表和实时百分比、最后自动产出归档分片。
 
-![NS Port Builder](frontend/screenshots/main-window.png)
+<details>
+<summary>界面截图（点开）</summary>
+
+<img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
+
+</details>
 
 ```bash
 cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app

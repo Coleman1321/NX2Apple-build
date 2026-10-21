@@ -56,7 +56,12 @@ people who would rather not read a build log: four inputs picked separately (bas
 DLC, `prod.keys`), a dependency panel that detects and installs what is missing, the script's real
 stage list with live percentages, and the archive shards produced at the end.
 
-![NS Port Builder](frontend/screenshots/main-window.png)
+<details>
+<summary>界面截图（点开）</summary>
+
+<img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
+
+</details>
 
 ```bash
 cd frontend && swift run          # or double-click frontend/NS Port Builder.app
