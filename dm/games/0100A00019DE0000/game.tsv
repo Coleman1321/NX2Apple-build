@@ -47,6 +47,12 @@ mem_used	0x6c00000
 # 0x2a7a20 call chain): the value feeds more than the swapchain, and whatever else depends on
 # 1280x720 specifically is not satisfied by just widening it. Real widescreen for this title
 # needs its resolution pipeline reversed — out of scope here.
+# Round 2 detail: with the immediates patched to 1600x900, the init crashes at
+# main+0x48e5a4 (ldr x2,[x21,#8] with a null x21) inside the 0x2a7a20 chain — the
+# allocation at 0x499840 fails or a lookup misses for the wider size. d2r-mobile's
+# widescreen works because its title's whole resolution path was brought up: PARAMS
+# slots (4 sites) plus the KASPECT aspect cap plus the derived-mask fix, each found
+# and tested one by one. The same depth of work is needed here.
 
 # ---- NVN driver constant segments (Mario's values, the translator's built-in layout, except the texture slot count) ----
 # The game's shaders bind textures at fixed, sparse slots: c2 handles at 0x20 + 8 r for r = 0, 1, 3, 6, 8, 11, 15, 21, 25, 26, 30, 31 and 34 over all 88 shaders.
