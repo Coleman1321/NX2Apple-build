@@ -111,8 +111,10 @@ HLE_FORCE("_ZN2nn2oe18GetPerformanceModeEv", "performance mode query; same as th
 // SDK 11 calls of Monster Hunter Rise: the CPU overclock query reads an apm session the host never opened (null read in sdk+0x35258 at the start of nnMain, main+0x6bc8650);
 // the default display resolution is the TV's (1080p docked) or the panel's (720p handheld) and only changes with the operation mode
 HLE_FORCE("_ZN2nn2oe21IsCpuOverclockEnabledEv", "CPU overclock state (through apm): not enabled", unsigned, h_oe_CpuOc, void) { return 0; }
-HLE_FORCE("_ZN2nn2oe27GetDefaultDisplayResolutionEPiS1_", "default display resolution: 1920x1080 docked, 1280x720 handheld", void, h_oe_DefRes, int *w, int *h) {
-    int con = opmode() == 1; if (w) *w = con ? 1920 : 1280; if (h) *h = con ? 1080 : 720;
+HLE_FORCE("_ZN2nn2oe27GetDefaultDisplayResolutionEPiS1_", "default display resolution: the front end's game picture (d2r-mobile's widescreen path; was hardcoded 1920x1080 docked / 1280x720 handheld, which held Hades II at 16:9 inside a taller window)", void, h_oe_DefRes, int *w, int *h) {
+    uint64_t r = dm_game_res(opmode() == 1);
+    static _Atomic int said; if (!atomic_exchange(&said, 1)) LOG("oe::GetDefaultDisplayResolution → %ux%u", (unsigned)(uint32_t)r, (unsigned)(r >> 32));
+    if (w) *w = (int)(uint32_t)r; if (h) *h = (int)(uint32_t)(r >> 32);
 }
 HLE_FORCE("_ZN2nn2oe38GetDefaultDisplayResolutionChangeEventEPNS_2os11SystemEventE", "default display resolution change event: bound, never signaled (the operation mode notification carries the change)",
           void, h_oe_DefResEv, void *ev) { hle_bind_system_event(ev, 0); }
