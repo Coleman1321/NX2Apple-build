@@ -44,21 +44,23 @@
 enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS, B_LEFT, B_UP, B_RIGHT, B_DOWN, B_N };
 enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_H2KEY };   // C_GAME: none, the touch goes to the game's touch screen (finger slot << 8); C_H2KEY: a Hades II combat key (key << 8)
 
-// ---- Hades II layout constants (the play-test sketch, round six: the vertical arc) ----
-// The combat keys run down the right edge in a thumb's arc, top to bottom: Ω above Y, R above Ω,
-// the menu key in the corner above R; X below-left of Y, B below Y. Equal spacing between
-// consecutive keys (the sketch's yellow lines). L stands alone on the LEFT edge at Y's height.
-// Offsets are from Y (the anchor, the biggest key), in u: (+x toward the screen edge, +y up).
-static const CGFloat KH_FACE_X = 148, KH_FACE_Y = 168,
-    KH_Y_R = 46, KH_OTHER_R = 34,   // the attack key bigger, the rest all equal
-    KH_OMEGA_DX = 34, KH_OMEGA_DY = 94,
-    KH_R_DX = 52, KH_R_DY = 188,
-    KH_X_DX = -80, KH_X_DY = -38,
-    KH_B_DX = -12, KH_B_DY = -100;
-// The menu key sits in the top-right corner; L on the left edge at Y's height.
-static const CGFloat KH_MENU_X = 66, KH_MENU_Y = 64, KH_MENU_R = 34,
-    KH_R_BUMP_DY = 148;   // R: this much below the menu key's row
-static const CGFloat KH_L_X = 66;   // L: from the left edge (its height follows Y's)
+// ---- Hades II layout constants (round seven: verified on paper against the smallest and the
+// largest iPhone landscape screens — every key inside the frame, no two keys overlapping) ----
+// The combat keys hang off Y (the attack anchor, the biggest key) at the offsets below, in u
+// (+x toward the right edge, +y up): B below-outward (dash under the thumb), X inward of B,
+// A above X, Ω above-outward of Y, R above Ω toward the corner. The menu key sits on the top
+// edge between the + pill and the cluster (absolute: x = W − 200u, y = 30u); L on the left edge
+// at Y's height.
+static const CGFloat KH_FACE_X = 132, KH_FACE_Y = 190,
+    KH_Y_R = 46, KH_OTHER_R = 34, KH_HEX_R = 26;   // the hex spell key a little smaller
+static const CGFloat
+    KH_B_DX = -6, KH_B_DY = -108,
+    KH_X_DX = -88, KH_X_DY = 48,
+    KH_A_DX = -96, KH_A_DY = 48,
+    KH_OMEGA_DX = 36, KH_OMEGA_DY = 82,
+    KH_HEX_DX = 98, KH_HEX_DY = 116;
+static const CGFloat KH_MENU_X = 200, KH_MENU_Y = 30, KH_MENU_R = 30;   // the menu key: x from the right edge, y from the top (absolute, on the top edge)
+static const CGFloat KH_L_X = 58;   // L: from the left edge (its height follows Y's)
 // Floating stick: the start zone's right bound (fraction of the width) and upper bound (fraction of
 // the height from the bottom); the base radius, full-tilt fraction, dead zone, the resume window for
 // a system-cancelled stick finger, its grab factor, and how long the Ω latch leads the attack key.
@@ -107,15 +109,15 @@ static NSString *const k_h2_key = @"DmPadH2";           // NSUserDefaults: 1 = H
 // Y is the anchor at radius KH_Y_R; the rest share KH_OTHER_R and fan out evenly (the play-test
 // asked for equal gaps and equal sizes).
 typedef struct { int b; CGFloat dx, dy, r; NSString *icon; } h2key;
-// Centres from Y (the anchor), in u: R above Ω above Y, X and B below Y (X inward, B outward-down
-// per the sketch's bottom row). The menu key and L are placed separately (h2menuKey).
+// Centres from Y (the anchor), in u (+x toward the right edge, +y up). See the constants block
+// (round seven: verified against the smallest and largest iPhone screens).
 static const h2key k_h2[] = {
-    { B_Y,  0,          0,       KH_Y_R,     @"attack"  },
+    { B_Y,  0,        0,       KH_Y_R,     @"attack"  },
     { B_ZR, KH_OMEGA_DX, KH_OMEGA_DY, KH_OTHER_R, @"omega" },
-    { B_R,  KH_R_DX,    KH_R_DY, KH_OTHER_R, @"hex"     },
-    { B_X,  KH_X_DX,    KH_X_DY, KH_OTHER_R, @"special" },
-    { B_B,  KH_B_DX,    KH_B_DY, KH_OTHER_R, @"dash"    },
-    { B_A,  KH_X_DX - 6, KH_X_DY - 96, KH_OTHER_R, @"cast" },   // A above X (the sketch's left column)
+    { B_R,  KH_HEX_DX, KH_HEX_DY, KH_HEX_R,  @"hex"     },
+    { B_X,  KH_X_DX,  KH_X_DY, KH_OTHER_R, @"special" },
+    { B_B,  KH_B_DX,  KH_B_DY, KH_OTHER_R, @"dash"    },
+    { B_A,  KH_A_DX,  KH_A_DY, KH_OTHER_R, @"cast"    },   // A above X (the sketch's left column)
 };
 enum { KH_N = sizeof k_h2 / sizeof *k_h2 };
 static UIImage *h2_icon(NSString *name) {   // the game's own glyph from the profile folder, if present
@@ -155,7 +157,7 @@ static __weak DmGamepad *g_view;
     double _h2keyDown[KH_N];                       // when each key's finger went down (0 = up; Ω needs the duration)
     uint64_t _h2bits;                              // the combat-key bits as published at the last recompute
     // ---- Hades II menu keys ----
-    CAShapeLayer *_h2menuKey[3]; CATextLayer *_h2menuLabel[3];   // 0 = D-pad right (the handle), 1 = L, 2 = R
+    CAShapeLayer *_h2menuKey[2]; CATextLayer *_h2menuLabel[2];   // 0 = D-pad right (open the inventory), 1 = L
 }
 
 static UIColor *k_idle, *k_on, *k_line, *k_ringFill, *k_text, *k_textOn;
@@ -220,8 +222,8 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         [_h2knob addSublayer:h2in];
         // The menu keys: always visible in H2. The left one doubles as the handle (D-pad right);
         // L and R sit beside their screen edges for the inventory's pages.
-        static NSString *const h2menuNames[3] = {@"◀", @"L", @"R"};   // the menu key's label is a left-pointing triangle
-        for (int i = 0; i < 3; i++) {
+        static NSString *const h2menuNames[2] = {@"◀", @"L"};   // the menu key's label is a left-pointing triangle
+        for (int i = 0; i < 2; i++) {
             _h2menuKey[i] = shape(_controls); _h2menuKey[i].hidden = YES;
             _h2menuLabel[i] = label(_h2menuKey[i], h2menuNames[i]);
         }
@@ -239,7 +241,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
     _ring[1].hidden = _knob[1].hidden = _h2 || !_full;
     _ring[0].hidden = _knob[0].hidden = _h2;         // the H2 stick has its own floating base layers
     for (int i = 0; i < KH_N; i++) _h2key[i].hidden = !_h2;
-    for (int i = 0; i < 3; i++) _h2menuKey[i].hidden = !_h2;   // the menu keys always show in H2
+    for (int i = 0; i < 2; i++) _h2menuKey[i].hidden = !_h2;   // the menu keys always show in H2
     _swapLabel.string = _h2 ? @"H2" : _full ? @"3D" : @"2D";
     [CATransaction commit];
 }
@@ -313,12 +315,11 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 - (CGPoint)h2menuKey:(int)i {
     CGFloat u = self.h2u;
     if (i == 0) return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + KH_MENU_Y * u);
-    if (i == 1) return CGPointMake(CGRectGetMinX(self.safe) + KH_L_X * u, [self h2Anchor].y);
-    return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + (KH_MENU_Y + KH_R_BUMP_DY) * u);
+    return CGPointMake(CGRectGetMinX(self.safe) + KH_L_X * u, [self h2Anchor].y);
 }
 - (CGFloat)h2menuR { return KH_MENU_R * self.h2u; }
-- (int)h2menuAt:(CGPoint)p {   // 0 = D-pad right, 1 = L, 2 = R; -1 none
-    for (int i = 0; i < 3; i++) if (dist(p, [self h2menuKey:i]) <= [self h2menuR] * 1.15) return i;
+- (int)h2menuAt:(CGPoint)p {   // 0 = D-pad right (open the inventory), 1 = L (page); -1 none
+    for (int i = 0; i < 2; i++) if (dist(p, [self h2menuKey:i]) <= [self h2menuR] * 1.15) return i;
     return -1;
 }
 - (BOOL)h2inStickZone:(CGPoint)p {   // the lower-left zone the floating stick starts in
@@ -389,7 +390,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     // a quick tap-Ω-attack still arrives in the game's own "hold ZR first" order. Press durations
     // pass through untouched (the Ω moves are holds; the hex's hold-and-release works as is).
     uint64_t h2 = 0;
-    static const int h2menuBtn[3] = {B_RIGHT, B_L, B_R};   // handle = D-pad right (open the inventory), then L / R
+    static const int h2menuBtn[2] = {B_RIGHT, B_L};   // menu key = D-pad right (open the inventory), L = page
     for (UITouch *t in _owner) { uint64_t v = [_owner objectForKey:t].unsignedLongLongValue;
         if ((v & 0xff) != C_H2KEY) continue;
         int tag = (int)(v >> 8);
@@ -455,7 +456,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         int hit = [self btnAt:p];
         if (hit >= 0) { [_owner setObject:@(C_BTN | (uint64_t)hit << 8) forKey:t]; continue; }
         if ([self inSwap:p]) { [_owner setObject:@(C_SWAP) forKey:t]; continue; }
-        int m = [self h2menuAt:p];   // the menu keys sit clear of the combat cluster: handle / L / R
+        int m = [self h2menuAt:p];   // the menu keys sit clear of the combat cluster: menu key / L
         if (m >= 0) { [_owner setObject:@(C_H2KEY | (uint64_t)(KH_N + 8 + m) << 8) forKey:t]; continue; }
         int k = [self h2keyAt:p];
         if (k >= 0) {
@@ -612,9 +613,8 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
             placeLabel(_h2label[i], c, r * 0.75);
         }
     }
-    // Hades II menu keys: all three are circle keys (the size of a ring key); the menu key carries
-    // a left-pointing triangle as its label, L / R their letters
-    for (int i = 0; i < 3; i++) {
+    // Hades II menu keys: two circle keys (the menu key carries a ◀ label, L its letter)
+    for (int i = 0; i < 2; i++) {
         CGPoint mc = [self h2menuKey:i]; CGFloat mr = [self h2menuR];
         setPath(_h2menuKey[i], circlePath(mc, mr));
         placeLabel(_h2menuLabel[i], mc, mr * 0.5);
@@ -644,8 +644,8 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
     }
     // the menu pad: handle always visible in H2; the expanded keys light on press
     {
-        static const int h2menuBtn[3] = {B_RIGHT, B_L, B_R};
-        for (int i = 0; i < 3; i++) {
+        static const int h2menuBtn[2] = {B_RIGHT, B_L};
+        for (int i = 0; i < 2; i++) {
             BOOL on = (_h2bits >> h2menuBtn[i]) & 1;
             _h2menuKey[i].fillColor = (on ? k_on : k_idle).CGColor;
             _h2menuLabel[i].foregroundColor = (on ? k_textOn : k_text).CGColor;
