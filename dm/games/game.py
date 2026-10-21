@@ -155,6 +155,8 @@ def header(g):
          f'#define DM_GAME_RENDER_COND {int(rcd == "on")}',
          f'#define DM_GAME_TEX_DIRTY_UPLOAD {int(tdu == "on")}',
          f'#define DM_GAME_GPU_TS_SEGMENT {int(gts == "segment")}',
+         *([f'#define DM_GAME_WIDE_RES_TABLE {dict(kv.split("=") for kv in g.get("wide_res_patch").split()).get("table", "0")}',
+            f'#define DM_GAME_WIDE_RES_IMM {dict(kv.split("=") for kv in g.get("wide_res_patch").split()).get("imm", "0")}'] if g.get('wide_res_patch', '') else ['#define DM_GAME_WIDE_RES_TABLE 0', '#define DM_GAME_WIDE_RES_IMM 0']),
          f'#define DM_GAME_NVN_API_MAJOR {api.split(".")[0]}',
          f'#define DM_GAME_NVN_API_MINOR {api.split(".")[1]}',
          '']

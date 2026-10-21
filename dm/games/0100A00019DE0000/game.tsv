@@ -39,6 +39,15 @@ mem_stack	0x10000000
 app_pool	0xCD500000
 mem_used	0x6c00000
 
+# ---- Widescreen (host only, NOT enabled for this game) ----
+# The swapchain size 1280x720 is hardcoded twice in main: a rodata entry at +0x6d337c ({u32 w,
+# u32 h}, dead data) and two immediate instructions at +0x2a6080 (movz/movk x8) that write it into
+# a config object. Patching the rodata entry does nothing (the immediates win); patching the
+# immediates too makes the init run and then crash later (main+0x48e5a4, null deref in the
+# 0x2a7a20 call chain): the value feeds more than the swapchain, and whatever else depends on
+# 1280x720 specifically is not satisfied by just widening it. Real widescreen for this title
+# needs its resolution pipeline reversed — out of scope here.
+
 # ---- NVN driver constant segments (Mario's values, the translator's built-in layout, except the texture slot count) ----
 # The game's shaders bind textures at fixed, sparse slots: c2 handles at 0x20 + 8 r for r = 0, 1, 3, 6, 8, 11, 15, 21, 25, 26, 30, 31 and 34 over all 88 shaders.
 # Slot 34 (SceneFade.frag, 0x130) lies past Mario's 32 slots, where his image table starts; this game has no image bindings and no shader reads c2 at run time

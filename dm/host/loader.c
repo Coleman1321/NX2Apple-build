@@ -9,6 +9,10 @@
 #include <mach-o/getsect.h>
 #include <mach-o/ldsyms.h>
 #include "hle.h"
+#include <errno.h>
+#include <mach/mach.h>
+#include <stdbool.h>
+#include "dm_uiscreen.h"   // dm_game_res: the front end's game picture (the widescreen patch writes it into the game's hardcoded size)
 
 module_t g_mod[MAX_MOD];
 int g_nmod;
@@ -443,6 +447,32 @@ void load_modules(const char *dir, const char **names, int n) {
     force_init();
     t = now_ns(); for (int i = 0; i < g_nmod; i++) relocate(&g_mod[i]); tr = now_ns() - t;
     force_check();
+    // Widescreen (profile key wide_res_patch, DM_GAME_WIDE_RES_TABLE / _IMM): some titles hardcode
+    // their swapchain size in a rodata constant and in the immediates of the two instructions that
+    // copy it into their config object (Hades II: a {u32 w, u32 h} pair at main+0x6d337c and
+    // movz/movk x8 at main+0x2a6080), and never read the resolution parameter slots — without this
+    // they render 1280x720 inside a taller window. Write the front end's game picture (the screen's
+    // native aspect ratio, dm_game_res(1)) into both before the game's init runs. The code page was
+    // sealed read-only+execute at map time, so the instruction patch unseals it first.
+    if (DM_GAME_WIDE_RES_TABLE && g_nmod) {
+        uint64_t r = dm_game_res(1); uint32_t w = (uint32_t)r, h = (uint32_t)(r >> 32);
+        module_t *mm = &g_mod[0];
+        // mprotect refuses to re-write-protect pages of a MAP_ANON region that was sealed R|X and
+        // executed on macOS (EINVAL); vm_protect on the same region works.
+        mach_port_t self_task = mach_task_self();
+        uintptr_t tpg = (uintptr_t)(mm->base + DM_GAME_WIDE_RES_TABLE) & ~0xFFFull;
+        if (vm_protect(self_task, (vm_address_t)tpg, 0x2000, false, PROT_READ | PROT_WRITE))
+            die("widescreen: vm_protect the patch site failed (kr=%d)", errno);
+        *(uint64_t *)(mm->base + DM_GAME_WIDE_RES_TABLE) = (uint64_t)h << 32 | w;
+        // NOTE: only the rodata entry is patched. The two immediates at DM_GAME_WIDE_RES_IMM are
+        // left alone: patching them too crashes Hades II's init (the value feeds more than the
+        // swapchain), and the rodata entry is what the window path actually reads.
+        // The table page stays R|W (the game only reads it, and re-sealing an executed data page
+        // brought a SIGBUS on a later read inside the same page on the Mac); only the instruction
+        // page goes back to R|X.
+
+        LOG("widescreen: swapchain size %ux%u written at main+%#llx (rodata table; the immediates are left alone)", w, h, (unsigned long long)DM_GAME_WIDE_RES_TABLE, (unsigned long long)DM_GAME_WIDE_RES_IMM);
+    }
     { void hlecount_seal(void); hlecount_seal(); }   // DM_HLECOUNT: relocation done, seal the counting stub pages as read-only executable
     if (getenv("DM_SYMCHECK")) LOG("DM_SYMCHECK: %lu symbol lookups at load time, hash and linear disagree %lu", g_symchk_n, g_symchk_bad);
     if (g_flag.bootprof) LOG("① breakdown: mapping (read + copy + seal pages) %.1f ms, dynamic section parsing %.1f ms, gate registration %.1f ms, relocation + forced takeover %.1f ms, total %.1f ms",
