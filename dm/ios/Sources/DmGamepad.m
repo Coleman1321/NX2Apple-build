@@ -44,21 +44,22 @@
 enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS, B_LEFT, B_UP, B_RIGHT, B_DOWN, B_N };
 enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_H2KEY };   // C_GAME: none, the touch goes to the game's touch screen (finger slot << 8); C_H2KEY: a Hades II combat key (key << 8)
 
-// ---- Hades II layout constants (placed exactly as the play-test sketch asked) ----
-// The combat cluster: Y (attack) is the anchor and the biggest key; X, A, B and Ω sit on a ring
-// around it at the SAME centre distance (KH_RING) — the sketch's equal yellow gaps — and all four
-// are the same (smaller) size. B (dash) is the ring's bottom-left so the thumb falls onto it; the
-// sketch moved dash to the lower right, which for a right thumb IS the ring's lower-left quadrant
-// of this cluster. The cluster's centre: KH_FACE_X from the right edge, KH_FACE_Y from the bottom.
+// ---- Hades II layout constants (the play-test sketch, round five) ----
+// The combat cluster: Y (attack) is the anchor and the biggest key; the other five sit on a ring
+// around it at the SAME centre distance (KH_RING) and the same size. Clockwise from the top:
+// Ω, R (hex / interact, upper-right outside the ring), Y (right), B (dash, lower-right — the
+// sketch's "dash in the bottom-right corner"), A (lower-left), X (upper-left). The cluster's
+// centre: KH_FACE_X from the right edge, KH_FACE_Y from the bottom.
 static const CGFloat KH_FACE_X = 148, KH_FACE_Y = 128,
     KH_RING = 96,           // every non-attack key's centre distance from Y (equal gaps)
     KH_Y_R = 46, KH_OTHER_R = 34;   // the attack key bigger, the rest all equal
-// The three menu keys (all the same size, all always visible):
-//   menu  (▷, points left)  top-right corner — tapping it IS D-pad right (open the inventory)
-//   L      left edge, mid-height
-//   R      right edge, directly below the menu key (mirrored with L across the layout)
-static const CGFloat KH_MENU_X = 66, KH_MENU_Y = 64, KH_MENU_R = 30,
-    KH_MENU_BUMP_DY = 176;  // L / R: this much below the menu key's row
+// The three menu keys (all the same size as a ring key, all always visible):
+//   menu  a small circle key with a left-pointing triangle inside, top-right corner — the tap IS
+//         D-pad right (open the inventory)
+//   L     on the ring, mirrored with R: menu-key side's lower-left (the sketch's yellow circle)
+//   R     right edge, below the menu key
+static const CGFloat KH_MENU_X = 66, KH_MENU_Y = 64, KH_MENU_R = 34,
+    KH_MENU_BUMP_DY = 176;  // R: this much below the menu key's row
 // Floating stick: the start zone's right bound (fraction of the width) and upper bound (fraction of
 // the height from the bottom); the base radius, full-tilt fraction, dead zone, the resume window for
 // a system-cancelled stick finger, its grab factor, and how long the Ω latch leads the attack key.
@@ -107,15 +108,16 @@ static NSString *const k_h2_key = @"DmPadH2";           // NSUserDefaults: 1 = H
 // Y is the anchor at radius KH_Y_R; the rest share KH_OTHER_R and fan out evenly (the play-test
 // asked for equal gaps and equal sizes).
 typedef struct { int b; CGFloat angle, r; NSString *icon; } h2key;
-// Angles around Y (0 = up, clockwise): Ω above, A inward-down, B lower-left (the dash lands under
-// the thumb), X upper-left, R below-inward — five points evenly spread on the ring.
+// Angles around Y (0 = up, clockwise), six points evenly spaced (60° apart) so the gaps are equal:
+// Ω above, R upper-right, Y right (the anchor itself), B lower-right (dash under the thumb),
+// A lower-left, X upper-left.
 static const h2key k_h2[] = {
-    { B_Y,  0,    KH_Y_R,     @"attack"  },
+    { B_Y,  90,   KH_Y_R,     @"attack"  },   // 90° = the ring's right point, the thumb's rest
     { B_ZR, -90,  KH_OTHER_R, @"omega"   },
-    { B_A,  -18,  KH_OTHER_R, @"cast"    },
-    { B_B,  126,  KH_OTHER_R, @"dash"    },
-    { B_X,  -162, KH_OTHER_R, @"special" },
-    { B_R,  54,   KH_OTHER_R, @"hex"     },
+    { B_R,  -30,  KH_OTHER_R, @"hex"     },
+    { B_B,  30,   KH_OTHER_R, @"dash"    },
+    { B_A,  150,  KH_OTHER_R, @"cast"    },
+    { B_X,  -150, KH_OTHER_R, @"special" },
 };
 enum { KH_N = sizeof k_h2 / sizeof *k_h2 };
 static UIImage *h2_icon(NSString *name) {   // the game's own glyph from the profile folder, if present
@@ -220,7 +222,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         [_h2knob addSublayer:h2in];
         // The menu keys: always visible in H2. The left one doubles as the handle (D-pad right);
         // L and R sit beside their screen edges for the inventory's pages.
-        static NSString *const h2menuNames[3] = {@"", @"L", @"R"};   // the menu key draws its own triangle glyph
+        static NSString *const h2menuNames[3] = {@"◀", @"L", @"R"};   // the menu key's label is a left-pointing triangle
         for (int i = 0; i < 3; i++) {
             _h2menuKey[i] = shape(_controls); _h2menuKey[i].hidden = YES;
             _h2menuLabel[i] = label(_h2menuKey[i], h2menuNames[i]);
@@ -307,14 +309,18 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
     return -1;
 }
 // ---- Hades II menu keys ----
-// Three keys, always visible in H2, placed as the sketch drew them:
-//   0  menu (▷, a left-pointing triangle outline)  top-right corner — the tap IS D-pad right
-//   1  L                                           left edge, mid-height
-//   2  R                                           right edge, directly below the menu key
+// Three keys, always visible in H2, all the size of a ring key:
+//   0  menu  a circle key with a left-pointing triangle inside, top-right corner — the tap IS
+//            D-pad right (open the inventory)
+//   1  L     on the ring's left point (mirrored with Y, the sketch's yellow circle)
+//   2  R     right edge, directly below the menu key
 - (CGPoint)h2menuKey:(int)i {
     CGFloat u = self.h2u;
     if (i == 0) return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + KH_MENU_Y * u);
-    if (i == 1) return CGPointMake(CGRectGetMinX(self.safe) + KH_MENU_X * u, self.bounds.size.height * 0.42);
+    if (i == 1) {   // the ring's left point: the anchor is KH_FACE_X from the right edge, L sits KH_RING further left, same height
+        CGPoint a = [self h2Anchor];
+        return CGPointMake(a.x - KH_RING * u, a.y);
+    }
     return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + (KH_MENU_Y + KH_MENU_BUMP_DY) * u);
 }
 - (CGFloat)h2menuR { return KH_MENU_R * self.h2u; }
@@ -613,21 +619,12 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
             placeLabel(_h2label[i], c, r * 0.75);
         }
     }
-    // Hades II menu keys: the menu key draws a left-pointing triangle outline (▷ mirrored), L / R are circles
+    // Hades II menu keys: all three are circle keys (the size of a ring key); the menu key carries
+    // a left-pointing triangle as its label, L / R their letters
     for (int i = 0; i < 3; i++) {
         CGPoint mc = [self h2menuKey:i]; CGFloat mr = [self h2menuR];
-        if (i == 0) {
-            CGMutablePathRef tp = CGPathCreateMutable();
-            CGFloat s = mr * 0.62;   // the triangle's half-height; the tip points left
-            CGPathMoveToPoint(tp, NULL, mc.x + s * 0.9, mc.y - s);
-            CGPathAddLineToPoint(tp, NULL, mc.x + s * 0.9, mc.y + s);
-            CGPathAddLineToPoint(tp, NULL, mc.x - s * 1.1, mc.y);
-            CGPathCloseSubpath(tp);
-            setPath(_h2menuKey[i], tp);
-        } else {
-            setPath(_h2menuKey[i], circlePath(mc, mr));
-        }
-        placeLabel(_h2menuLabel[i], mc, mr * 0.55);
+        setPath(_h2menuKey[i], circlePath(mc, mr));
+        placeLabel(_h2menuLabel[i], mc, mr * 0.5);
     }
     for (int i = 0; i < 2; i++) {
         setPath(_ring[i], circlePath([self stickHome:i], [self stickR:i]));
