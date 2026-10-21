@@ -1,0 +1,21 @@
+{
+  "" : {
+    "const-values" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary.swiftconstvalues",
+    "dependencies" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary.d",
+    "diagnostics" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary.dia",
+    "emit-module-dependencies" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary-emit-module.dia",
+    "pch" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilder-primary.swiftdeps"
+  },
+  "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/Sources/NSPortBuilder/ContentView.swift" : {
+    "index-unit-output-path" : "/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/ContentView.o"
+  },
+  "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/Sources/NSPortBuilder/NSPortBuilderApp.swift" : {
+    "index-unit-output-path" : "/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.o",
+    "llvm-bc" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.bc",
+    "object" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Release/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.o"
+  }
+}
