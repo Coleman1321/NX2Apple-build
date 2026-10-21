@@ -116,6 +116,29 @@ The index may sit at any of these places; the reader tries them in order:
 <DM_ROMFS>/romfs/romfs.idx
 ```
 
+## Playing
+
+**Touch controls.** Two layouts (tap the button at the top centre to switch): 2D (left stick,
+A/B/X/Y, shoulders, − / +) and 3D (adds a D-pad, a right stick and L3 / R3). With no controller
+connected, touches outside the controls go to the game's touch screen.
+
+**Physical controllers** (GameController framework: Xbox, PlayStation, Switch Pro and MFi pads all
+work) hide the touch controls entirely while connected and bring them back when disconnected;
+meanwhile every touch goes to the game's touch screen. Buttons map by position, as on a Switch
+controller: bottom = B, right = A, left = Y, top = X, and the D-pad and right stick are kept.
+
+**Settings without rebuilding:** `Documents/env.txt`, one `KEY=VALUE` per line. Common ones:
+
+```
+DM_LANG=zh-Hans        # Chinese (en-US by default)
+DM_FPS_TARGET=30       # cap the frame rate (saves battery; the profile's fps_target by default)
+DM_OPMODE=0            # handheld mode: 720p render instead of the docked 1080p
+```
+
+**Saves and logs** are in the Files app under the app's name: `save/` and `log.txt`. When something
+goes wrong, send `log.txt` (the previous run is `log.prev.txt`). Short stutters the first time a new
+scene appears are normal: the app compiles graphics for it once and remembers them.
+
 ## Using it for another game
 
 The archive format has nothing game-specific in it: the packer walks whatever directory you give it
@@ -175,19 +198,20 @@ The mount is recognised by its **directory**, not its name: titles differ (`rom`
   byte-compare OK, and the game runs from the archive on macOS (2,100 frames, 1,772 archive reads).
   The update needs no special handling: `nx_extract` already layers the update NCA over the base
   with `OpenFileSystemWithPatch`, so the extracted RomFS — and therefore the archive — is the merge.
+  **Playable on an iPhone** (12 GB device, AltStore Classic 2.3) once the memory entitlement is in
+  effect — see below.
 - The C reader walks all 304,243 Tears of the Kingdom files and 2,667 directories in 7.6 s.
 
-**On an iPhone, Tears of the Kingdom currently stops at the world map.** Its resident memory reaches
-~3.34 GB, which is the per-app jetsam budget on a 12 GB device (measured headroom: 33 MB), and the
-open world needs more. Lowering the render scale to 0.5 does not change it, so the limit is the
-guest heap, not the GPU. Games from upstream's tested list (4–6 GB) are far below that budget.
-
-The app requests `com.apple.developer.kernel.increased-memory-limit`, which raises that budget to
-6–8 GB. Whether it takes effect depends on the sideloader: it has to keep unknown entitlements and
-enable the capability on the App ID with Apple. **AltStore Classic 2.2+**, **Impactor** and **Xcode
-with a Personal Team** do; **SideStore** with a free Apple ID needs a one-time App ID fix;
-**Sideloadly** does not. See [dm/ios/ENTITLEMENTS.md](dm/ios/ENTITLEMENTS.md) for the steps and for
-how to tell from `Documents/log.txt` whether it took effect.
+**The jetsam budget is the limit on big titles, and it can be raised.** Without
+`com.apple.developer.kernel.increased-memory-limit` an iPhone gives this app ~3,375 MB (measured on
+a 12 GB device: Tears of the Kingdom was killed entering the world map at 3,342 MB resident with
+33 MB of headroom; lowering the render scale to 0.5 did not change it, so the limit is the guest
+heap, not the GPU). The app requests the entitlement and `build_ipa.sh` embeds it in a placeholder
+ad-hoc signature — an unsigned binary has no signature for a sideloader to read entitlements from,
+so without that step the request would be lost. **AltStore Classic 2.2+**, **Impactor** and **Xcode
+with a Personal Team** keep it; **SideStore** with a free Apple ID needs a one-time App ID fix;
+**Sideloadly** does not. See [dm/ios/ENTITLEMENTS.md](dm/ios/ENTITLEMENTS.md) for the steps and how
+to tell from `Documents/log.txt` (resident + headroom: ~3,375 MB = not in effect, 6–8 GB = it is).
 
 ## Limitations
 

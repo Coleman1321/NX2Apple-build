@@ -63,11 +63,32 @@ Launch the game, let it run a few hundred frames, then read the memory line in `
 memory up to frame 600: resident 3342 MB, ... headroom to the system memory limit 33 MB
 ```
 
-- `headroom` in the low tens of MB, then the log stops with no `CRASH sig=` line → no entitlement.
-- `headroom` in the hundreds of MB or more at the same frame count → the entitlement is active.
+`resident + headroom` is the budget the kernel enforces:
+
+- ≈ 3,375 MB → the entitlement is not in effect.
+- ≈ 6,000–8,000 MB → it is.
 
 `os_proc_available_memory()` is what produces that number (`dm/gfx/nvn/nvn_mtl.m`), and it reports
 the distance to the budget the kernel enforces.
+
+## Why the placeholder signature matters
+
+`build_ipa.sh` builds unsigned. A sideloader decides which entitlements to carry by reading them
+from the signature it is replacing — an unsigned binary has none, so the request would be lost no
+matter what sits in the bundle. The script therefore embeds `Sources/DmIOS.entitlements` with an
+ad-hoc signature (`codesign --force --sign - --entitlements …`, no certificate needed): the
+sideloader strips that signature and swaps in the user's own, but it now sees the entitlement and
+carries it over. Check any built IPA with:
+
+```bash
+codesign -d --entitlements :- Payload/DmIOS.app/DmIOS | grep increased-memory-limit
+```
+
+Measured here (12 GB iPhone, AltStore Classic 2.3): before the placeholder signature the budget was
+3,375 MB and Hades II died entering a larger scene; after it the game runs. If the budget stays at
+3,375 MB with a signed IPA, the remaining step is on the App ID — enable the capability with a tool
+like GetMoreRam (same Apple ID as the sideloader, App IDs → Refresh → select the app → Add
+Increased Memory Limit), then reinstall so the profile picks it up.
 
 ## Xcode route
 

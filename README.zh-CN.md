@@ -110,6 +110,27 @@ App 会先找 `romfs.idx`（`dm/ios/Sources/main.m` 的 `romfs_locate`）。没�
 <DM_ROMFS>/romfs/romfs.idx
 ```
 
+## 游玩
+
+**触屏操控。** 两种布局（点顶部中央的按钮切换）：2D（左摇杆、A/B/X/Y、肩键、−/+）和 3D
+（增加十字键、右摇杆和 L3/R3）。未连接手柄时，触到控件以外的区域会送到游戏的触屏。
+
+**实体手柄**（GameController 框架：Xbox、PlayStation、Switch Pro 和 MFi 手柄都支持）连接后
+会完全隐藏触屏控件，断开时恢复；期间所有触摸都送到游戏的触屏。按键按位置映射，与 Switch
+手柄一致：下=B、右=A、左=Y、上=X，十字键和右摇杆同样保留。
+
+**不改包调设置：** `Documents/env.txt`，每行一个 `KEY=VALUE`。常用的：
+
+```
+DM_LANG=zh-Hans        # 中文（默认 en-US）
+DM_FPS_TARGET=30       # 限帧（省电；默认用 profile 的 fps_target）
+DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
+```
+
+**存档和日志**在「文件」App 里该 App 名字下：`save/` 和 `log.txt`。出问题时把 `log.txt`
+发出来（上一次运行的是 `log.prev.txt`）。新场景第一次出现时短促卡顿是正常的：App 会为它
+编译一次图形并记住。
+
 ## 换其他游戏
 
 归档格式里没有任何与具体游戏绑定的东西：打包工具遍历你给的目录，读取层在那棵树里查路径。换游戏只需要：
@@ -159,11 +180,22 @@ App 会先找 `romfs.idx`（`dm/ios/Sources/main.m` 的 `romfs_locate`）。没�
 - **《王国之泪》**（0100F2C0115B6000，v1.0.0 + 更新 1.4.3）：304,243 个文件打成 127 个文件；
   304,243 个文件全部与源目录逐字节比对通过（`verify: OK`）；游戏从归档正常运行于 macOS
   （30 fps，1,905 帧）。
-- C 读取层遍历全部 304,243 个文件、2,667 个目录，耗时 7.6 秒。
+- **《哈迪斯 2》**（0100A00019DE0000，本体 + 更新 1.0.137848）：5,258 个文件打成 33 个文件，
+  逐字节比对通过，游戏从归档正常运行于 macOS（2,100 帧，1,772 次归档读取）。更新包无需特殊
+  处理：`nx_extract` 本来就用 `OpenFileSystemWithPatch` 把更新层叠在本体上，解出的 RomFS
+  ——也就是归档——就是合并结果。**在 iPhone 上可玩**（12 GB 设备，AltStore Classic 2.3），
+  前提是内存 entitlement 生效——见下。
+- C 读取层遍历全部 304,243 个《王国之泪》文件、2,667 个目录，耗时 7.6 秒。
 
-**在 iPhone 上，《王国之泪》目前会停在进入大地图时。** 常驻内存达到约 3.34 GB，而 12 GB 设备给单个
-App 的 jetsam 预算就是这么多（实测剩余余量 33 MB），开放世界需要更多。把渲染缩放降到 0.5 没有改变
-结果，说明瓶颈在 guest 堆而不是 GPU。上游测试列表里的游戏（4–6 GB）离这个预算还远。
+**jetsam 预算是大体积游戏的限制，而它是可以提高的。** 没有
+`com.apple.developer.kernel.increased-memory-limit` 时，iPhone 给这个 App 约 3,375 MB（12 GB
+设备实测：《王国之泪》进大地图时被杀，常驻 3,342 MB、余量 33 MB；渲染缩放降到 0.5 无改善，
+说明瓶颈在 guest 堆而不是 GPU）。App 请求了这个 entitlement，`build_ipa.sh` 把它嵌进占位用的
+ad-hoc 签名——无签名的二进制没有可供侧载工具读取 entitlement 的签名，不做这一步请求就会丢失。
+**AltStore Classic 2.2+**、**Impactor** 和 **Xcode + Personal Team** 会保留它；**SideStore**
+配合免费 Apple ID 需要对 App ID 做一次性修复；**Sideloadly** 不会。步骤和判断方法（log.txt 里
+resident + headroom：约 3,375 MB = 未生效，6–8 GB = 已生效）见
+[dm/ios/ENTITLEMENTS.md](dm/ios/ENTITLEMENTS.md)。
 
 ## 限制
 
