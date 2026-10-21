@@ -42,6 +42,7 @@ typedef struct {
     unsigned nsym;
     uint32_t *symh; unsigned symh_mask;   // Name hash table of defined symbols (open addressing, stores symbol indices; for a duplicated name only the smallest index is kept = the first hit of a linear scan)
     uint64_t init, init_array, init_arraysz;   // init = DT_INIT (the module's _init: registers the DSO and runs this module's init_array)
+    int late;                  // 1 = a dynamic module (NRO) preloaded like main / sdk: its DT_INIT runs at nn::ro::LoadModule, not with the others (hle_ro.c)
 } module_t;
 
 extern module_t g_mod[MAX_MOD];
@@ -55,6 +56,7 @@ extern pthread_key_t g_keyres[2], g_keyaspect, g_keyaspectui;
 
 void load_modules(const char *dir, const char **names, int n);
 void run_module_inits(void);
+void run_module_init_one(void *m);   // one module's DT_INIT (hle_ro.c calls it at nn::ro::LoadModule for a preloaded NRO; module_t * cast inside)
 void *module_sym(module_t *m, const char *name);
 void *guest_sym(const char *name);
 module_t *module_of(const void *p);

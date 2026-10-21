@@ -278,6 +278,15 @@ static void relocate(module_t *m) {
                 if (v != self && nint++ < 8) LOG("%s: %s bound to an earlier module's definition (%s)", m->name, m->strtab + s->st_name, module_of((void *)v) ? module_of((void *)v)->name : "?");
             }
             if (!v) v = resolve_sym(m, m->strtab + s->st_name);
+            if (type == 1031) {   // R_AARCH64_TLSDESC: thread-local variable descriptor {resolver, argument}; resolved in hle_ro.c
+                void ro_tlsdesc_fill(module_t *, uint64_t *, uint64_t); ro_tlsdesc_fill(m, where, (si ? s->st_value : 0) + (uint64_t)r->r_addend); cnt[1]++; continue;
+            }
+            // A global symbol that a late module (a preloaded NRO) also defines itself: a real
+            // device resolves it in global lookup order, so a definition of the same name in the
+            // main program / sdk wins (symbol preemption). This makes template static members
+            // (singleton pointers instantiated once per module) the same object.
+            if (!v && m->late && s->st_shndx && !(s->st_other & 3) && (s->st_info >> 4) != 0)
+                for (int k = 0; k < g_nmod && !v; k++) if (!g_mod[k].late) v = (uint64_t)module_sym(&g_mod[k], m->strtab + s->st_name);
             if (type == R_AARCH64_JUMP_SLOT) { *where = v; cnt[2]++; }
             else { *where = v + r->r_addend; cnt[1]++; }       // ABS64 / GLOB_DAT
         }
@@ -432,6 +441,7 @@ void load_modules(const char *dir, const char **names, int n) {
     for (int i = 0; i < n; i++) {
         module_t *m = &g_mod[i];
         strlcpy(m->name, names[i], sizeof m->name);
+        m->late = strcmp(m->name, "main") && strcmp(m->name, "game") && strcmp(m->name, "sdk") && strncmp(m->name, "subsdk", 6);   // a dynamic module (NRO) preloaded: its DT_INIT runs at nn::ro::LoadModule (hle_ro.c)
         read_layout(m, dir);
     }
     create_keys();
@@ -481,11 +491,12 @@ void load_modules(const char *dir, const char **names, int n) {
 
 // Plays the role of rtld's InitModules (rtld+0x830): call each module's DT_INIT in forward order of the load list.
 // The timing is decided by nn::init::Start: after nninitStartup and _init_libc2, before nnMain (the 4th argument callback of Start).
+// A late module (a preloaded NRO) has its DT_INIT run at nn::ro::LoadModule instead (hle_ro.c).
+void run_module_init_one(void *vm) {
+    module_t *m = vm; if (!m->init) return;
+    LOG("%s: DT_INIT +%#llx (init_array %llu entries)", m->name, m->init, m->init_arraysz / 8);
+    ((void (*)(void))(m->base + m->init))();
+}
 void run_module_inits(void) {
-    for (int i = 0; i < g_nmod; i++) {
-        module_t *m = &g_mod[i];
-        if (!m->init) continue;
-        LOG("%s: DT_INIT +%#llx (init_array %llu entries)", m->name, m->init, m->init_arraysz / 8);
-        ((void (*)(void))(m->base + m->init))();
-    }
+    for (int i = 0; i < g_nmod; i++) if (!g_mod[i].late) run_module_init_one(&g_mod[i]);
 }
