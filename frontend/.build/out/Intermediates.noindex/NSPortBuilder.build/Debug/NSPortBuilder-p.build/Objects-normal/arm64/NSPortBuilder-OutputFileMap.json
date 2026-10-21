@@ -15,5 +15,15 @@
     "object" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/ContentView.o",
     "swift-dependencies" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/ContentView.swiftdeps",
     "swiftmodule" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/ContentView~partial.swiftmodule"
+  },
+  "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/Sources/NSPortBuilder/NSPortBuilderApp.swift" : {
+    "const-values" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.swiftconstvalues",
+    "dependencies" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.d",
+    "diagnostics" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.dia",
+    "index-unit-output-path" : "/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.o",
+    "llvm-bc" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.bc",
+    "object" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.o",
+    "swift-dependencies" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp.swiftdeps",
+    "swiftmodule" : "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/.build/out/Intermediates.noindex/NSPortBuilder.build/Debug/NSPortBuilder-p.build/Objects-normal/arm64/NSPortBuilderApp~partial.swiftmodule"
   }
 }
