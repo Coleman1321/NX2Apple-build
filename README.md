@@ -68,7 +68,10 @@ cd frontend && swift run          # or double-click frontend/NS Port Builder.app
 ```
 
 It runs the same scripts the command line does, so everything below still applies; see
-[frontend/README.md](frontend/README.md).
+[frontend/README.md](frontend/README.md). The prebuilt app, and the release notes in English and
+Chinese (including which games are verified), are on the
+[releases page](https://github.com/LNPANDY/nxnative-romfs-archive/releases) and in
+[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md).
 
 ## Using it
 
