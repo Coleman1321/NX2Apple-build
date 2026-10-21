@@ -142,6 +142,105 @@ final class BuildModel: ObservableObject {
         }}
         try? p.run()
     }
+
+
+    // ---- Dependencies (checked at launch; installable one by one) ----
+    struct Dep: Identifiable {
+        let id = UUID()
+        let name: String
+        let hint: String
+        var present: Bool
+        var installing: Bool = false
+        let installCmd: [String]   // run via bash; empty = manual (Xcode from the App Store)
+    }
+
+    @Published var deps: [Dep] = []
+    @Published var depsChecked = false
+
+    nonisolated static func detectDepsSync() -> [Dep] {
+        func have(_ tool: String) -> Bool {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+            p.arguments = [tool]
+            let pipe = Pipe(); p.standardOutput = pipe; p.standardError = Pipe()
+            p.standardInput = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit()
+            return p.terminationStatus == 0
+        }
+        var out: [Dep] = []
+        let xcode = FileManager.default.fileExists(atPath: "/Applications/Xcode.app") &&
+                    have("xcodebuild")
+        out.append(Dep(name: "Xcode + iOS SDK", hint: "App Store 安装，约 12 GB", present: xcode, installCmd: []))
+        let mt = have("xcrun") && {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+            p.arguments = ["-sdk", "macosx", "metal", "--version"]
+            let pipe = Pipe(); p.standardOutput = Pipe(); p.standardError = Pipe()
+            p.standardInput = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit()
+            return p.terminationStatus == 0
+        }()
+        out.append(Dep(name: "Metal Toolchain", hint: "xcodebuild -downloadComponent MetalToolchain（约 840 MB）", present: mt,
+                       installCmd: ["xcodebuild", "-downloadComponent", "MetalToolchain"]))
+        let brew = have("brew")
+        out.append(Dep(name: "Homebrew", hint: "brew.sh（后续包的前置）", present: brew,
+                       installCmd: ["/bin/bash", "-c",
+                         "NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""]))
+        for (pkg, hint) in [("xcodegen", "Xcode 工程生成"), ("zstd", "解压"), ("spirv-cross", "shader 转换")] {
+            out.append(Dep(name: "brew: " + pkg, hint: hint, present: brew && have(pkg),
+                           installCmd: ["/opt/homebrew/bin/brew", "install", pkg]))
+        }
+        let dotnet = have("dotnet")
+        out.append(Dep(name: ".NET SDK 10", hint: "dotnet-install.sh 装到 ~/.dotnet", present: dotnet,
+                       installCmd: ["/bin/bash", "-c",
+                         "curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/di.sh && chmod +x /tmp/di.sh && /tmp/di.sh --channel 10.0 --install-dir $HOME/.dotnet"]))
+        // python packages: importable in the system python3
+        let pyok: Bool = {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            p.arguments = ["-c", "import lz4, capstone, fontTools, backports.zstd"]
+            let pipe = Pipe(); p.standardOutput = Pipe(); p.standardError = Pipe()
+            p.standardInput = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit()
+            return p.terminationStatus == 0
+        }()
+        out.append(Dep(name: "Python 包", hint: "pip install lz4 capstone fonttools backports.zstd", present: pyok,
+                       installCmd: ["/usr/bin/python3", "-m", "pip", "install", "--user", "lz4", "capstone", "fonttools", "backports.zstd"]))
+        return out
+    }
+
+    func checkDeps() {
+        DispatchQueue.global().async {
+            let d = Self.detectDepsSync()
+            DispatchQueue.main.async { self.deps = d; self.depsChecked = true }
+        }
+    }
+
+    func installDep(_ dep: Dep) {
+        guard !dep.installCmd.isEmpty else {
+            if let i = deps.firstIndex(where: { $0.id == dep.id }) { deps[i].installing = true }
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/App Store.app"))
+            return   // Xcode: the user installs it from the App Store; re-check on return
+        }
+        guard let i = deps.firstIndex(where: { $0.id == dep.id }) else { return }
+        deps[i].installing = true
+        let cmd = dep.installCmd
+        DispatchQueue.global().async {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/bash")
+            p.arguments = ["-c"] + [cmd.joined(separator: " ")]
+            p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "NONINTERACTIVE": "1"]
+            let pipe = Pipe(); p.standardOutput = Pipe(); p.standardError = pipe
+            p.standardInput = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit()
+            DispatchQueue.main.async {
+                if let j = self.deps.firstIndex(where: { $0.id == dep.id }) {
+                    self.deps[j].installing = false
+                    self.checkDeps()
+                }
+            }
+        }
+    }
+
+
+    var allDepsPresent: Bool { depsChecked && deps.allSatisfy { $0.present } }
     func stop() { proc?.terminate(); running = false }
 }
 
@@ -172,6 +271,31 @@ struct ContentView: View {
                     }
                 }.padding(6)
             }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("设备依赖").font(.headline)
+                        Spacer()
+                        if !m.depsChecked { ProgressView().controlSize(.small); Text("检测中…").font(.caption).foregroundColor(.secondary) }
+                        else if m.allDepsPresent { Image(systemName: "checkmark.circle.fill").foregroundColor(.green); Text("全部就绪").font(.caption).foregroundColor(.green) }
+                        Button("重新检测") { m.checkDeps() }.controlSize(.small)
+                    }
+                    ForEach(m.deps) { d in
+                        HStack {
+                            if d.installing { ProgressView().controlSize(.small) }
+                            else { Image(systemName: d.present ? "checkmark.circle.fill" : "xmark.circle").foregroundColor(d.present ? .green : .red) }
+                            Text(d.name).frame(width: 150, alignment: .leading)
+                            Text(d.hint).font(.caption).foregroundColor(.secondary).lineLimit(1).truncationMode(.tail)
+                            Spacer()
+                            if !d.present && !d.installing {
+                                Button(d.installCmd.isEmpty ? "打开 App Store" : "安装") { m.installDep(d) }.controlSize(.small)
+                            } else if d.installing { Text("安装中…").font(.caption).foregroundColor(.orange) }
+                        }
+                    }
+                }.padding(6)
+            }
+
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(m.steps) { s in
@@ -194,12 +318,13 @@ struct ContentView: View {
                 Button(m.running ? "停止" : (m.done ? "重新构建" : "开始构建")) {
                     m.running ? m.stop() : m.startBuild()
                 }
-                .buttonStyle(.borderedProminent).disabled(m.gameDir.isEmpty || m.keysPath.isEmpty)
-                if m.done { Text("完成：IPA 与归档已生成").foregroundColor(.green) }
+                .buttonStyle(.borderedProminent).disabled(m.gameDir.isEmpty || m.keysPath.isEmpty || !m.allDepsPresent)
+                if !m.allDepsPresent { Text("先安装上方缺失的依赖").foregroundColor(.orange) }
+                else if m.done { Text("完成：IPA 与归档已生成").foregroundColor(.green) }
                 Spacer()
             }
         }.padding(20).frame(width: 640, height: 680)
-        .onAppear { m.keysPath = NSHomeDirectory() + "/keys/prod.keys"; m.scanFiles() }
+        .onAppear { m.keysPath = NSHomeDirectory() + "/keys/prod.keys"; m.scanFiles(); m.checkDeps() }
         .onChange(of: m.gameDir) { _ in m.scanFiles() }
     }
     func pickDir() {
