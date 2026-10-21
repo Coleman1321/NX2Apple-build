@@ -49,6 +49,22 @@ Path lookup is a binary search over the sorted file table; a directory listing w
 child range. The index is `mmap`ed, shards are opened lazily, and reads go straight to `pread` on
 the shard, so the page cache still works.
 
+## The GUI front end
+
+`frontend/` is a macOS app that does steps 2–5 below with a window instead of a terminal, for
+people who would rather not read a build log: four inputs picked separately (base game, update,
+DLC, `prod.keys`), a dependency panel that detects and installs what is missing, the script's real
+stage list with live percentages, and the archive shards produced at the end.
+
+![NS Port Builder](frontend/screenshots/main-window.png)
+
+```bash
+cd frontend && swift run          # or double-click frontend/NS Port Builder.app
+```
+
+It runs the same scripts the command line does, so everything below still applies; see
+[frontend/README.md](frontend/README.md).
+
 ## Using it
 
 ### 1. Build the app (as upstream)
@@ -230,6 +246,8 @@ past the end would return the next file's bytes).
 | `dm/host/Makefile` | build `romfs_arc.c` |
 | `dm/ios/Sources/main.m` | `romfs_locate` accepts `romfs.idx` |
 | `dm/ios/tools/build_ipa.sh` | slim by default (`DM_FULL_ROMFS=1` = upstream full package) |
+| `scripts/build_ipa_from_nsp.py` | `--work-dir` (build folder away from the NSPs); derives `DOTNET_ROOT` (a framework-dependent `nx_extract` will not start from a plain shell without it) |
+| `frontend/` | new — macOS GUI front end (see [The GUI front end](#the-gui-front-end)) |
 
 The mount is recognised by its **directory**, not its name: titles differ (`rom` for most games,
 `content` for Tears of the Kingdom).

@@ -44,6 +44,21 @@ romfs.00 ... .125        126 个分片，每片 200 MiB，源文件字节原样
 路径查找是对排序后的文件表做二分查找；目录枚举只遍历一段连续的子项区间。索引用 `mmap` 映射，
 分片按需打开，读取直接在分片上 `pread`，所以页缓存照常生效。
 
+## 图形界面
+
+`frontend/` 是一个 macOS App，用窗口代替终端完成下面第 2–5 步，给不想读构建日志的人用：四项输入
+分开选（本体、更新包、DLC、`prod.keys`）、依赖面板自动检测并一键安装缺失项、直接显示脚本自己的
+阶段列表和实时百分比、最后自动产出归档分片。
+
+![NS Port Builder](frontend/screenshots/main-window.png)
+
+```bash
+cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
+```
+
+它调用的就是命令行那套脚本，下面的说明全部适用；细节见
+[frontend/README.md](frontend/README.md)。
+
 ## 使用方法
 
 ### 1. 构建 App（与上游相同）
@@ -212,6 +227,8 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 | `dm/host/Makefile` | 编译 `romfs_arc.c` |
 | `dm/ios/Sources/main.m` | `romfs_locate` 接受 `romfs.idx` |
 | `dm/ios/tools/build_ipa.sh` | 默认瘦身包（`DM_FULL_ROMFS=1` = 上游完整包） |
+| `scripts/build_ipa_from_nsp.py` | `--work-dir`（构建目录可离开 NSP 所在文件夹）；自动推导 `DOTNET_ROOT`（framework-dependent 的 `nx_extract` 在裸 shell 里缺它无法启动） |
+| `frontend/` | 新增 —— macOS 图形界面前端（见 [图形界面](#图形界面)） |
 
 挂载点按**目录**识别，而不是按名字：各游戏的挂载名不同（多数是 `rom`，《王国之泪》是 `content`）。
 

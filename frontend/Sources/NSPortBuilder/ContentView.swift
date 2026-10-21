@@ -512,60 +512,95 @@ final class BuildModel: ObservableObject {
 // MARK: - View
 
 struct ContentView: View {
-    @StateObject private var m = BuildModel()
+    @StateObject private var m: BuildModel
+
+    init(model: BuildModel? = nil) {
+        _m = StateObject(wrappedValue: model ?? BuildModel())
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: "gamecontroller.fill").font(.system(size: 34)).foregroundColor(.green)
-                VStack(alignment: .leading) {
-                    Text("NS Port Builder").font(.title2.bold())
-                    Text("Switch 游戏 → iPhone IPA · 归档分片 · 大内存").font(.caption).foregroundColor(.secondary)
-                }
-                Spacer()
-            }
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: true) { sections }
+            Divider()
+            footer
+        }
+        .frame(minWidth: 720, idealWidth: 880, minHeight: 560, idealHeight: 820)
+        .onAppear { m.checkDeps() }
+    }
 
+    // The scrollable part, split out so it can be rendered on its own for layout checks.
+    var sections: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
             inputs
             dependencies
             stagesView
             logView
-            footer
         }
-        .padding(18)
-        .frame(width: 760, height: 780)
-        .onAppear { m.checkDeps() }
+        .padding(.horizontal, 22)
+        .padding(.top, 20)
+        .padding(.bottom, 18)
+    }
+
+    // ---- 标题 ----
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "gamecontroller.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.white)
+                .frame(width: 54, height: 54)
+                .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.green.gradient))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NS Port Builder").font(.system(size: 25, weight: .bold))
+                Text("Switch 游戏 → iPhone IPA · 归档分片 · 大内存")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func sectionHeader(_ symbol: String, _ title: String, note: String = "") -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
+            Text(title).font(.system(size: 15, weight: .semibold))
+            if !note.isEmpty { Text(note).font(.system(size: 11.5)).foregroundStyle(.tertiary) }
+            Spacer(minLength: 0)
+        }
     }
 
     // ---- 游戏数据 ----
 
     private var inputs: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("游戏数据").font(.headline)
-                    Text("四项可以分开选").font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Button("选整个文件夹…") { pickFolder() }.controlSize(.small)
+                    sectionHeader("folder", "游戏数据", note: "四项可以分开选")
+                    Button("选整个文件夹…") { pickFolder() }
                 }
                 Text(m.gameDir.isEmpty ? "同一个文件夹里都有时，用右上角一次选好" : m.gameDir)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundColor(.secondary).lineLimit(1).truncationMode(.head)
-                ForEach($m.slots) { $s in
-                    HStack(spacing: 8) {
-                        Image(systemName: s.ok ? "checkmark.circle.fill" : (s.optional ? "circle.dashed" : "xmark.circle"))
-                            .foregroundColor(s.ok ? .green : (s.optional ? .secondary : .red))
-                        Text(s.title).frame(width: 130, alignment: .leading)
-                        Text(s.summary)
-                            .font(.system(.caption, design: .monospaced))
-                            .lineLimit(1).truncationMode(.middle)
-                            .foregroundColor(s.ok ? .secondary : .orange)
-                            .help(s.paths.joined(separator: "\n"))
-                        Spacer()
-                        if !s.paths.isEmpty { Button("清除") { m.clear(s.id) }.controlSize(.mini) }
-                        Button(s.paths.isEmpty ? "选择…" : "更换…") { m.pickFiles(kind: s.kind) }.controlSize(.small)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                VStack(spacing: 9) {
+                    ForEach(m.slots, id: \.id) { s in
+                        HStack(spacing: 10) {
+                            Image(systemName: s.ok ? "checkmark.circle.fill" : (s.optional ? "circle.dashed" : "xmark.circle.fill"))
+                                .font(.system(size: 15))
+                                .foregroundStyle(s.ok ? Color.green : (s.optional ? Color.secondary : Color.red))
+                                .frame(width: 20)
+                            Text(s.title).font(.system(size: 14)).frame(width: 140, alignment: .leading)
+                            Text(s.summary)
+                                .font(.system(size: 12.5, design: .monospaced))
+                                .lineLimit(1).truncationMode(.middle)
+                                .foregroundStyle(s.ok ? Color.secondary : Color.orange)
+                                .help(s.paths.joined(separator: "\n"))
+                            Spacer(minLength: 8)
+                            if !s.paths.isEmpty { Button("清除") { m.clear(s.id) }.controlSize(.small) }
+                            Button(s.paths.isEmpty ? "选择…" : "更换…") { m.pickFiles(kind: s.kind) }
+                        }
                     }
                 }
-            }.padding(6)
+            }.padding(8)
         }
     }
 
@@ -579,68 +614,106 @@ struct ContentView: View {
 
     private var dependencies: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("设备依赖").font(.headline)
-                    Spacer()
-                    if !m.depsChecked { ProgressView().controlSize(.small); Text("检测中…").font(.caption).foregroundColor(.secondary) }
-                    else if m.allDepsPresent { Image(systemName: "checkmark.circle.fill").foregroundColor(.green); Text("全部就绪").font(.caption).foregroundColor(.green) }
-                    else { Text("缺 \(m.deps.filter { !$0.present }.count) 项").font(.caption).foregroundColor(.orange) }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    sectionHeader("wrench.and.screwdriver", "设备依赖")
+                    if !m.depsChecked {
+                        ProgressView().controlSize(.small)
+                        Text("检测中…").font(.system(size: 12)).foregroundStyle(.secondary)
+                    } else if m.allDepsPresent {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("全部就绪").font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
+                    } else {
+                        Text("缺 \(m.deps.filter { !$0.present }.count) 项")
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
+                    }
                     Button("重新检测") { m.checkDeps() }.controlSize(.small)
                 }
-                ForEach($m.deps) { $d in
-                    HStack(spacing: 8) {
-                        if d.installing { ProgressView().controlSize(.small) }
-                        else { Image(systemName: d.present ? "checkmark.circle.fill" : "xmark.circle").foregroundColor(d.present ? .green : .red) }
-                        Text(d.name).frame(width: 130, alignment: .leading)
-                        Text(d.detail.isEmpty ? d.hint : d.detail)
-                            .font(.caption).foregroundColor(.secondary)
-                            .lineLimit(1).truncationMode(.middle).help(d.hint)
-                        Spacer()
-                        if d.installing { Text("安装中…").font(.caption).foregroundColor(.orange) }
-                        else if !d.present { Button(d.installCmd.isEmpty ? "打开 App Store" : "安装") { m.installDep(d) }.controlSize(.small) }
+                VStack(spacing: 7) {
+                    ForEach(m.deps, id: \.id) { d in
+                        HStack(spacing: 10) {
+                            if d.installing {
+                                ProgressView().controlSize(.small).frame(width: 20)
+                            } else {
+                                Image(systemName: d.present ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(d.present ? Color.green : Color.red)
+                                    .frame(width: 20)
+                            }
+                            Text(d.name).font(.system(size: 13.5)).frame(width: 140, alignment: .leading)
+                            Text(d.detail.isEmpty ? d.hint : d.detail)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle).help(d.hint)
+                            Spacer(minLength: 8)
+                            if d.installing {
+                                Text("安装中…").font(.system(size: 11.5)).foregroundStyle(.orange)
+                            } else if !d.present {
+                                Button(d.installCmd.isEmpty ? "打开 App Store" : "安装") { m.installDep(d) }
+                                    .controlSize(.small)
+                            }
+                        }
                     }
                 }
-            }.padding(6)
+            }.padding(8)
         }
     }
 
-    // ---- 构建阶段 ----
+    // ---- 构建进度（紧凑） ----
 
     private var stagesView: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("构建进度").font(.headline)
-                    Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    sectionHeader("chart.bar", "构建进度")
                     if m.running { ProgressView().controlSize(.small) }
+                    if let p = overallPercent {
+                        Text("\(Int(p))%").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if m.stages.isEmpty {
-                    Text("开始构建后，这里显示脚本自己的每个阶段（解包、模块改写、shader 编译、打包、归档）")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 5) {
-                        ForEach($m.stages) { $s in
-                            HStack(spacing: 8) {
-                                if s.state == .running { ProgressView().controlSize(.small) }
-                                else { Image(systemName: s.state.icon).foregroundColor(s.state.color) }
-                                Text(s.name).font(.system(.caption, design: .monospaced))
-                                if let p = s.percent, s.state == .running {
-                                    ProgressView(value: p / 100).frame(width: 80)
-                                    Text("\(Int(p))%").font(.caption2).foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                if !s.detail.isEmpty {
-                                    Text(s.detail).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+                    Text("开始构建后，这里显示脚本自己的每个阶段")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(m.stages, id: \.id) { s in
+                                HStack(spacing: 8) {
+                                    if s.state == .running { ProgressView().controlSize(.mini).frame(width: 14) }
+                                    else {
+                                        Image(systemName: s.state.icon).font(.system(size: 11))
+                                            .foregroundStyle(s.state.color).frame(width: 14)
+                                    }
+                                    Text(s.name).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+                                    if let p = s.percent, s.state == .running {
+                                        ProgressView(value: p / 100).frame(width: 70)
+                                        Text("\(Int(p))%").font(.system(size: 10.5, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 6)
+                                    if !s.detail.isEmpty {
+                                        Text(s.detail).font(.system(size: 10.5))
+                                            .foregroundStyle(.tertiary).lineLimit(1)
+                                    }
                                 }
                             }
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(height: 130)
-            }.padding(6)
+                    }
+                    .frame(height: 78)
+                }
+            }.padding(8)
         }
     }
+
+    private var overallPercent: Double? {
+        let ps = m.stages.compactMap { $0.state == .done ? 100.0 : ($0.state == .running ? $0.percent : nil) }
+        guard !ps.isEmpty else { return nil }
+        return ps.reduce(0, +) / Double(ps.count)
+    }
+
+    // ---- 日志（紧凑） ----
 
     private var logView: some View {
         ScrollViewReader { sp in
@@ -649,40 +722,53 @@ struct ContentView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+                    .padding(6)
                     .id("end")
             }
-            .frame(height: 150)
-            .background(Color(nsColor: .textBackgroundColor))
-            .cornerRadius(6)
+            .frame(height: 88)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
             .onChange(of: m.logTail) { _ in sp.scrollTo("end", anchor: .bottom) }
         }
     }
 
+    // ---- 底部（固定） ----
+
     private var footer: some View {
-        HStack {
+        HStack(spacing: 14) {
             Button(m.running ? "停止" : (m.done ? "重新构建" : "开始构建")) {
                 m.running ? m.stop() : m.startBuild()
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .font(.system(size: 14, weight: .semibold))
             .disabled(!m.running && !m.canBuild)
-            if !m.doneNote.isEmpty {
-                Text(m.doneNote).font(.callout).foregroundColor(m.done ? .green : .orange).lineLimit(2)
-            } else if !m.depsChecked {
-                Text("正在检测依赖…").foregroundColor(.secondary)
-            } else if !m.allDepsPresent {
-                Text("先安装上方缺失的依赖").foregroundColor(.orange)
-            } else if m.basePath.isEmpty || m.keysPath.isEmpty {
-                Text("还需要选择游戏本体和 prod.keys").foregroundColor(.orange)
-            } else {
-                Text("输出：\(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir)")
-                    .font(.caption).foregroundColor(.secondary).lineLimit(1).truncationMode(.head)
-            }
-            Spacer()
+
+            statusText
+            Spacer(minLength: 8)
             Button("输出目录…") {
                 let d = NSOpenPanel(); d.canChooseDirectories = true; d.canChooseFiles = false
                 if d.runModal() == .OK, let u = d.url { m.outDir = u.path }
-            }.controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder private var statusText: some View {
+        if !m.doneNote.isEmpty {
+            Text(m.doneNote).font(.system(size: 12))
+                .foregroundStyle(m.done ? Color.green : Color.orange).lineLimit(2)
+        } else if !m.depsChecked {
+            Text("正在检测依赖…").font(.system(size: 12)).foregroundStyle(.secondary)
+        } else if !m.allDepsPresent {
+            Text("先安装上方缺失的依赖").font(.system(size: 12)).foregroundStyle(.orange)
+        } else if m.basePath.isEmpty || m.keysPath.isEmpty {
+            Text("还需要选择游戏本体和 prod.keys").font(.system(size: 12)).foregroundStyle(.orange)
+        } else {
+            Text("输出：\(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir)")
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
         }
     }
 }
