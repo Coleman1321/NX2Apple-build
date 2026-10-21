@@ -8,6 +8,10 @@ void *front_metal_layer(void);
 // The original game's constants are 1600x900 / 1280x720 (16:9); front ends with a different screen aspect ratio widen at the same height, and the game natively renders at the new width and re-lays out the UI (width ≤ 4096).
 #include <stdint.h>
 uint64_t front_game_res(int docked);
+// Whether the front end runs true fullscreen (the picture fills the whole window at the screen's
+// native aspect ratio). iOS only; the Mac front end has no implementation, callers treat it as 0.
+// The iOS gamepad uses it to normalize touch points on the whole view instead of the 16:9 block.
+int front_ios_true_fullscreen(void);
 // Text input box (for the software keyboard swkbd): the main thread shows a native input box and the calling thread blocks until the user confirms / cancels.
 // All text is UTF-8; max_chars is the maximum character count (0 = unlimited, only a hint for the front end; truncation is done uniformly by the caller hle_swkbd.c in UTF-16 units).
 // Confirm returns 1 and writes the result into out (including the terminating 0); cancel returns 0;

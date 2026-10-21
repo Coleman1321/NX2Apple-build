@@ -65,6 +65,10 @@ static void front_ios_audio_watch(void);
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGRect b = self.view.bounds; if (!self.game) return;
+    if (front_ios_true_fullscreen()) {   // true fullscreen: the Metal layer covers the whole window;
+        // the game's picture (at the screen's own aspect ratio) already fills it — nothing to center
+        self.game.frame = b; return;
+    }
     CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
     if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
@@ -91,7 +95,38 @@ static void front_ios_power_watch(void) {
 }
 
 void *front_metal_layer(void) { return (__bridge void *)g_layer; }
-uint64_t front_game_res(int docked) { return docked ? 900ull << 32 | 1600 : 720ull << 32 | 1280; }   // Same as Mac: the original 16:9 constants
+// True fullscreen: the game renders at the screen's native aspect ratio (not stretched) — the game
+// picture fills the whole window, and the 16:9 floor is gone. Hades II and the other Unity-family
+// titles support any aspect ratio (they are widescreen games on the PC). DM_GAME_RES=WxH overrides
+// (DM_GAME_RES=1600x900 restores the original 16:9 output as a negative control). The handheld
+// profile keeps the original 720 height at the screen's aspect ratio.
+static int g_fullscreen = -1;   // decided once, from the screen ratio (and DM_FULL_OFF)
+uint64_t front_game_res(int docked) {
+    static double aspect; static unsigned fw, fh; static BOOL native;
+    if (!aspect) {
+        CGRect b = UIScreen.mainScreen.nativeBounds;
+        aspect = fmax(b.size.width, b.size.height) / fmin(b.size.width, b.size.height);
+        native = YES;
+        const char *e = getenv("DM_GAME_RES");
+        if (e && sscanf(e, "%ux%u", &fw, &fh) == 2) { aspect = (double)fw / fh; native = NO; }
+        else { fw = (unsigned)fmax(b.size.width, b.size.height); fh = (unsigned)fmin(b.size.width, b.size.height); }
+        if (native) {   // a screen narrower than 16:9 (iPads) keeps the 16:9 output with black bars
+            const char *off = getenv("DM_FULL_OFF");
+            if (aspect < 16.0 / 9.0 - 0.01 || (off && atoi(off))) { native = NO; aspect = 16.0 / 9.0; fh = (unsigned)llround(fw * 9.0 / 16.0 / 2) * 2; }
+        }
+        if (native) g_fullscreen = 1;
+        LOG("front end: game picture %ux%u (aspect %.3f%s)", fw, fh, aspect, g_fullscreen == 1 ? ", true fullscreen" : native ? "" : ", forced by DM_GAME_RES");
+    }
+    if (fw && docked && native) return (uint64_t)fh << 32 | fw;   // docked + native screen: the screen's own pixels
+    if (docked) {   // a forced or 16:9-floored aspect at the docked height
+        unsigned h = 900, w = (unsigned)llround(h * aspect / 8) * 8;
+        if (native) { h = fh; w = fw; }
+        return (uint64_t)h << 32 | w;
+    }
+    uint64_t h = 720, w = (uint64_t)llround(h * aspect / 8) * 8;   // handheld: the original 720 height
+    return h << 32 | w;
+}
+int front_ios_true_fullscreen(void) { if (g_fullscreen < 0) front_game_res(1); return g_fullscreen == 1; }
 void front_run(void (*guest)(void)) { guest(); }   // Already on main.m's big-stack thread
 
 // Software keyboard: show a UIAlertController on the main thread, the calling thread waits for the result

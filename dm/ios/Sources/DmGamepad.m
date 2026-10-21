@@ -430,13 +430,17 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     if (changed || sticks || _sticksShown) [self refresh];   // also refresh on the stick release so the knob returns to the centre
     _sticksShown = sticks;
 }
-// Touches no control takes (all of them while a physical controller is connected) go to the game's touch screen, normalized on the 16:9 picture that front_ios.m
-// centres in the screen: Super Mario Galaxy's pointer in handheld mode (profile op_mode). The host reports them only in handheld mode, as on the Switch (hle_hid.c touch_read)
+// Touches no control takes (all of them while a physical controller is connected) go to the game's touch screen, normalized on the picture front_ios.m
+// lays out: true fullscreen = the whole view (the picture fills it); otherwise the centred 16:9 block (Super Mario Galaxy's pointer in handheld
+// mode, profile op_mode). The host reports them only in handheld mode, as on the Switch (hle_hid.c touch_read)
 - (void)pushGame {
     CGRect b = self.bounds; CGFloat w = b.size.width, h = b.size.height;
     if (w <= 0 || h <= 0) return;
-    if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
-    CGFloat x0 = (b.size.width - w) / 2, y0 = (b.size.height - h) / 2;
+    CGFloat x0 = 0, y0 = 0;
+    if (!front_ios_true_fullscreen()) {
+        if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
+        x0 = (b.size.width - w) / 2; y0 = (b.size.height - h) / 2;
+    }
     dm_touch t[16]; int n = 0;
     for (int i = 0; i < 16; i++) if (_game[i]) {
         CGPoint p = [_game[i] locationInView:self];
