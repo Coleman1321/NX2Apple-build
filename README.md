@@ -65,9 +65,50 @@ brew install --cask dotnet-sdk
 python3 -m pip install lz4 capstone fonttools backports.zstd
 ```
 
+### 2. What you need on disk
+
+Three things, none of which ship with the repository:
+
+| What | Where it comes from | Used by |
+|---|---|---|
+| **`prod.keys`** | dumped from **your own console** (see below) | the extractor, to decrypt your game |
+| **The game's NSPs** | dumped from your own cartridge or eShop purchases | the extractor |
+| **Xcode + iOS SDK** | the App Store | the app build |
+
+`prod.keys` is the console's key set — a text file of `name = hex value` lines (~230 entries:
+`master_key_xx`, `titlekek_xx`, `header_key`, `key_area_key_application_xx`, …). Every Switch
+homebrew tool reads this format. It is **not** tied to a specific game: one `prod.keys` decrypts
+any of your games. The only requirement is that the file contains keys for the key generation
+(firmware era) the game was packaged with — a current dump covers every retail game.
+
+Where to put it is up to you; you pass the path with `-k`:
+
+```bash
+# any layout works, e.g.
+~/keys/prod.keys
+# or keep it beside the game's NSPs
+~/Games/Hades2/prod.keys
+```
+
+```bash
+python3 scripts/build_ipa_from_nsp.py ~/Games/Hades2 -k ~/keys/prod.keys
+```
+
+How keys are dumped is documented across the Switch homebrew community (Lockpick_RCM from a
+hacked console is the usual route); this repository does not cover that step and ships none of
+it. Two practical notes from real dumps:
+
+- **Malformed lines.** Some dumpers emit lines whose hex value has the wrong length (33 bad
+  `master_kek_source_*` lines in one real dump), which makes the extraction tool refuse the whole
+  file. Delete the offending lines and keep a backup of the original.
+- **Updates.** An update NSP's ticket may carry a newer key generation than the base game's. The
+  extractor reads the title key straight from the common ticket inside each NSP, so in practice
+  both decrypt fine as long as `prod.keys` is reasonably current — verified here with a base
+  game on generation 15 and its update on 16, using a keys file that only reached 15.
+
 `backports.zstd` is needed for Tears of the Kingdom's zstd dictionaries; other games do not use it.
 
-### 2. Pack the RomFS into an archive
+### 3. Pack the RomFS into an archive
 
 ```bash
 python3 dm/tools/romfs_arc.py pack <RomFS dir> <output base> --shard-mib 200
@@ -84,7 +125,7 @@ python3 dm/tools/romfs_arc.py verify <base> <RomFS dir>   # byte-compares every 
 python3 dm/tools/romfs_arc.py list   <base> [path]        # list one directory
 ```
 
-### 3. Build the IPA without the RomFS
+### 4. Build the IPA without the RomFS
 
 ```bash
 DM_NO_ROMFS=1 GAME=<title id> W=<work dir> PATCHED=<patched dir> \
@@ -94,7 +135,7 @@ DM_NO_ROMFS=1 GAME=<title id> W=<work dir> PATCHED=<patched dir> \
 
 Without `DM_NO_ROMFS=1` the script behaves exactly as upstream (the RomFS goes into the package).
 
-### 4. Copy the archive to the phone
+### 5. Copy the archive to the phone
 
 Put the whole set in the app's `Documents/romfs/`, keeping the base name:
 
