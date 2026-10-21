@@ -95,16 +95,16 @@ codesign -d --entitlements :- "$APP" | grep -q increased-memory-limit \
   || die "entitlements did not make it into the placeholder signature"
 t "entitlements: increased-memory-limit embedded in the placeholder signature"
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
-# DM_NO_ROMFS=1: leave the RomFS out of the package. The app then reads it from Documents/romfs
-# (a directory tree, or a ROMFSARC archive: romfs.idx + romfs.NN shards, see dm/host/romfs_arc.h).
-# This is how a game whose RomFS is too large for the iOS installer is shipped: the package stays
-# small and the game files are copied once through the Files app / Finder.
-if [ -n "${DM_NO_ROMFS:-}" ]; then
-  t "pack IPA without RomFS (game files come from Documents/romfs)"
+# DM_FULL_ROMFS=1: pack the RomFS into the package (upstream behaviour; only sensible for small
+# games — a full package of a large game is many GB and iOS refuses to install it). The default is
+# the slim package: the app reads the game files from Documents/romfs (a directory tree, or a
+# ROMFSARC archive: romfs.idx + romfs.NN shards, see dm/host/romfs_arc.h and docs/ROMFS_ARCHIVE.md).
+if [ -z "${DM_FULL_ROMFS:-}" ]; then
+  t "pack slim IPA without RomFS (game files come from Documents/romfs; DM_FULL_ROMFS=1 packs them)"
   python3 tools/pack_ipa.py "$OUT_IPA" --store "$(gp zip_store)" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/aoc --skip $P/romfs "${MAPS[@]}" || die "pack_ipa"
 else
   MAPS+=("$P/romfs=$ROMFS")
-  t "pack IPA (already-compressed game files stored, everything else deflated)"
+  t "pack full IPA with RomFS (already-compressed game files stored, everything else deflated)"
   python3 tools/pack_ipa.py "$OUT_IPA" --store "$(gp zip_store)" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/aoc --skip $P/romfs "${MAPS[@]}" || die "pack_ipa"
 fi
 t "done: $OUT_IPA ($(du -h "$OUT_IPA" | cut -f1))"

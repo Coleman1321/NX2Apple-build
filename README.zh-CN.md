@@ -38,7 +38,7 @@ romfs.00 ... .125        126 个分片，每片 200 MiB，源文件字节原样
 | 文件数 | 304,243 | **127** |
 | 最大的目录 | 75,941 个条目 | 126 个分片，均不超过 200 MiB |
 | 含游戏的 IPA | 16.6 GB（装不上） | — |
-| 不含游戏的 IPA（`DM_NO_ROMFS=1`） | — | **743 MB，可安装** |
+| 瘦身 IPA（默认，不含 RomFS） | — | **743 MB，可安装** |
 | 拷到手机 | 数小时 | 一个含 127 个文件的文件夹 |
 
 路径查找是对排序后的文件表做二分查找；目录枚举只遍历一段连续的子项区间。索引用 `mmap` 映射，
@@ -115,15 +115,18 @@ python3 dm/tools/romfs_arc.py verify <基路径> <RomFS 目录>   # 逐字节比
 python3 dm/tools/romfs_arc.py list   <基路径> [路径]          # 列出某个目录
 ```
 
-### 4. 构建不含 RomFS 的 IPA
+### 4. 构建 IPA
+
+主构建脚本**默认打瘦身 IPA**（不含 RomFS；App 从 `Documents/romfs` 读游戏文件），所以第 1 步
+已经产出。以后只想重新打包时：
 
 ```bash
-DM_NO_ROMFS=1 GAME=<title id> W=<工作目录> PATCHED=<改写目录> \
+GAME=<title id> W=<工作目录> PATCHED=<改写目录> \
   ROMFS=<RomFS 目录> MSL_IOS=<shader 目录> \
   dm/ios/tools/build_ipa.sh <输出.ipa>
 ```
 
-不设 `DM_NO_ROMFS=1` 时，脚本行为与上游完全一致（RomFS 进包）。
+`--full-romfs`（或 `DM_FULL_ROMFS=1`）把 RomFS 打进包里——上游行为，只对小体量游戏有意义。
 
 ### 5. 把归档拷到手机
 
@@ -174,7 +177,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 
 1. 用 `nx_extract` 解出新游戏的 NSP（上游脚本会自动做）。
 2. 用 `romfs_arc.py` 打包那个游戏的 `RomFS`。
-3. 用新的 `GAME=` profile 加 `DM_NO_ROMFS=1` 重新构建 IPA。
+3. 用新的 `GAME=` profile 重新构建 IPA（默认即瘦身包）。
 4. 把新归档拷进 `Documents/romfs/`。
 
 三点需要注意：
@@ -208,7 +211,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 | `dm/host/hle_fs.c` | 挂载并路由归档路径 |
 | `dm/host/Makefile` | 编译 `romfs_arc.c` |
 | `dm/ios/Sources/main.m` | `romfs_locate` 接受 `romfs.idx` |
-| `dm/ios/tools/build_ipa.sh` | `DM_NO_ROMFS=1` |
+| `dm/ios/tools/build_ipa.sh` | 默认瘦身包（`DM_FULL_ROMFS=1` = 上游完整包） |
 
 挂载点按**目录**识别，而不是按名字：各游戏的挂载名不同（多数是 `rom`，《王国之泪》是 `content`）。
 

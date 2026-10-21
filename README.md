@@ -42,7 +42,7 @@ Measured on Tears of the Kingdom (v1.0.0 + 1.4.3):
 | Files | 304,243 | **127** |
 | Largest directory | 75,941 entries | 126 shards, none over 200 MiB |
 | IPA with the game inside | 16.6 GB (fails to install) | — |
-| IPA without it (`DM_NO_ROMFS=1`) | — | **743 MB, installs** |
+| Slim IPA (the default, no RomFS inside) | — | **743 MB, installs** |
 | Copy to the phone | hours | one folder of 127 files |
 
 Path lookup is a binary search over the sorted file table; a directory listing walks one contiguous
@@ -125,15 +125,19 @@ python3 dm/tools/romfs_arc.py verify <base> <RomFS dir>   # byte-compares every 
 python3 dm/tools/romfs_arc.py list   <base> [path]        # list one directory
 ```
 
-### 4. Build the IPA without the RomFS
+### 4. Build the IPA
+
+The main build script packs a **slim IPA by default** (no RomFS inside; the app reads the game
+files from `Documents/romfs`), so step 1 already produced it. To re-pack just the package later:
 
 ```bash
-DM_NO_ROMFS=1 GAME=<title id> W=<work dir> PATCHED=<patched dir> \
+GAME=<title id> W=<work dir> PATCHED=<patched dir> \
   ROMFS=<RomFS dir> MSL_IOS=<shader dir> \
   dm/ios/tools/build_ipa.sh <output.ipa>
 ```
 
-Without `DM_NO_ROMFS=1` the script behaves exactly as upstream (the RomFS goes into the package).
+`--full-romfs` (or `DM_FULL_ROMFS=1`) packs the RomFS into the package instead — upstream's
+behaviour, only sensible for small games.
 
 ### 5. Copy the archive to the phone
 
@@ -187,7 +191,7 @@ and the reader looks paths up in that tree. To switch games:
 
 1. Extract the new game's NSPs with `nx_extract` as usual (upstream's script does this).
 2. Pack that game's `RomFS` with `romfs_arc.py`.
-3. Rebuild the IPA with `DM_NO_ROMFS=1` and the new `GAME=` profile.
+3. Rebuild the IPA with the new `GAME=` profile (the slim package is the default).
 4. Copy the new archive into `Documents/romfs/`.
 
 Three things to watch for:
@@ -225,7 +229,7 @@ past the end would return the next file's bytes).
 | `dm/host/hle_fs.c` | mount and route archive-backed paths |
 | `dm/host/Makefile` | build `romfs_arc.c` |
 | `dm/ios/Sources/main.m` | `romfs_locate` accepts `romfs.idx` |
-| `dm/ios/tools/build_ipa.sh` | `DM_NO_ROMFS=1` |
+| `dm/ios/tools/build_ipa.sh` | slim by default (`DM_FULL_ROMFS=1` = upstream full package) |
 
 The mount is recognised by its **directory**, not its name: titles differ (`rom` for most games,
 `content` for Tears of the Kingdom).
