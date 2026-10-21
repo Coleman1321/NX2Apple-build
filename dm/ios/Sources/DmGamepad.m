@@ -44,22 +44,21 @@
 enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS, B_LEFT, B_UP, B_RIGHT, B_DOWN, B_N };
 enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_H2KEY };   // C_GAME: none, the touch goes to the game's touch screen (finger slot << 8); C_H2KEY: a Hades II combat key (key << 8)
 
-// ---- Hades II layout constants (the play-test sketch, round five) ----
-// The combat cluster: Y (attack) is the anchor and the biggest key; the other five sit on a ring
-// around it at the SAME centre distance (KH_RING) and the same size. Clockwise from the top:
-// Ω, R (hex / interact, upper-right outside the ring), Y (right), B (dash, lower-right — the
-// sketch's "dash in the bottom-right corner"), A (lower-left), X (upper-left). The cluster's
-// centre: KH_FACE_X from the right edge, KH_FACE_Y from the bottom.
-static const CGFloat KH_FACE_X = 148, KH_FACE_Y = 128,
-    KH_RING = 96,           // every non-attack key's centre distance from Y (equal gaps)
-    KH_Y_R = 46, KH_OTHER_R = 34;   // the attack key bigger, the rest all equal
-// The three menu keys (all the same size as a ring key, all always visible):
-//   menu  a small circle key with a left-pointing triangle inside, top-right corner — the tap IS
-//         D-pad right (open the inventory)
-//   L     on the ring, mirrored with R: menu-key side's lower-left (the sketch's yellow circle)
-//   R     right edge, below the menu key
+// ---- Hades II layout constants (the play-test sketch, round six: the vertical arc) ----
+// The combat keys run down the right edge in a thumb's arc, top to bottom: Ω above Y, R above Ω,
+// the menu key in the corner above R; X below-left of Y, B below Y. Equal spacing between
+// consecutive keys (the sketch's yellow lines). L stands alone on the LEFT edge at Y's height.
+// Offsets are from Y (the anchor, the biggest key), in u: (+x toward the screen edge, +y up).
+static const CGFloat KH_FACE_X = 148, KH_FACE_Y = 168,
+    KH_Y_R = 46, KH_OTHER_R = 34,   // the attack key bigger, the rest all equal
+    KH_OMEGA_DX = 34, KH_OMEGA_DY = 94,
+    KH_R_DX = 52, KH_R_DY = 188,
+    KH_X_DX = -80, KH_X_DY = -38,
+    KH_B_DX = -12, KH_B_DY = -100;
+// The menu key sits in the top-right corner; L on the left edge at Y's height.
 static const CGFloat KH_MENU_X = 66, KH_MENU_Y = 64, KH_MENU_R = 34,
-    KH_MENU_BUMP_DY = 176;  // R: this much below the menu key's row
+    KH_R_BUMP_DY = 148;   // R: this much below the menu key's row
+static const CGFloat KH_L_X = 66;   // L: from the left edge (its height follows Y's)
 // Floating stick: the start zone's right bound (fraction of the width) and upper bound (fraction of
 // the height from the bottom); the base radius, full-tilt fraction, dead zone, the resume window for
 // a system-cancelled stick finger, its grab factor, and how long the Ω latch leads the attack key.
@@ -107,17 +106,16 @@ static NSString *const k_h2_key = @"DmPadH2";           // NSUserDefaults: 1 = H
 // Each entry: button, centre angle (degrees, from Y at KH_RING distance), radius, icon name.
 // Y is the anchor at radius KH_Y_R; the rest share KH_OTHER_R and fan out evenly (the play-test
 // asked for equal gaps and equal sizes).
-typedef struct { int b; CGFloat angle, r; NSString *icon; } h2key;
-// Angles around Y (0 = up, clockwise), six points evenly spaced (60° apart) so the gaps are equal:
-// Ω above, R upper-right, Y right (the anchor itself), B lower-right (dash under the thumb),
-// A lower-left, X upper-left.
+typedef struct { int b; CGFloat dx, dy, r; NSString *icon; } h2key;
+// Centres from Y (the anchor), in u: R above Ω above Y, X and B below Y (X inward, B outward-down
+// per the sketch's bottom row). The menu key and L are placed separately (h2menuKey).
 static const h2key k_h2[] = {
-    { B_Y,  90,   KH_Y_R,     @"attack"  },   // 90° = the ring's right point, the thumb's rest
-    { B_ZR, -90,  KH_OTHER_R, @"omega"   },
-    { B_R,  -30,  KH_OTHER_R, @"hex"     },
-    { B_B,  30,   KH_OTHER_R, @"dash"    },
-    { B_A,  150,  KH_OTHER_R, @"cast"    },
-    { B_X,  -150, KH_OTHER_R, @"special" },
+    { B_Y,  0,          0,       KH_Y_R,     @"attack"  },
+    { B_ZR, KH_OMEGA_DX, KH_OMEGA_DY, KH_OTHER_R, @"omega" },
+    { B_R,  KH_R_DX,    KH_R_DY, KH_OTHER_R, @"hex"     },
+    { B_X,  KH_X_DX,    KH_X_DY, KH_OTHER_R, @"special" },
+    { B_B,  KH_B_DX,    KH_B_DY, KH_OTHER_R, @"dash"    },
+    { B_A,  KH_X_DX - 6, KH_X_DY - 96, KH_OTHER_R, @"cast" },   // A above X (the sketch's left column)
 };
 enum { KH_N = sizeof k_h2 / sizeof *k_h2 };
 static UIImage *h2_icon(NSString *name) {   // the game's own glyph from the profile folder, if present
@@ -298,9 +296,7 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 }
 - (CGPoint)h2keyCenter:(int)i {
     CGPoint a = self.h2Anchor; CGFloat u = self.h2u;
-    if (i == 0) return a;   // Y is the anchor
-    CGFloat r = KH_RING * u, th = k_h2[i].angle * M_PI / 180;
-    return CGPointMake(a.x + r * cos(th), a.y - r * sin(th));   // angle 0 = up, positive clockwise
+    return CGPointMake(a.x + k_h2[i].dx * u, a.y - k_h2[i].dy * u);   // +dy = up
 }
 - (CGFloat)h2keyR:(int)i { return k_h2[i].r * self.h2u; }
 - (int)h2keyAt:(CGPoint)p {
@@ -309,19 +305,16 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
     return -1;
 }
 // ---- Hades II menu keys ----
-// Three keys, always visible in H2, all the size of a ring key:
+// Three keys, always visible in H2:
 //   0  menu  a circle key with a left-pointing triangle inside, top-right corner — the tap IS
 //            D-pad right (open the inventory)
-//   1  L     on the ring's left point (mirrored with Y, the sketch's yellow circle)
-//   2  R     right edge, directly below the menu key
+//   1  L     the left edge, at Y's height (the sketch's yellow circle, alone on its side)
+//   2  R     the right edge, directly below the menu key
 - (CGPoint)h2menuKey:(int)i {
     CGFloat u = self.h2u;
     if (i == 0) return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + KH_MENU_Y * u);
-    if (i == 1) {   // the ring's left point: the anchor is KH_FACE_X from the right edge, L sits KH_RING further left, same height
-        CGPoint a = [self h2Anchor];
-        return CGPointMake(a.x - KH_RING * u, a.y);
-    }
-    return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + (KH_MENU_Y + KH_MENU_BUMP_DY) * u);
+    if (i == 1) return CGPointMake(CGRectGetMinX(self.safe) + KH_L_X * u, [self h2Anchor].y);
+    return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, CGRectGetMinY(self.safe) + (KH_MENU_Y + KH_R_BUMP_DY) * u);
 }
 - (CGFloat)h2menuR { return KH_MENU_R * self.h2u; }
 - (int)h2menuAt:(CGPoint)p {   // 0 = D-pad right, 1 = L, 2 = R; -1 none
