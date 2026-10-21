@@ -47,16 +47,16 @@ enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_H2KEY };   
 // ---- Hades II layout constants ----
 // Key radii: attack biggest, hex smallest (sized by use frequency, see the header comment).
 static const CGFloat KH_Y_R = 40, KH_X_R = 33, KH_B_R = 34, KH_A_R = 26, KH_ZR_R = 25, KH_R_R = 20;
-// Key centres from Y (the anchor), in u: X upper-left, B below-left, A inward-down, ZR above-left
-// of Y (the thumb reaches it from the attack key without leaving the cluster), R inward below A.
-// Y itself sits KH_FACE_X from the right edge and KH_FACE_Y from the bottom. All offsets are
-// centre-to-centre and sized so the whole cluster stays inside the thumb's arc.
-static const CGFloat KH_FACE_X = 132, KH_FACE_Y = 100,
-    KH_X_DX = -74, KH_X_DY = -46,
-    KH_B_DX = -96, KH_B_DY = 30,
-    KH_A_DX = 44, KH_A_DY = 96,
-    KH_ZR_DX = -8, KH_ZR_DY = -124,
-    KH_R_DX = 38, KH_R_DY = 164;
+// H2 key centres from Y (the anchor), in u. The whole cluster hugs the thumb's rest arc: Y under
+// the thumb, X up-left, B left-down, A inward-down, ZR directly above Y, R inward below A. The R
+// key is the game's universal interact (door / IOR return / cast field detonate), so it sits in
+// the frequent band, not in a corner. Y itself: KH_FACE_X from the right edge, KH_FACE_Y up.
+static const CGFloat KH_FACE_X = 118, KH_FACE_Y = 88,
+    KH_X_DX = -66, KH_X_DY = -44,
+    KH_B_DX = -88, KH_B_DY = 26,
+    KH_A_DX = 40, KH_A_DY = 88,
+    KH_ZR_DX = -4, KH_ZR_DY = -108,
+    KH_R_DX = 34, KH_R_DY = 148;
 // Floating stick: the start zone's right bound (fraction of the width) and upper bound (fraction of
 // the height from the bottom); the base radius, full-tilt fraction, dead zone, the resume window for
 // a system-cancelled stick finger, its grab factor, and how long the Ω latch leads the attack key.
@@ -269,15 +269,21 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 - (CGPoint)swapCenter { CGRect s = self.safe; return CGPointMake(CGRectGetMidX(s), CGRectGetMinY(s) + K_PILL_Y * self.u); }
 
 // ---- Hades II geometry ----
+- (CGFloat)h2u {   // the H2 layout scales by the SHORT screen edge, tighter than the global u:
+    // the key cluster spans about 320 u horizontally (Y anchor + A/R inward + ZR up), and it must
+    // fit half the screen next to the stick zone on every iPhone (smallest landscape height 375).
+    CGFloat byHeight = self.bounds.size.height / 430.0, byWidth = self.bounds.size.width / 932.0;
+    return fmin(fmin(byHeight, byWidth), 1.3) * fmin(1.0, self.bounds.size.width * 0.5 / 340.0);
+}
 - (CGPoint)h2Anchor {   // Y, the anchor every other key is placed from
-    CGRect s = self.corner; CGFloat u = self.u;
+    CGRect s = self.corner; CGFloat u = self.h2u;
     return side(s, 1, KH_FACE_X * u, CGRectGetMaxY(s) - KH_FACE_Y * u);
 }
 - (CGPoint)h2keyCenter:(int)i {
-    CGPoint a = self.h2Anchor; CGFloat u = self.u;
+    CGPoint a = self.h2Anchor; CGFloat u = self.h2u;
     return CGPointMake(a.x + k_h2[i].dx * u, a.y + k_h2[i].dy * u);
 }
-- (CGFloat)h2keyR:(int)i { return k_h2[i].r * self.u; }
+- (CGFloat)h2keyR:(int)i { return k_h2[i].r * self.h2u; }
 - (int)h2keyAt:(CGPoint)p {
     for (int i = 0; i < KH_N; i++) { CGFloat r = [self h2keyR:i] * 1.18;   // a slightly generous hit area: small keys must not need pixel aim
         if (dist(p, [self h2keyCenter:i]) <= r) return i; }
@@ -291,7 +297,7 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 // The knob offset from the floating base (clamped to the base edge), the same convention as knobOffset.
 - (CGPoint)h2knobOffset {
     if (!_h2stick) return CGPointZero;
-    CGFloat dx = _h2now.x - _h2origin.x, dy = _h2now.y - _h2origin.y, d = hypot(dx, dy), R = KH_STICK_R * self.u;
+    CGFloat dx = _h2now.x - _h2origin.x, dy = _h2now.y - _h2origin.y, d = hypot(dx, dy), R = KH_STICK_R * self.h2u;
     if (d > R) { dx *= R / d; dy *= R / d; }
     return CGPointMake(dx, dy);
 }
@@ -358,7 +364,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     // The H2 floating stick: axis values from the finger's offset to the base centre (the same
     // curve as the fixed sticks — dead zone, then rising to full at KH_FULL of the base radius).
     if (_h2 && _h2stick) {
-        CGPoint o = [self h2knobOffset]; CGFloat R = KH_STICK_R * self.u, d = hypot(o.x, o.y), dz = R * KH_DEAD;
+        CGPoint o = [self h2knobOffset]; CGFloat R = KH_STICK_R * self.h2u, d = hypot(o.x, o.y), dz = R * KH_DEAD;
         if (d > dz) {
             CGFloat m = fmin((d - dz) / (R * KH_FULL - dz), 1) / d;
             ax[0] = (int32_t)lrint(o.x * m * 32767); ax[1] = (int32_t)lrint(-o.y * m * 32767);
@@ -425,11 +431,11 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         // keeps the old base instead of jumping to the new touch point.
         if (!_h2stick && [self h2inStickZone:p]) {
             BOOL resume = _h2lostS > 0 && [NSDate timeIntervalSinceReferenceDate] - _h2lostS <= KH_RESUME_S
-                && dist(p, CGPointMake(_h2lostOrigin.x, _h2lostOrigin.y)) <= KH_RESUME_K * KH_STICK_R * self.u;
+                && dist(p, CGPointMake(_h2lostOrigin.x, _h2lostOrigin.y)) <= KH_RESUME_K * KH_STICK_R * self.h2u;
             _h2stick = t; _h2now = p;
             if (resume) _h2origin = _h2lostOrigin;
             else {
-                CGFloat R = KH_STICK_R * self.u, m = CGRectGetMinX(self.bounds) + R + 8;
+                CGFloat R = KH_STICK_R * self.h2u, m = CGRectGetMinX(self.bounds) + R + 8;
                 _h2origin = CGPointMake(fmax(p.x, m), fmin(p.y, self.bounds.size.height - R - 8));
             }
             _h2lostS = 0;
@@ -596,7 +602,7 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
     BOOL h2s = _h2 && _h2stick != nil;
     _h2ring.hidden = !h2s; _h2knob.hidden = !h2s;
     if (h2s) {
-        CGFloat R = KH_STICK_R * self.u, k = K_KNOB_R * self.u;
+        CGFloat R = KH_STICK_R * self.h2u, k = K_KNOB_R * self.u;
         setPath(_h2ring, circlePath(_h2origin, R));
         _h2knob.bounds = CGRectMake(0, 0, 2 * k, 2 * k);
         setPath(_h2knob, circlePath(CGPointMake(k, k), k));
