@@ -1,0 +1,4 @@
+Target dependency graph (2 targets)
+Target 'AllExcludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'NSPortBuilder-product' in project 'NSPortBuilder'
+Target 'NSPortBuilder-product' in project 'NSPortBuilder' (no dependencies)
