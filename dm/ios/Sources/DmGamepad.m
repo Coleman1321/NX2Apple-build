@@ -45,27 +45,22 @@ enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS
 enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_H2KEY };   // C_GAME: none, the touch goes to the game's touch screen (finger slot << 8); C_H2KEY: a Hades II combat key (key << 8)
 
 // ---- Hades II layout constants ----
-// Key radii: attack biggest, hex smallest (sized by use frequency, see the header comment).
-static const CGFloat KH_Y_R = 40, KH_X_R = 33, KH_B_R = 34, KH_A_R = 26, KH_ZR_R = 25, KH_R_R = 20;
-// H2 key centres from Y (the anchor), in u. The whole cluster hugs the thumb's rest arc: Y under
-// the thumb, X up-left, B left-down, A inward-down, ZR directly above Y, R inward below A. The R
-// key is the game's universal interact (door / IOR return / cast field detonate), so it sits in
-// the frequent band, not in a corner. Y itself: KH_FACE_X from the right edge, KH_FACE_Y up.
-static const CGFloat KH_FACE_X = 118, KH_FACE_Y = 88,
-    KH_X_DX = -66, KH_X_DY = -44,
-    KH_B_DX = -88, KH_B_DY = 26,
-    KH_A_DX = 40, KH_A_DY = 88,
-    KH_ZR_DX = -4, KH_ZR_DY = -108,
-    KH_R_DX = 34, KH_R_DY = 148;
-// The menu pad: a handle on the left edge mid-height expands a small D-pad (menu navigation) with
-// the two bumpers beside it — the keys menus want (D-pad right opens the inventory, L / R page
-// through it) while costing nothing in combat. It hides again 4 s after the last touch on it.
-static const CGFloat KH_MENU_HANDLE_X = 6, KH_MENU_HANDLE_Y = 0.42, KH_MENU_HANDLE_R = 22,
-    KH_MENU_X = 64, KH_MENU_Y = 0.40,       // the D-pad centre: from the left edge, fraction of the height
-    KH_MENU_R = 40, KH_MENU_ARM = 17, KH_MENU_IN = 12,
-    KH_MENU_L_DX = 116, KH_MENU_L_DY = -62,  // L: inward and above the D-pad
-    KH_MENU_R_DX = 116, KH_MENU_R_DY = 62,   // R: inward and below
-    KH_MENU_HIDE_S = 4.0;
+// H2 key centres, in u. Y is the anchor (biggest, the thumb's rest); the other five sit on a ring
+// around it at the SAME centre distance (KH_RING), evenly fanned — the play-test asked for equal
+// gaps and equal sizes, only the attack key bigger. Going clockwise from the top: ZR (Ω) above,
+// A inward-down, B below, X up-left, R (interact / hex) inward below A. The cluster's centre sits
+// KH_FACE_X from the right edge, KH_FACE_Y up.
+static const CGFloat KH_FACE_X = 150, KH_FACE_Y = 120,
+    KH_RING = 104,          // every non-attack key's centre distance from Y
+    KH_ZR_ANGLE = -90,      // Ω directly above
+    KH_A_ANGLE = 25,        // inward-down (toward the screen centre)
+    KH_B_ANGLE = 115,       // below, slightly outward
+    KH_X_ANGLE = -155,      // up-left
+    KH_R_ANGLE = 65;        // below, inward (the interact / hex key)
+// The menu handle on the LEFT edge: the handle itself IS the menu key — tapping it is D-pad right
+// (open the inventory); L appears beside it, mirrored across to R on the right edge (symmetric).
+static const CGFloat KH_MENU_X = 10, KH_MENU_Y = 0.45, KH_MENU_R = 30,
+    KH_MENU_BUMP_DY = 108;  // L above the handle by this much (R sits the same below the attack key's column, mirrored)
 // Floating stick: the start zone's right bound (fraction of the width) and upper bound (fraction of
 // the height from the bottom); the base radius, full-tilt fraction, dead zone, the resume window for
 // a system-cancelled stick finger, its grab factor, and how long the Ω latch leads the attack key.
@@ -110,16 +105,18 @@ static NSString *const k_layout_key = @"DmPadLayout";   // NSUserDefaults: 1 = 3
 static NSString *const k_h2_key = @"DmPadH2";           // NSUserDefaults: 1 = Hades II layout (overrides 2D / 3D)
 
 // ---- Hades II combat keys ----
-// Each entry: button, centre from Y (the anchor) in u, radius in u, icon name. Y sits at the thumb's
-// rest point; the rest fan out by use frequency (attack biggest and under the thumb, hex smallest).
-typedef struct { int b; CGFloat dx, dy, r; NSString *icon; } h2key;
+// Each entry: button, centre angle (degrees, from Y at KH_RING distance), radius, icon name.
+// Y is the anchor at radius KH_Y_R; the rest share KH_OTHER_R and fan out evenly (the play-test
+// asked for equal gaps and equal sizes).
+typedef struct { int b; CGFloat angle, r; NSString *icon; } h2key;
+static const CGFloat KH_Y_R = 42, KH_OTHER_R = 32;
 static const h2key k_h2[] = {
-    { B_Y,  0,      0,    KH_Y_R,  @"attack"  },
-    { B_X,  KH_X_DX, KH_X_DY, KH_X_R, @"special" },
-    { B_B,  KH_B_DX, KH_B_DY, KH_B_R, @"dash"    },
-    { B_A,  KH_A_DX, KH_A_DY, KH_A_R, @"cast"    },
-    { B_ZR, KH_ZR_DX, KH_ZR_DY, KH_ZR_R, @"omega" },
-    { B_R,  KH_R_DX, KH_R_DY, KH_R_R, @"hex"     },
+    { B_Y,  0,           KH_Y_R,     @"attack"  },
+    { B_ZR, KH_ZR_ANGLE, KH_OTHER_R, @"omega"   },
+    { B_A,  KH_A_ANGLE,  KH_OTHER_R, @"cast"    },
+    { B_B,  KH_B_ANGLE,  KH_OTHER_R, @"dash"    },
+    { B_X,  KH_X_ANGLE,  KH_OTHER_R, @"special" },
+    { B_R,  KH_R_ANGLE,  KH_OTHER_R, @"hex"     },
 };
 enum { KH_N = sizeof k_h2 / sizeof *k_h2 };
 static UIImage *h2_icon(NSString *name) {   // the game's own glyph from the profile folder, if present
@@ -158,11 +155,8 @@ static __weak DmGamepad *g_view;
     double _h2omegaSince;                          // when the latch went down (the lead time runs from it)
     double _h2keyDown[KH_N];                       // when each key's finger went down (0 = up; Ω needs the duration)
     uint64_t _h2bits;                              // the combat-key bits as published at the last recompute
-    // ---- Hades II menu pad ----
-    BOOL _h2menu;                                  // the menu pad is expanded
-    CAShapeLayer *_h2menuKey[6]; CATextLayer *_h2menuLabel[6];   // up / down / left / right / L / R
-    CAShapeLayer *_h2menuHandle; CATextLayer *_h2menuHandleLabel;
-    NSDate *_h2menuTouch;                          // the last touch on the menu pad (auto-hide after KH_MENU_HIDE_S)
+    // ---- Hades II menu keys ----
+    CAShapeLayer *_h2menuKey[3]; CATextLayer *_h2menuLabel[3];   // 0 = D-pad right (the handle), 1 = L, 2 = R
 }
 
 static UIColor *k_idle, *k_on, *k_line, *k_ringFill, *k_text, *k_textOn;
@@ -204,7 +198,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         _swap = shape(_controls); _swapLabel = label(_swap, @"");
         // Hades II combat keys: one ring + one content layer each; the content is the game's own
         // glyph when the profile ships one, else the button letter.
-        static NSString *const h2names[KH_N] = {@"Y", @"X", @"B", @"A", @"Ω", @"R"};
+        static NSString *const h2names[] = {@"Y", @"Ω", @"A", @"B", @"X", @"R"};   // matches k_h2's order
         for (int i = 0; i < KH_N; i++) {
             _h2key[i] = shape(_controls);
             UIImage *im = h2_icon(k_h2[i].icon);
@@ -225,15 +219,13 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         _h2knob = shape(_controls);
         CAShapeLayer *h2in = [CAShapeLayer layer]; h2in.fillColor = nil; h2in.strokeColor = k_line.CGColor; h2in.lineWidth = 1.5;
         [_h2knob addSublayer:h2in];
-        // The menu pad: a handle on the left edge expands a small D-pad + L / R for the menus.
-        _h2menuHandle = shape(_controls);
-        _h2menuHandleLabel = label(_h2menuHandle, @"☰");
-        static NSString *const h2menuNames[6] = {@"↑", @"↓", @"←", @"→", @"L", @"R"};
-        for (int i = 0; i < 6; i++) {
+        // The menu keys: always visible in H2. The left one doubles as the handle (D-pad right);
+        // L and R sit beside their screen edges for the inventory's pages.
+        static NSString *const h2menuNames[3] = {@"→", @"L", @"R"};
+        for (int i = 0; i < 3; i++) {
             _h2menuKey[i] = shape(_controls); _h2menuKey[i].hidden = YES;
             _h2menuLabel[i] = label(_h2menuKey[i], h2menuNames[i]);
         }
-        _h2menuHandle.hidden = YES;   // only the H2 layout shows it
         [self applyLayout];
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
         [nc addObserver:self selector:@selector(padsChanged) name:GCControllerDidConnectNotification object:nil];
@@ -248,9 +240,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
     _ring[1].hidden = _knob[1].hidden = _h2 || !_full;
     _ring[0].hidden = _knob[0].hidden = _h2;         // the H2 stick has its own floating base layers
     for (int i = 0; i < KH_N; i++) _h2key[i].hidden = !_h2;
-    _h2menuHandle.hidden = !_h2;                     // the handle always shows in H2; the pad expands on tap
-    if (!_h2) _h2menu = NO;
-    for (int i = 0; i < 6; i++) _h2menuKey[i].hidden = !_h2 || !_h2menu;
+    for (int i = 0; i < 3; i++) _h2menuKey[i].hidden = !_h2;   // the menu keys always show in H2
     _swapLabel.string = _h2 ? @"H2" : _full ? @"3D" : @"2D";
     [CATransaction commit];
 }
@@ -307,7 +297,9 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
 }
 - (CGPoint)h2keyCenter:(int)i {
     CGPoint a = self.h2Anchor; CGFloat u = self.h2u;
-    return CGPointMake(a.x + k_h2[i].dx * u, a.y + k_h2[i].dy * u);
+    if (i == 0) return a;   // Y is the anchor
+    CGFloat r = KH_RING * u, th = k_h2[i].angle * M_PI / 180;
+    return CGPointMake(a.x + r * cos(th), a.y - r * sin(th));   // angle 0 = up, positive clockwise
 }
 - (CGFloat)h2keyR:(int)i { return k_h2[i].r * self.h2u; }
 - (int)h2keyAt:(CGPoint)p {
@@ -315,33 +307,21 @@ static BOOL isClick(int b) { return b == B_LS || b == B_RS; }
         if (dist(p, [self h2keyCenter:i]) <= r) return i; }
     return -1;
 }
-// ---- Hades II menu pad geometry ----
-- (CGPoint)h2menuHandleCenter {
+// ---- Hades II menu keys ----
+// Three keys, always visible in H2: the handle on the left edge IS D-pad right (open the
+// inventory); L sits above it (page up) and R beside the attack cluster's column on the right
+// edge (page down), the two mirrored at the same height. The old expandable D-pad is gone.
+- (CGPoint)h2menuKey:(int)i {   // 0 = handle (D-pad right, left edge), 1 = L (left, above), 2 = R (right, above the attack column)
     CGFloat u = self.h2u;
-    return CGPointMake(CGRectGetMinX(self.safe) + KH_MENU_HANDLE_X * u, self.bounds.size.height * KH_MENU_HANDLE_Y);
-}
-- (CGFloat)h2menuHandleR { return KH_MENU_HANDLE_R * self.h2u; }
-- (CGPoint)h2menuCenter {
-    CGFloat u = self.h2u;
-    return CGPointMake(CGRectGetMinX(self.safe) + KH_MENU_X * u, self.bounds.size.height * KH_MENU_Y);
+    if (i == 0) return CGPointMake(CGRectGetMinX(self.safe) + KH_MENU_X * u, self.bounds.size.height * KH_MENU_Y);
+    if (i == 1) return CGPointMake(CGRectGetMinX(self.safe) + KH_MENU_X * u, self.bounds.size.height * KH_MENU_Y - KH_MENU_BUMP_DY * u);
+    return CGPointMake(CGRectGetMaxX(self.safe) - KH_MENU_X * u, self.bounds.size.height * KH_MENU_Y - KH_MENU_BUMP_DY * u);
 }
 - (CGFloat)h2menuR { return KH_MENU_R * self.h2u; }
-- (CGPoint)h2menuBumper:(int)i {   // 4 = L (above), 5 = R (below)
-    CGPoint c = self.h2menuCenter; CGFloat u = self.h2u;
-    CGFloat dy = i == 4 ? KH_MENU_L_DY : KH_MENU_R_DY;
-    return CGPointMake(c.x + KH_MENU_L_DX * u, c.y + dy * u);
-}
-- (int)h2menuAt:(CGPoint)p {   // 0 up, 1 down, 2 left, 3 right, 4 L, 5 R; -1 none
-    CGFloat r = self.h2menuR * 1.15;
-    for (int i = 0; i < 4; i++) {
-        static const CGFloat an[4] = {-M_PI_2, M_PI_2, M_PI, 0};
-        CGPoint c = CGPointMake(self.h2menuCenter.x + self.h2menuR * cos(an[i]), self.h2menuCenter.y + self.h2menuR * sin(an[i]));
-        if (dist(p, c) <= self.h2menuR * 0.62) return i;
-    }
-    for (int i = 4; i < 6; i++) if (dist(p, [self h2menuBumper:i]) <= self.h2menuR * 0.55) return i;
+- (int)h2menuAt:(CGPoint)p {   // 0 = D-pad right, 1 = L, 2 = R; -1 none
+    for (int i = 0; i < 3; i++) if (dist(p, [self h2menuKey:i]) <= [self h2menuR] * 1.15) return i;
     return -1;
 }
-- (BOOL)h2inMenuHandle:(CGPoint)p { return dist(p, [self h2menuHandleCenter]) <= [self h2menuHandleR] * 1.5; }
 - (BOOL)h2inStickZone:(CGPoint)p {   // the lower-left zone the floating stick starts in
     return p.x >= 0 && p.y <= self.bounds.size.height
         && p.x < self.bounds.size.width * KH_ZONE_R
@@ -410,17 +390,12 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     // a quick tap-Ω-attack still arrives in the game's own "hold ZR first" order. Press durations
     // pass through untouched (the Ω moves are holds; the hex's hold-and-release works as is).
     uint64_t h2 = 0;
-    static const int h2menuBtn[6] = {B_UP, B_DOWN, B_LEFT, B_RIGHT, B_L, B_R};
+    static const int h2menuBtn[3] = {B_RIGHT, B_L, B_R};   // handle = D-pad right (open the inventory), then L / R
     for (UITouch *t in _owner) { uint64_t v = [_owner objectForKey:t].unsignedLongLongValue;
         if ((v & 0xff) != C_H2KEY) continue;
         int tag = (int)(v >> 8);
         if (tag < KH_N) h2 |= 1ull << k_h2[tag].b;
-        else if (tag >= KH_N + 16) h2 |= 1ull << h2menuBtn[tag - KH_N - 16];
-        /* the handle's tag (KH_N + 8) holds no key: the toggle happened at touch-down */ }
-    // the menu pad hides itself when nothing has touched it for a while
-    if (_h2menu && _h2menuTouch && [_h2menuTouch timeIntervalSinceNow] < -KH_MENU_HIDE_S) {
-        _h2menu = NO; [self applyLayout];
-    }
+        else h2 |= 1ull << h2menuBtn[tag - KH_N - 8]; }
     BOOL h2changed = h2 != _h2bits;
     _h2bits = h2;
     // The H2 floating stick: axis values from the finger's offset to the base centre (the same
@@ -481,19 +456,8 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         int hit = [self btnAt:p];
         if (hit >= 0) { [_owner setObject:@(C_BTN | (uint64_t)hit << 8) forKey:t]; continue; }
         if ([self inSwap:p]) { [_owner setObject:@(C_SWAP) forKey:t]; continue; }
-        if ([self h2inMenuHandle:p]) {   // the handle toggles the menu pad on touch-down
-            _h2menu = !_h2menu; _h2menuTouch = [NSDate date]; [self applyLayout];
-            [_owner setObject:@(C_H2KEY | (uint64_t)(KH_N + 8) << 8) forKey:t];   // holds no key
-            continue;
-        }
-        if (_h2menu) {
-            int m = [self h2menuAt:p];
-            if (m >= 0) {
-                [_owner setObject:@(C_H2KEY | (uint64_t)(KH_N + 16 + m) << 8) forKey:t];
-                _h2menuTouch = [NSDate date];
-                continue;
-            }
-        }
+        int m = [self h2menuAt:p];   // the menu keys sit clear of the combat cluster: handle / L / R
+        if (m >= 0) { [_owner setObject:@(C_H2KEY | (uint64_t)(KH_N + 8 + m) << 8) forKey:t]; continue; }
         int k = [self h2keyAt:p];
         if (k >= 0) {
             [_owner setObject:@(C_H2KEY | (uint64_t)k << 8) forKey:t];
@@ -575,10 +539,6 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if ((v & 0xff) == C_H2KEY) {
             int tag = (int)(v >> 8);
             if (tag < KH_N) { _h2keyDown[tag] = 0; if (k_h2[tag].b == B_ZR) _h2omega = NO; }
-            else if (tag >= KH_N + 16 && ended) {   // a menu key: touch the auto-hide clock
-                _h2menuTouch = [NSDate date];
-            }
-            // the handle's toggle happens in recompute (it sees the release through the missing bit)
         }
         if ((v & 0xff) == C_GAME && (v >> 8) < 16) { _game[v >> 8] = nil; game = YES; }
         [_owner removeObjectForKey:t]; [_faceOf removeObjectForKey:t]; for (int i = 0; i < 2; i++) if (t == _stick[i]) _stick[i] = nil;
@@ -590,7 +550,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
 - (void)touchesEnded:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:YES]; }
 - (void)touchesCancelled:(NSSet<UITouch *> *)ts withEvent:(UIEvent *)e { [self endTouches:ts tapped:NO]; }
 - (void)reset { [_owner removeAllObjects]; [_faceOf removeAllObjects]; _stick[0] = _stick[1] = nil; for (int i = 0; i < 16; i++) _game[i] = nil;
-    _h2stick = nil; _h2omega = NO; for (int i = 0; i < KH_N; i++) _h2keyDown[i] = 0; _h2lostS = 0; _h2menu = NO; [self pushGame]; [self recompute]; }
+    _h2stick = nil; _h2omega = NO; for (int i = 0; i < KH_N; i++) _h2keyDown[i] = 0; _h2lostS = 0; [self pushGame]; [self recompute]; }
 
 // ---- Shapes ----
 static CGPathRef circlePath(CGPoint c, CGFloat r) { return CGPathCreateWithEllipseInRect(CGRectMake(c.x - r, c.y - r, 2 * r, 2 * r), NULL); }
@@ -653,22 +613,11 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
             placeLabel(_h2label[i], c, r * 0.75);
         }
     }
-    // Hades II menu pad: the handle on the left edge; the D-pad arms and the two bumpers
-    {
-        CGPoint hc = [self h2menuHandleCenter]; CGFloat hr = [self h2menuHandleR];
-        setPath(_h2menuHandle, circlePath(hc, hr)); placeLabel(_h2menuHandleLabel, hc, hr * 0.9);
-        CGPoint c = [self h2menuCenter]; CGFloat r = self.h2menuR, arm = KH_MENU_ARM * self.h2u, tip = KH_MENU_IN * self.h2u;
-        static const struct { int i, b; CGFloat angle; } arms[] = {{0, B_UP, 0}, {1, B_DOWN, M_PI}, {2, B_LEFT, -M_PI_2}, {3, B_RIGHT, M_PI_2}};
-        for (int i = 0; i < 4; i++) {
-            setPath(_h2menuKey[arms[i].i], armPath(c, r, arm, tip, arms[i].angle, 5 * self.h2u));
-            CGPoint k = CGPointMake(c.x + r * cos(arms[i].angle), c.y + r * sin(arms[i].angle));
-            placeLabel(_h2menuLabel[arms[i].i], k, 15 * self.h2u);
-        }
-        for (int i = 4; i < 6; i++) {
-            CGPoint bc = [self h2menuBumper:i];
-            setPath(_h2menuKey[i], circlePath(bc, r * 0.52));
-            placeLabel(_h2menuLabel[i], bc, 16 * self.h2u);
-        }
+    // Hades II menu keys: the handle (D-pad right) on the left edge, L above it, R mirrored on the right edge
+    for (int i = 0; i < 3; i++) {
+        CGPoint mc = [self h2menuKey:i]; CGFloat mr = [self h2menuR];
+        setPath(_h2menuKey[i], circlePath(mc, mr));
+        placeLabel(_h2menuLabel[i], mc, mr * 0.62);
     }
     for (int i = 0; i < 2; i++) {
         setPath(_ring[i], circlePath([self stickHome:i], [self stickR:i]));
@@ -694,10 +643,9 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
         if (_h2label[i]) _h2label[i].foregroundColor = (on || armed ? k_textOn : k_text).CGColor;
     }
     // the menu pad: handle always visible in H2; the expanded keys light on press
-    _h2menuHandle.fillColor = (_h2menu ? k_on : k_idle).CGColor; _h2menuHandleLabel.foregroundColor = (_h2menu ? k_textOn : k_text).CGColor;
     {
-        static const int h2menuBtn[6] = {B_UP, B_DOWN, B_LEFT, B_RIGHT, B_L, B_R};
-        for (int i = 0; i < 6; i++) {
+        static const int h2menuBtn[3] = {B_RIGHT, B_L, B_R};
+        for (int i = 0; i < 3; i++) {
             BOOL on = (_h2bits >> h2menuBtn[i]) & 1;
             _h2menuKey[i].fillColor = (on ? k_on : k_idle).CGColor;
             _h2menuLabel[i].foregroundColor = (on ? k_textOn : k_text).CGColor;
