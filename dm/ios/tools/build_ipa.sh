@@ -77,6 +77,11 @@ APP=$DD/Build/Products/Release-iphoneos/DmIOS.app; [ -d "$APP" ] || APP=$(grep -
 # the app sets DM_AOC_DIR at launch, the host reports them as owned and mounts them from it) and the RomFS
 rm -rf "$APP/msl" "$O/Payload" "$O/out.ipa"   # (the last two: what the copy-and-zip packing left behind)
 P=Payload/DmIOS.app; MAPS=("$P=$APP" "$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR")
+# Hades II layout: the virtual pad's combat keys draw the game profile's own glyphs when the
+# profile ships them (dm/games/<id>/pad_icons/<name>.png; see DmGamepad.m's H2 block). Copy the
+# folder into the app so h2_icon() finds it; without it the keys fall back to letters.
+ICONDIR="$DM/games/$GAME/pad_icons"
+if [ -d "$ICONDIR" ]; then mkdir -p "$APP/dm/pad_icons" && cp "$ICONDIR"/*.png "$APP/dm/pad_icons/" && t "pad icons: $(ls "$ICONDIR" | wc -l | tr -d ' ') glyphs from $ICONDIR"; fi
 # Increased Memory Limit: the build is unsigned, so Xcode never merges Sources/DmIOS.entitlements
 # into a signature. A sideloader reads the entitlements it should keep from the signature it is
 # replacing — an unsigned binary has none, so the request would be lost. Embed them with an ad-hoc
