@@ -47,14 +47,16 @@ enum { C_NONE = 0, C_STICK, C_DPAD, C_FACE, C_BTN, C_SWAP, C_GAME, C_H2KEY };   
 // ---- Hades II layout constants ----
 // Key radii: attack biggest, hex smallest (sized by use frequency, see the header comment).
 static const CGFloat KH_Y_R = 40, KH_X_R = 33, KH_B_R = 34, KH_A_R = 26, KH_ZR_R = 25, KH_R_R = 20;
-// Key centres from Y (the anchor), in u: X upper-left, B below-left, A inward-down, ZR outward-up, R inward below A.
-// Y itself sits KH_FACE_X from the right edge and KH_FACE_Y from the bottom.
-static const CGFloat KH_FACE_X = 120, KH_FACE_Y = 96,
-    KH_X_DX = -86, KH_X_DY = -50,
-    KH_B_DX = -118, KH_B_DY = 34,
-    KH_A_DX = 52, KH_A_DY = 118,
-    KH_ZR_DX = 132, KH_ZR_DY = -96,
-    KH_R_DX = 46, KH_R_DY = 200;
+// Key centres from Y (the anchor), in u: X upper-left, B below-left, A inward-down, ZR above-left
+// of Y (the thumb reaches it from the attack key without leaving the cluster), R inward below A.
+// Y itself sits KH_FACE_X from the right edge and KH_FACE_Y from the bottom. All offsets are
+// centre-to-centre and sized so the whole cluster stays inside the thumb's arc.
+static const CGFloat KH_FACE_X = 132, KH_FACE_Y = 100,
+    KH_X_DX = -74, KH_X_DY = -46,
+    KH_B_DX = -96, KH_B_DY = 30,
+    KH_A_DX = 44, KH_A_DY = 96,
+    KH_ZR_DX = -8, KH_ZR_DY = -124,
+    KH_R_DX = 38, KH_R_DY = 164;
 // Floating stick: the start zone's right bound (fraction of the width) and upper bound (fraction of
 // the height from the bottom); the base radius, full-tilt fraction, dead zone, the resume window for
 // a system-cancelled stick finger, its grab factor, and how long the Ω latch leads the attack key.
@@ -138,6 +140,7 @@ static __weak DmGamepad *g_view;
     // ---- Hades II state ----
     CAShapeLayer *_h2key[KH_N]; CALayer *_h2icon[KH_N];   // combat keys: ring + the game's glyph (or the letter label when no glyph ships)
     CATextLayer *_h2label[KH_N];
+    CAShapeLayer *_h2ring, *_h2knob;                      // the floating base and its knob (own layers: reusing _ring[0] hid the 2D/3D stick)
     UITouch *_h2stick;                             // the finger holding the floating stick
     CGPoint _h2origin, _h2now;                     // the base centre (the touch-down point) and the finger now
     CGPoint _h2lostOrigin; double _h2lostS;        // the base centre and time of a cancelled stick finger (for the resume)
@@ -203,6 +206,11 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         _full = saved ? saved.boolValue : DM_GAME_PAD_FULL;
         NSNumber *h2saved = [NSUserDefaults.standardUserDefaults objectForKey:k_h2_key];
         _h2 = h2saved ? h2saved.boolValue : NO;
+        // The floating base and knob: own layers, not the fixed stick's — sharing them hid the 2D/3D stick.
+        _h2ring = shape(_controls); _h2ring.fillColor = k_ringFill.CGColor;
+        _h2knob = shape(_controls);
+        CAShapeLayer *h2in = [CAShapeLayer layer]; h2in.fillColor = nil; h2in.strokeColor = k_line.CGColor; h2in.lineWidth = 1.5;
+        [_h2knob addSublayer:h2in];
         [self applyLayout];
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
         [nc addObserver:self selector:@selector(padsChanged) name:GCControllerDidConnectNotification object:nil];
@@ -215,7 +223,7 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     for (int b = 0; b < B_N; b++) _key[b].hidden = _h2 || (fullOnly(b) && !_full);
     _ring[1].hidden = _knob[1].hidden = _h2 || !_full;
-    _ring[0].hidden = _knob[0].hidden = _h2;         // the H2 stick draws its own floating base
+    _ring[0].hidden = _knob[0].hidden = _h2;         // the H2 stick has its own floating base layers
     for (int i = 0; i < KH_N; i++) _h2key[i].hidden = !_h2;
     _swapLabel.string = _h2 ? @"H2" : _full ? @"3D" : @"2D";
     [CATransaction commit];
@@ -347,6 +355,15 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
         if ((v & 0xff) == C_H2KEY) h2 |= 1ull << k_h2[(int)(v >> 8)].b; }
     BOOL h2changed = h2 != _h2bits;
     _h2bits = h2;
+    // The H2 floating stick: axis values from the finger's offset to the base centre (the same
+    // curve as the fixed sticks — dead zone, then rising to full at KH_FULL of the base radius).
+    if (_h2 && _h2stick) {
+        CGPoint o = [self h2knobOffset]; CGFloat R = KH_STICK_R * self.u, d = hypot(o.x, o.y), dz = R * KH_DEAD;
+        if (d > dz) {
+            CGFloat m = fmin((d - dz) / (R * KH_FULL - dz), 1) / d;
+            ax[0] = (int32_t)lrint(o.x * m * 32767); ax[1] = (int32_t)lrint(-o.y * m * 32767);
+        }
+    }
     if (_h2 && _h2omega) {
         // A ZR-carrying key is down (or comes down): ZR leads it by the remainder of the window.
         BOOL carry = (h2 & ((1ull << B_Y) | (1ull << B_X))) != 0;
@@ -362,7 +379,7 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y); 
     BOOL changed = face != _faceBits || dpad != _dpadBits || btn != _btnBits || swap != _swapHeld || h2changed;
     _faceBits = face; _dpadBits = dpad; _btnBits = btn; _swapHeld = swap;
     pthread_mutex_lock(&g_mu);
-    if (_h2) { g_touch_btn = h2 | btn; g_touch_lx = ax[2]; g_touch_ly = ax[3]; g_touch_rx = 0; g_touch_ry = 0; }
+    if (_h2) { g_touch_btn = h2 | btn; g_touch_lx = ax[0]; g_touch_ly = ax[1]; g_touch_rx = 0; g_touch_ry = 0; }
     else { g_touch_btn = face | dpad | btn; g_touch_lx = ax[0]; g_touch_ly = ax[1]; g_touch_rx = ax[2]; g_touch_ry = ax[3]; }
     pthread_mutex_unlock(&g_mu);
     publish();
@@ -577,17 +594,17 @@ static void placeLabel(CATextLayer *t, CGPoint c, CGFloat fs) {
     }
     // the H2 floating base: hidden with no stick finger, drawn at its origin with the knob when held
     BOOL h2s = _h2 && _h2stick != nil;
-    _ring[0].hidden = !h2s; _knob[0].hidden = !h2s;
+    _h2ring.hidden = !h2s; _h2knob.hidden = !h2s;
     if (h2s) {
         CGFloat R = KH_STICK_R * self.u, k = K_KNOB_R * self.u;
-        setPath(_ring[0], circlePath(_h2origin, R));
-        _knob[0].bounds = CGRectMake(0, 0, 2 * k, 2 * k);
-        setPath(_knob[0], circlePath(CGPointMake(k, k), k));
-        CAShapeLayer *in = (CAShapeLayer *)_knob[0].sublayers.firstObject; CGPathRef ip = circlePath(CGPointMake(k, k), k * 0.62);
-        in.frame = _knob[0].bounds; in.path = ip; CGPathRelease(ip);
+        setPath(_h2ring, circlePath(_h2origin, R));
+        _h2knob.bounds = CGRectMake(0, 0, 2 * k, 2 * k);
+        setPath(_h2knob, circlePath(CGPointMake(k, k), k));
+        CAShapeLayer *in = (CAShapeLayer *)_h2knob.sublayers.firstObject; CGPathRef ip = circlePath(CGPointMake(k, k), k * 0.62);
+        in.frame = _h2knob.bounds; in.path = ip; CGPathRelease(ip);
         CGPoint o = [self h2knobOffset];
-        _knob[0].position = CGPointMake(_h2origin.x + o.x, _h2origin.y + o.y);
-        _knob[0].fillColor = k_on.CGColor;
+        _h2knob.position = CGPointMake(_h2origin.x + o.x, _h2origin.y + o.y);
+        _h2knob.fillColor = k_on.CGColor;
     }
     [CATransaction commit];
 }
