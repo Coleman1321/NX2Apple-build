@@ -4,9 +4,9 @@ A macOS front end that walks a new user through building a playable IPA from
 their own Switch game files — the GUI counterpart of the repository's scripts.
 
 <details>
-<summary>界面截图（点开）</summary>
+<summary>Screenshot (click to expand)</summary>
 
-<img src="screenshots/main-window.png" width="620" alt="NS Port Builder">
+<img src="screenshots/main-window-en.png" width="620" alt="NS Port Builder">
 
 </details>
 
@@ -54,6 +54,16 @@ installs), verifies `.NET` with `--list-sdks` (the extractor targets `net10.0`),
 and picks the first interpreter that can really import
 `lz4 capstone fontTools backports.zstd`. That same interpreter then runs the
 build.
+
+## Language
+
+The interface follows the device on first launch: any Chinese variant (Simplified, Traditional,
+Hong Kong, Taiwan) gets Chinese, **every other language gets English**. The `中文` / `EN` button in
+the title bar switches between them at any time and the choice is remembered.
+
+Every string lives in `Sources/NSPortBuilder/Localization.swift` as a `key: (Chinese, English)`
+pair; a missing translation shows up as the raw key rather than a blank control, and
+`L10n.selfCheck()` reports any empty side at launch.
 
 ## Notes
 

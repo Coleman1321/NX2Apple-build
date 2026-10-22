@@ -67,6 +67,9 @@ stage list with live percentages, and the archive shards produced at the end.
 cd frontend && swift run          # or double-click frontend/NS Port Builder.app
 ```
 
+The interface is bilingual: it follows the device (Chinese for any Chinese variant, **English for
+everything else**) and the `中文` / `EN` button in the title bar switches at any time.
+
 It runs the same scripts the command line does, so everything below still applies; see
 [frontend/README.md](frontend/README.md). The prebuilt app, and the release notes in English and
 Chinese (including which games are verified), are on the

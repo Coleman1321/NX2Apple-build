@@ -51,11 +51,14 @@ struct Slot: Identifiable {
     var paths: [String] = []
     var problem: String = ""
     var ok: Bool { paths.contains { FileManager.default.fileExists(atPath: $0) } }
-    var summary: String {
-        if !problem.isEmpty { return problem }
-        if paths.isEmpty { return optional ? "未选择（可选）" : "未选择" }
+    /// `problem` holds either a finished message or a key + arguments, resolved by the model
+    /// (it needs the current language, which a struct cannot read).
+    var problemText: String { problem }
+    func summary(_ t: (String) -> String) -> String {
+        if !problem.isEmpty { return problem.hasPrefix("data.") ? t(problem) : problem }
+        if paths.isEmpty { return optional ? t("data.notSelectedOptional") : t("data.notSelected") }
         if paths.count == 1 { return (paths[0] as NSString).lastPathComponent }
-        return "\(paths.count) 个文件：" + paths.map { ($0 as NSString).lastPathComponent }.joined(separator: "、")
+        return String(format: t("data.files"), paths.count) + paths.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
     }
 }
 
@@ -64,10 +67,10 @@ struct Slot: Identifiable {
 final class BuildModel: ObservableObject {
     @Published var gameDir = ""
     @Published var slots: [Slot] = [
-        Slot(id: "base", kind: .base, title: "游戏本体", optional: false),
-        Slot(id: "update", kind: .update, title: "更新包", optional: true),
-        Slot(id: "dlc", kind: .dlc, title: "追加内容 DLC", optional: true),
-        Slot(id: "keys", kind: .keys, title: "主机密钥 prod.keys", optional: false),
+        Slot(id: "base", kind: .base, title: "data.base", optional: false),
+        Slot(id: "update", kind: .update, title: "data.update", optional: true),
+        Slot(id: "dlc", kind: .dlc, title: "data.dlc", optional: true),
+        Slot(id: "keys", kind: .keys, title: "data.keys", optional: false),
     ]
     @Published var outDir = ""
     @Published var stages: [Stage] = []
@@ -79,6 +82,13 @@ final class BuildModel: ObservableObject {
     @Published var deps: [Dep] = []
     @Published var depsChecked = false
     @Published var pythonPath = ""
+
+    /// Interface language: the device's at first launch, then whatever the toggle was set to.
+    @Published var lang: Lang = Lang.initial() {
+        didSet { UserDefaults.standard.set(lang.rawValue, forKey: "uiLang") }
+    }
+    func t(_ key: String) -> String { L10n.string(key, lang) }
+    func toggleLang() { lang = lang.other }
 
     private var proc: Process?
     private var lineBuf = ""
@@ -152,12 +162,12 @@ final class BuildModel: ObservableObject {
             default: dlc.append(path)
             }
         }
-        updateSlot("base") { $0.paths = Array(base.prefix(1)); $0.problem = base.isEmpty ? "这个文件夹里没有本体 NSP（[xxxx…000]）" : "" }
+        updateSlot("base") { $0.paths = Array(base.prefix(1)); $0.problem = base.isEmpty ? "data.noBase" : "" }
         updateSlot("update") { $0.paths = Array(update.prefix(1)); $0.problem = "" }
         updateSlot("dlc") { $0.paths = dlc; $0.problem = "" }
         if let k = names.first(where: { $0 == "prod.keys" }) { updateSlot("keys") { $0.paths = [folder + "/" + k]; $0.problem = "" } }
         if base.isEmpty && update.isEmpty && dlc.isEmpty {
-            updateSlot("base") { $0.problem = "这个文件夹里没有 NSP/XCI" }
+            updateSlot("base") { $0.problem = "data.noNsp" }
         }
     }
 
@@ -198,7 +208,10 @@ final class BuildModel: ObservableObject {
 
     func startBuild() {
         running = true; done = false; doneNote = ""; stages = []; logTail = ""; lineBuf = ""
-        guard repoOK else { fail("仓库路径无效：\(repoPath.isEmpty ? "未选择" : repoPath)——用上方的「选择仓库…」指向本项目的 clone"); return }
+        guard repoOK else {
+            fail(repoPath.isEmpty ? t("msg.repoInvalidEmpty") : String(format: t("msg.repoInvalid"), shortPath(repoPath)))
+            return
+        }
         let py = pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath
 
         // One folder when everything lives together; otherwise a staging folder of symlinks.
@@ -214,7 +227,7 @@ final class BuildModel: ObservableObject {
                 let dst = tmp + "/" + (f as NSString).lastPathComponent
                 if (try? FileManager.default.createSymbolicLink(atPath: dst, withDestinationPath: f)) != nil { linked += 1 }
             }
-            if linked == 0 { fail("无法在暂存文件夹里建立链接（文件在不同磁盘？）"); return }
+            if linked == 0 { fail(t("msg.stagingFailed")); return }
             staging = tmp; inputDir = tmp
         } else { staging = nil }
 
@@ -223,7 +236,7 @@ final class BuildModel: ObservableObject {
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
                     "--work-dir", workDir, "--progress", "lines"]
         if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
-        say("运行：\(py) " + args.joined(separator: " "))
+        say(String(format: t("msg.running"), py) + " " + args.joined(separator: " "))
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: py)
@@ -245,8 +258,8 @@ final class BuildModel: ObservableObject {
                 } else {
                     if let i = self.stages.lastIndex(where: { $0.state == .running }) {
                         self.stages[i].state = .failed
-                        self.stages[i].detail = "退出码 \(status.terminationStatus)"
-                    } else { self.doneNote = "构建失败（退出码 \(status.terminationStatus)），见下方日志" }
+                        self.stages[i].detail = String(format: self.t("msg.exitCode"), status.terminationStatus)
+                    } else { self.doneNote = String(format: self.t("msg.buildFailed"), status.terminationStatus) }
                     self.cleanupStaging()
                 }
             }
@@ -257,14 +270,14 @@ final class BuildModel: ObservableObject {
             DispatchQueue.main.async { self?.ingest(s) }
         }
         proc = p
-        do { try p.run() } catch { fail("无法启动构建脚本：\(error.localizedDescription)") }
+        do { try p.run() } catch { fail(String(format: t("msg.launchFailed"), error.localizedDescription)) }
     }
 
     private func fail(_ why: String) { running = false; doneNote = why; say("✗ " + why); cleanupStaging() }
 
     func stop() {
         proc?.terminate(); running = false
-        doneNote = "已停止"; cleanupStaging()
+        doneNote = t("msg.stopped"); cleanupStaging()
     }
 
     private func cleanupStaging() {
@@ -352,16 +365,16 @@ final class BuildModel: ObservableObject {
             .filter { $0.hasPrefix("v") && fm.fileExists(atPath: extract + "/" + $0 + "/RomFS") }
             .sorted { (Int($0.dropFirst()) ?? 0) < (Int($1.dropFirst()) ?? 0) }
         guard let v = vers.last else {
-            stages.append(Stage(id: 1000, name: "RomFS 归档分片", state: .failed, detail: "找不到解出的 RomFS"))
-            doneNote = "IPA 已生成，但归档跳过：找不到 \(extract)/v*/RomFS"
+            stages.append(Stage(id: 1000, name: t("prog.archiveShort"), state: .failed, detail: t("prog.noRomfs")))
+            doneNote = String(format: t("msg.archiveSkipped"), extract)
             cleanupStaging(); return
         }
         let romfs = extract + "/" + v + "/RomFS"
         let dest = (outDir.isEmpty ? (basePath as NSString).deletingLastPathComponent : outDir) + "/archive"
         try? fm.createDirectory(atPath: dest, withIntermediateDirectories: true)
         let idx = 1000
-        stages.append(Stage(id: idx, name: "RomFS 归档分片（200 MiB/片）", state: .running, detail: v))
-        say("归档：\(romfs) → \(dest)/romfs.idx")
+        stages.append(Stage(id: idx, name: t("prog.archive"), state: .running, detail: v))
+        say(String(format: t("msg.archiveLog"), romfs, dest))
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath)
@@ -378,18 +391,22 @@ final class BuildModel: ObservableObject {
             self.cleanupStaging()
             if let i = self.stages.firstIndex(where: { $0.id == idx }) {
                 self.stages[i].state = st.terminationStatus == 0 ? .done : .failed
-                self.stages[i].detail = st.terminationStatus == 0 ? dest + "/romfs.idx" : "归档失败（退出码 \(st.terminationStatus)）"
+                self.stages[i].detail = st.terminationStatus == 0
+                    ? dest + "/romfs.idx"
+                    : String(format: self.t("msg.archiveFailed"), st.terminationStatus)
             }
             let n = ((try? FileManager.default.contentsOfDirectory(atPath: dest)) ?? []).filter { $0.hasPrefix("romfs") }.count
             self.running = false
             self.done = st.terminationStatus == 0
             self.doneNote = st.terminationStatus == 0
-                ? "完成：IPA + 归档 \(n) 个文件（\(dest)）"
-                : "IPA 已生成，归档失败"
+                ? String(format: self.t("msg.done"), n, dest)
+                : self.t("msg.archiveIpaOnly")
         }}
         do { try p.run() } catch {
-            if let i = stages.firstIndex(where: { $0.id == idx }) { stages[i].state = .failed; stages[i].detail = "无法启动 romfs_arc.py" }
-            running = false; doneNote = "IPA 已生成，归档失败"; cleanupStaging()
+            if let i = stages.firstIndex(where: { $0.id == idx }) {
+                stages[i].state = .failed; stages[i].detail = t("msg.archiveNoStart")
+            }
+            running = false; doneNote = t("msg.archiveIpaOnly"); cleanupStaging()
         }
     }
 
@@ -397,8 +414,8 @@ final class BuildModel: ObservableObject {
 
     struct Dep: Identifiable {
         let id: String
-        let name: String
-        let hint: String
+        let name: String      // an L10n key
+        let hint: String      // an L10n key
         var present: Bool
         var installing = false
         var detail = ""
@@ -474,33 +491,33 @@ final class BuildModel: ObservableObject {
 
         let xcode = FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
             && FileManager.default.isExecutableFile(atPath: "/usr/bin/xcodebuild")
-        out.append(Dep(id: "xcode", name: "Xcode + iOS SDK", hint: "App Store 安装，约 12 GB",
+        out.append(Dep(id: "xcode", name: "dep.xcode", hint: "dep.xcode.hint",
                        present: xcode, installCmd: []))
 
         let mt = runOK("/usr/bin/xcrun", ["-sdk", "macosx", "metal", "--version"])
-        out.append(Dep(id: "metal", name: "Metal Toolchain", hint: "xcodebuild -downloadComponent MetalToolchain（约 840 MB）",
+        out.append(Dep(id: "metal", name: "dep.metal", hint: "dep.metal.hint",
                        present: mt, installCmd: ["xcodebuild", "-downloadComponent", "MetalToolchain"]))
 
         let brew = firstExisting(["/opt/homebrew/bin/brew", "/usr/local/bin/brew"])
-        out.append(Dep(id: "brew", name: "Homebrew", hint: "brew.sh（后续包的前置）", present: brew != nil,
+        out.append(Dep(id: "brew", name: "dep.brew", hint: "dep.brew.hint", present: brew != nil,
                        installCmd: ["/bin/bash", "-c",
                          "NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""]))
-        for (pkg, hint) in [("xcodegen", "Xcode 工程生成"), ("zstd", "解压"), ("spirv-cross", "shader 转换")] {
+        for (pkg, key) in [("xcodegen", "dep.xcodegen"), ("zstd", "dep.zstd"), ("spirv-cross", "dep.spirv")] {
             let path = firstExisting(["/opt/homebrew/bin/\(pkg)", "/usr/local/bin/\(pkg)"])
-            out.append(Dep(id: "brew:" + pkg, name: "brew: " + pkg, hint: hint, present: path != nil,
+            out.append(Dep(id: "brew:" + pkg, name: key, hint: key + ".hint", present: path != nil,
                            detail: path ?? "",
                            installCmd: [(brew ?? "/opt/homebrew/bin/brew"), "install", pkg]))
         }
 
         let (dn, dnOK) = findDotnet()
-        out.append(Dep(id: "dotnet", name: ".NET SDK 10", hint: "dotnet-install.sh 装到 ~/.dotnet",
-                       present: dnOK, detail: dnOK ? dn : "没找到带 SDK 10 的 dotnet",
+        out.append(Dep(id: "dotnet", name: "dep.dotnet", hint: "dep.dotnet.hint",
+                       present: dnOK, detail: dnOK ? dn : "dep.dotnet.missing",
                        installCmd: ["/bin/bash", "-c",
                          "curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/di.sh && chmod +x /tmp/di.sh && /tmp/di.sh --channel 10.0 --install-dir $HOME/.dotnet"]))
 
         let (py, pyOK) = findPython()
-        out.append(Dep(id: "python", name: "Python + 包", hint: "lz4 capstone fonttools backports.zstd",
-                       present: pyOK, detail: pyOK ? py : "\(py) 缺包",
+        out.append(Dep(id: "python", name: "dep.python", hint: "dep.python.hint",
+                       present: pyOK, detail: pyOK ? py : "dep.python.missing:\(py)",
                        installCmd: [py, "-m", "pip", "install", "--user", "lz4", "capstone", "fonttools", "backports.zstd"]))
         return out
     }
@@ -543,6 +560,27 @@ final class BuildModel: ObservableObject {
     }
 
     var allDepsPresent: Bool { depsChecked && deps.allSatisfy { $0.present } }
+
+    /// Home shown as ~ (shorter in a one-line row, and it keeps the account name out of
+    /// screenshots).
+    func shortPath(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// A dependency row's second column: a path when there is one, else the translated hint.
+    /// `detail` carries either a real path, an L10n key, or "key:argument".
+    func depDetail(_ d: Dep) -> String {
+        let raw = d.detail
+        if raw.isEmpty { return t(d.hint) }
+        if raw.hasPrefix("/") || raw.hasPrefix("~") { return raw }
+        if let colon = raw.firstIndex(of: ":") {
+            let key = String(raw[..<colon]), arg = String(raw[raw.index(after: colon)...])
+            if L10n.table[key] != nil { return String(format: t(key), shortPath(arg)) }
+        }
+        if L10n.table[raw] != nil { return t(raw) }
+        return raw
+    }
 }
 
 // MARK: - View
@@ -590,18 +628,15 @@ struct ContentView: View {
                 .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.green.gradient))
             VStack(alignment: .leading, spacing: 3) {
                 Text("NS Port Builder").font(.system(size: 25, weight: .bold))
-                Text("Switch 游戏 → iPhone IPA · 归档分片 · 大内存")
+                Text(m.t("app.subtitle"))
                     .font(.system(size: 13)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            Button(m.lang.toggleLabel) { m.toggleLang() }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .help(m.lang == .zh ? "Switch to English" : "切换到中文")
         }
-    }
-
-    /// Show the home directory as ~ — shorter in a one-line row, and it keeps the
-    /// account name out of screenshots.
-    private func short(_ path: String) -> String {
-        let home = NSHomeDirectory()
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     private func sectionHeader(_ symbol: String, _ title: String, note: String = "") -> some View {
@@ -619,16 +654,17 @@ struct ContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    sectionHeader("shippingbox", "项目仓库", note: "App 调用这里的构建脚本")
-                    Button("选择仓库…") { pickRepo() }
+                    sectionHeader("shippingbox", m.t("repo.title"), note: m.t("repo.note"))
+                    Button(m.t("repo.choose")) { pickRepo() }
                 }
                 HStack(spacing: 10) {
                     Image(systemName: m.repoOK ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .font(.system(size: 15))
                         .foregroundStyle(m.repoOK ? Color.green : Color.red)
                         .frame(width: 20)
-                    Text(m.repoOK ? short(m.repoPath)
-                         : (m.repoPath.isEmpty ? "未找到本项目——点右侧选择 clone 的位置" : "不是本项目的仓库：\(short(m.repoPath))"))
+                    Text(m.repoOK ? m.shortPath(m.repoPath)
+                         : (m.repoPath.isEmpty ? m.t("repo.notFound")
+                            : String(format: m.t("repo.notRepo"), m.shortPath(m.repoPath))))
                         .font(.system(size: 12.5, design: .monospaced))
                         .foregroundStyle(m.repoOK ? Color.secondary : Color.orange)
                         .lineLimit(1).truncationMode(.head)
@@ -642,7 +678,7 @@ struct ContentView: View {
     private func pickRepo() {
         let d = NSOpenPanel()
         d.canChooseDirectories = true; d.canChooseFiles = false
-        d.message = "选择本项目（含 dm/tools/nx_extract/Program.cs）的文件夹"
+        d.message = m.t("repo.pickMessage")
         if d.runModal() == .OK, let u = d.url { m.repoPath = u.path }
     }
 
@@ -652,10 +688,10 @@ struct ContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    sectionHeader("folder", "游戏数据", note: "四项可以分开选")
-                    Button("选整个文件夹…") { pickFolder() }
+                    sectionHeader("folder", m.t("data.title"), note: m.t("data.note"))
+                    Button(m.t("data.pickFolder")) { pickFolder() }
                 }
-                Text(m.gameDir.isEmpty ? "同一个文件夹里都有时，用右上角一次选好" : short(m.gameDir))
+                Text(m.gameDir.isEmpty ? m.t("data.folderHint") : m.shortPath(m.gameDir))
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                 VStack(spacing: 9) {
@@ -665,15 +701,17 @@ struct ContentView: View {
                                 .font(.system(size: 15))
                                 .foregroundStyle(s.ok ? Color.green : (s.optional ? Color.secondary : Color.red))
                                 .frame(width: 20)
-                            Text(s.title).font(.system(size: 14)).frame(width: 140, alignment: .leading)
-                            Text(s.summary)
+                            Text(m.t(s.title)).font(.system(size: 14))
+                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                                .frame(width: 160, alignment: .leading)
+                            Text(s.summary(m.t))
                                 .font(.system(size: 12.5, design: .monospaced))
                                 .lineLimit(1).truncationMode(.middle)
                                 .foregroundStyle(s.ok ? Color.secondary : Color.orange)
                                 .help(s.paths.joined(separator: "\n"))
                             Spacer(minLength: 8)
-                            if !s.paths.isEmpty { Button("清除") { m.clear(s.id) }.controlSize(.small) }
-                            Button(s.paths.isEmpty ? "选择…" : "更换…") { m.pickFiles(kind: s.kind) }
+                            if !s.paths.isEmpty { Button(m.t("data.clear")) { m.clear(s.id) }.controlSize(.small) }
+                            Button(s.paths.isEmpty ? m.t("data.choose") : m.t("data.change")) { m.pickFiles(kind: s.kind) }
                         }
                     }
                 }
@@ -693,18 +731,18 @@ struct ContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    sectionHeader("wrench.and.screwdriver", "设备依赖")
+                    sectionHeader("wrench.and.screwdriver", m.t("dep.title"))
                     if !m.depsChecked {
                         ProgressView().controlSize(.small)
-                        Text("检测中…").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(m.t("dep.checking")).font(.system(size: 12)).foregroundStyle(.secondary)
                     } else if m.allDepsPresent {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        Text("全部就绪").font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
+                        Text(m.t("dep.allReady")).font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
                     } else {
-                        Text("缺 \(m.deps.filter { !$0.present }.count) 项")
+                        Text(String(format: m.t("dep.missing"), m.deps.filter { !$0.present }.count))
                             .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
                     }
-                    Button("重新检测") { m.checkDeps() }.controlSize(.small)
+                    Button(m.t("dep.recheck")) { m.checkDeps() }.controlSize(.small)
                 }
                 VStack(spacing: 7) {
                     ForEach(m.deps, id: \.id) { d in
@@ -717,16 +755,18 @@ struct ContentView: View {
                                     .foregroundStyle(d.present ? Color.green : Color.red)
                                     .frame(width: 20)
                             }
-                            Text(d.name).font(.system(size: 13.5)).frame(width: 140, alignment: .leading)
-                            Text(short(d.detail.isEmpty ? d.hint : d.detail))
+                            Text(m.t(d.name)).font(.system(size: 13.5))
+                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                                .frame(width: 160, alignment: .leading)
+                            Text(m.shortPath(m.depDetail(d)))
                                 .font(.system(size: 11.5, design: .monospaced))
                                 .foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle).help(d.hint)
+                                .lineLimit(1).truncationMode(.middle).help(m.t(d.hint))
                             Spacer(minLength: 8)
                             if d.installing {
-                                Text("安装中…").font(.system(size: 11.5)).foregroundStyle(.orange)
+                                Text(m.t("dep.installing")).font(.system(size: 11.5)).foregroundStyle(.orange)
                             } else if !d.present {
-                                Button(d.installCmd.isEmpty ? "打开 App Store" : "安装") { m.installDep(d) }
+                                Button(d.installCmd.isEmpty ? m.t("dep.openAppStore") : m.t("dep.install")) { m.installDep(d) }
                                     .controlSize(.small)
                             }
                         }
@@ -742,7 +782,7 @@ struct ContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    sectionHeader("chart.bar", "构建进度")
+                    sectionHeader("chart.bar", m.t("prog.title"))
                     if m.running { ProgressView().controlSize(.small) }
                     if let p = overallPercent {
                         Text("\(Int(p))%").font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -750,7 +790,7 @@ struct ContentView: View {
                     }
                 }
                 if m.stages.isEmpty {
-                    Text("开始构建后，这里显示脚本自己的每个阶段")
+                    Text(m.t("prog.empty"))
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
                 } else {
@@ -795,7 +835,7 @@ struct ContentView: View {
     private var logView: some View {
         ScrollViewReader { sp in
             ScrollView {
-                Text(m.logTail.isEmpty ? "构建日志会显示在这里" : m.logTail)
+                Text(m.logTail.isEmpty ? m.t("log.placeholder") : m.logTail)
                     .font(.system(size: 10, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -813,7 +853,7 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 14) {
-            Button(m.running ? "停止" : (m.done ? "重新构建" : "开始构建")) {
+            Button(m.running ? m.t("btn.stop") : (m.done ? m.t("btn.rebuild") : m.t("btn.build"))) {
                 m.running ? m.stop() : m.startBuild()
             }
             .buttonStyle(.borderedProminent)
@@ -823,7 +863,7 @@ struct ContentView: View {
 
             statusText
             Spacer(minLength: 8)
-            Button("输出目录…") {
+            Button(m.t("btn.outDir")) {
                 let d = NSOpenPanel(); d.canChooseDirectories = true; d.canChooseFiles = false
                 if d.runModal() == .OK, let u = d.url { m.outDir = u.path }
             }
@@ -837,15 +877,15 @@ struct ContentView: View {
             Text(m.doneNote).font(.system(size: 12))
                 .foregroundStyle(m.done ? Color.green : Color.orange).lineLimit(2)
         } else if !m.depsChecked {
-            Text("正在检测依赖…").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(m.t("status.checkingDeps")).font(.system(size: 12)).foregroundStyle(.secondary)
         } else if !m.allDepsPresent {
-            Text("先安装上方缺失的依赖").font(.system(size: 12)).foregroundStyle(.orange)
+            Text(m.t("status.installFirst")).font(.system(size: 12)).foregroundStyle(.orange)
         } else if !m.repoOK {
-            Text("先选择项目仓库").font(.system(size: 12)).foregroundStyle(.orange)
+            Text(m.t("status.chooseRepo")).font(.system(size: 12)).foregroundStyle(.orange)
         } else if m.basePath.isEmpty || m.keysPath.isEmpty {
-            Text("还需要选择游戏本体和 prod.keys").font(.system(size: 12)).foregroundStyle(.orange)
+            Text(m.t("status.needInputs")).font(.system(size: 12)).foregroundStyle(.orange)
         } else {
-            Text("输出：\(short(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir))")
+            Text(String(format: m.t("status.output"), m.shortPath(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir)))
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
         }

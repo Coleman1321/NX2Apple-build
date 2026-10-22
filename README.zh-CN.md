@@ -61,6 +61,9 @@ romfs.00 ... .125        126 个分片，每片 200 MiB，源文件字节原样
 cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
 ```
 
+界面支持中英双语：首次启动跟随设备语言（中文系统用中文，**其他所有语言都用英文**），标题栏的
+`中文` / `EN` 按钮可随时切换并记住选择。
+
 它调用的就是命令行那套脚本，下面的说明全部适用；细节见
 [frontend/README.md](frontend/README.md)。打包好的 App 和英中双语发布说明（含已验证游戏清单）在
 [Releases 页面](https://github.com/LNPANDY/nxnative-romfs-archive/releases)，仓库内也存了一份：
