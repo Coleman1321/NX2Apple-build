@@ -1168,6 +1168,19 @@ def build_shaders(py, repo, sh, xlate, env, logs, g, provisional=False, pkg_key=
     if provisional:
         PROG.set(step='chain header')
         run([py, repo / 'dm/gfx/tools/dmsh_chain.py', '--header'], logs / 'dmsh_chain.log', env=env)   # the profile's chain version header (dmsh_build checks it)
+    else:
+        # A registered profile ships its dmsh_chain.h, but the version is a hash of chain inputs
+        # (dmsh_*.py, ios_metal.py, the lock) that keep changing upstream — the .h committed with a
+        # game goes stale the moment one of them moves, and dmsh_build refuses to run. The RED names
+        # the operator command; the script runs it here instead, and only when the header is really
+        # behind (dmsh_chain --header rewrites unconditionally, and profile_files() fingerprints
+        # stat, so a blind rewrite would defeat the reuse check on every build).
+        want = subprocess.run([py, repo / 'dm/gfx/tools/dmsh_chain.py'], capture_output=True, text=True, env=env).stdout.strip()
+        have = re.search(r'"([0-9a-f]{12})"', g.table('dmsh_chain.h').read_text())
+        if want != (have.group(1) if have else None):
+            PROG.set(step='chain header')
+            say(f'the chain version this tree computes is {want} and the profile holds {have.group(1) if have else "none"}: regenerating dmsh_chain.h (dmsh_chain.py --header)')
+            run([py, repo / 'dm/gfx/tools/dmsh_chain.py', '--header'], logs / 'dmsh_chain.log', env=env)
     chain = re.search(r'#define DMSH_CHAIN "(.*)"', g.table('dmsh_chain.h').read_text()).group(1)
     libs = ios / f'b-{chain}'; kf = libs.with_name(libs.name + '.key')
     if pkg_key:
