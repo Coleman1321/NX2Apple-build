@@ -244,7 +244,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 
 ## 支持的游戏
 
-本仓库自带 46 个游戏 profile。profile 决定了一个游戏能不能构建——build ID、内存布局、
+本仓库自带 48 个游戏 profile。profile 决定了一个游戏能不能构建——build ID、内存布局、
 shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 归档层，让大体积游戏能装得下。
 
 | 游戏 | Title ID | 状态 |
@@ -254,6 +254,7 @@ shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 
 | Hollow Knight: Silksong | `010013C00E930000` | 有 profile，未在手机上验证 |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 有 profile，未在手机上验证 |
 | Super Mario Bros. Wonder | `010015100B514000` | 上游报告 iPhone 可玩 |
+| Mario Kart 8 Deluxe | `0100152000022000` | 上游报告 iPhone 可玩 |
 | Raging Loop | `010020400E1C2000` | 有 profile，未在手机上验证 |
 | ANIMAL WELL | `010020D01AD24000` | 上游报告 iPhone 可玩 |
 | Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 上游报告 iPhone 可玩 |
@@ -287,6 +288,7 @@ shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 有 profile，未在手机上验证 |
 | Monster Hunter Rise | `0100B04011742000` | 有 profile，未在手机上验证 |
 | Catherine: Full Body | `0100BF00112C0000` | 有 profile，未在手机上验证 |
+| Balatro | `0100CD801CE5E000` | 上游报告 iPhone 可玩 |
 | Rhythm Heaven Groove | `0100D9F01D474000` | 有 profile，未在手机上验证 |
 | Luigi's Mansion 3 | `0100DCA0064A6000` | 上游报告 iPhone 可玩 |
 | Patrick's Parabox | `0100E44016C22000` | 有 profile，未在手机上验证 |
@@ -295,13 +297,6 @@ shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 
 | Pokémon Legends: Z-A | `0100F43008C44000` | 有 profile，未在手机上验证 |
 | Brain Memory Training Academy | `0100F5D01DA3A000` | 有 profile，未在手机上验证 |
 | Super Mario Galaxy 2 | `0100FD8022DAA000` | 有 profile，未在手机上验证 |
-
-"Verified here" means the whole chain was exercised on this fork: build, install on an iPhone, run,
-and (for the archive) every file byte-compared against the source. "上游报告 iPhone 可玩"
-means the upstream project reports it working; this fork has not re-tested those. A profile alone
-does not guarantee a title boots — the host changes a game needs are part of upstream's work, and
-this fork follows it.
-
 
 「本 fork 已验证」表示完整走通了整条链路：构建、装到 iPhone、运行，归档还逐字节比对过源文件。
 「上游报告 iPhone 可玩」是上游项目的结果，本 fork 未重新测试。只有 profile 不保证游戏能启动——
