@@ -16,3 +16,6 @@ frontend/NS Port Builder.app/
 # Made from each shader build's Mac outputs (c1_guard.py, cb_extent.py; the NSP script makes them), not committed
 dm/games/*/c1_full.tsv
 dm/games/*/cb_extent.tsv
+
+# Swift build products at the repository root (a stray build run)
+.build/
