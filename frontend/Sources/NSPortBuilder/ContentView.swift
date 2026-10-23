@@ -444,6 +444,30 @@ final class BuildModel: ObservableObject {
 
     /// The Python that actually has lz4/capstone/fontTools/backports.zstd — the one
     /// the build must run under, not whatever /usr/bin/python3 happens to be.
+    /// The minimum the build scripts need. /usr/bin/python3 is 3.9 on a stock Mac and has none of
+    /// the packages; picking it made a build fail with a syntax error deep inside the script
+    /// (an f-string only 3.12 can parse) instead of a clear message here.
+    nonisolated static let minPython = (3, 9)
+
+    /// "3.12.4" → (3, 12). nil when the interpreter cannot be run.
+    nonisolated static func pythonVersion(_ path: String) -> (Int, Int)? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = ["-c", "import sys; print('%d.%d' % sys.version_info[:2])"]
+        let pipe = Pipe()
+        p.standardOutput = pipe; p.standardError = Pipe()
+        p.standardInput = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let parts = out.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ".")
+        guard parts.count == 2, let a = Int(parts[0]), let b = Int(parts[1]) else { return nil }
+        return (a, b)
+    }
+
+    /// Every python3 on this Mac, newest-looking first, each tried for a usable version and the
+    /// packages. Returns the one to build with, plus why the others were rejected for the message.
     nonisolated static func findPython() -> (path: String, ok: Bool) {
         var cands: [String] = []
         let fw = "/Library/Frameworks/Python.framework/Versions"
@@ -465,11 +489,14 @@ final class BuildModel: ObservableObject {
             cands += out.split(separator: "\n").map(String.init)
         }
         var seen = Set<String>()
+        var fallback: (String, (Int, Int))? = nil   // newest with an acceptable version but no packages
         for c in cands where !c.isEmpty && seen.insert(c).inserted {
-            guard FileManager.default.isExecutableFile(atPath: c) else { continue }
+            guard FileManager.default.isExecutableFile(atPath: c), let v = pythonVersion(c) else { continue }
+            guard v >= minPython else { continue }
             if runOK(c, ["-c", "import lz4, capstone, fontTools, backports.zstd"]) { return (c, true) }
+            if fallback == nil || v > fallback!.1 { fallback = (c, v) }
         }
-        return (cands.first { FileManager.default.isExecutableFile(atPath: $0) } ?? "/usr/bin/python3", false)
+        return (fallback?.0 ?? "/usr/bin/python3", false)
     }
 
     nonisolated static func findDotnet() -> (path: String, ok: Bool) {
@@ -516,8 +543,15 @@ final class BuildModel: ObservableObject {
                          "curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/di.sh && chmod +x /tmp/di.sh && /tmp/di.sh --channel 10.0 --install-dir $HOME/.dotnet"]))
 
         let (py, pyOK) = findPython()
+        let pyVer = pythonVersion(py).map { "\($0.0).\($0.1)" } ?? "?"
+        // A too-old interpreter is a different problem from a missing package: say which one it is,
+        // because the fix differs (install a newer Python vs pip install into this one).
+        let pyDetail = pyOK ? py
+            : (pythonVersion(py).map { $0 >= minPython } ?? false)
+                ? "dep.python.missing:\(py) (\(pyVer))"
+                : "dep.python.old:\(pyVer):\(minPython.0).\(minPython.1)"
         out.append(Dep(id: "python", name: "dep.python", hint: "dep.python.hint",
-                       present: pyOK, detail: pyOK ? py : "dep.python.missing:\(py)",
+                       present: pyOK, detail: pyDetail,
                        installCmd: [py, "-m", "pip", "install", "--user", "lz4", "capstone", "fonttools", "backports.zstd"]))
         return out
     }
