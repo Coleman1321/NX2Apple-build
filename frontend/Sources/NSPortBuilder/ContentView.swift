@@ -146,30 +146,64 @@ final class BuildModel: ObservableObject {
 
     /// Fill every slot from a folder: NSP/XCI classified by title ID (…000 base,
     /// …800 update, anything above base+0x1000 add-on content), plus prod.keys.
+    /// Subfolders are scanned too — a dump usually arrives as 本体/ 更新/ DLC/ folders —
+    /// pruning the build folders this pipeline itself writes so a rescan is not slow.
     func scan(folder: String) {
         gameDir = folder
         let fm = FileManager.default
-        let names = (try? fm.contentsOfDirectory(atPath: folder)) ?? []
-        var base: [String] = [], update: [String] = [], dlc: [String] = []
-        for n in names.sorted() {
-            let low = n.lowercased()
+        var base: [(String, Int)] = [], update: [(String, Int, Int)] = [], dlc: [String] = []
+        var keys: String?
+        var seen = 0
+        let enumerator = fm.enumerator(atPath: folder)
+        while let rel = enumerator?.nextObject() as? String {
+            if seen > 8000 { break }   // a pathological tree should not hang the picker
+            seen += 1
+            let name = (rel as NSString).lastPathComponent
+            if name.hasPrefix(".") { continue }
+            let path = folder + "/" + rel
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
+            let low = name.lowercased()
+            if isDir.boolValue {
+                // the pipeline's own output, and anything hidden: never walk back into those
+                if low == "archive" || low == "xcode" || low.hasSuffix("_build") || low.hasSuffix("_survey") { enumerator?.skipDescendants() }
+                continue
+            }
+            if keys == nil && (low == "prod.keys" || low.hasSuffix(".keys")) { keys = path; continue }
             guard low.hasSuffix(".nsp") || low.hasSuffix(".xci") else { continue }
-            let path = folder + "/" + n
-            guard ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int ?? 0) > 0 else { continue }
-            guard let tid = Self.titleID(n) else { continue }
+            let size = (try? fm.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
+            guard size > 0 else { continue }   // an incomplete download leaves 0-byte files behind
+            guard let tid = Self.titleID(name) else { continue }   // a name without [title ID] cannot be classified
             switch tid & 0xFFF {
-            case 0: base.append(path)
-            case 0x800: update.append(path)
+            case 0: base.append((path, size))
+            case 0x800: update.append((path, size, Self.updateVersion(name)))
             default: dlc.append(path)
             }
         }
-        updateSlot("base") { $0.paths = Array(base.prefix(1)); $0.problem = base.isEmpty ? "data.noBase" : "" }
-        updateSlot("update") { $0.paths = Array(update.prefix(1)); $0.problem = "" }
-        updateSlot("dlc") { $0.paths = dlc; $0.problem = "" }
-        if let k = names.first(where: { $0 == "prod.keys" }) { updateSlot("keys") { $0.paths = [folder + "/" + k]; $0.problem = "" } }
+        // several bases happen when a folder holds a repack beside the original: the largest wins
+        updateSlot("base") {
+            $0.paths = base.sorted { $0.1 > $1.1 }.prefix(1).map(\.0)
+            $0.problem = base.isEmpty ? "data.noBase" : ""
+        }
+        // several updates: the newest [vN] is the one a profile would pack
+        updateSlot("update") {
+            $0.paths = update.sorted { $0.2 > $1.2 }.prefix(1).map(\.0)
+            $0.problem = ""
+        }
+        updateSlot("dlc") { $0.paths = dlc.sorted(); $0.problem = "" }
+        updateSlot("keys") { $0.paths = keys.map { [$0] } ?? []; $0.problem = "" }
         if base.isEmpty && update.isEmpty && dlc.isEmpty {
             updateSlot("base") { $0.problem = "data.noNsp" }
         }
+    }
+
+    /// The [vN] in a file name, 0 when absent — used to pick the newest of several updates.
+    nonisolated static func updateVersion(_ name: String) -> Int {
+        guard let re = try? NSRegularExpression(pattern: #"\[v(\d+)\]"#) else { return 0 }
+        let ns = name as NSString
+        guard let m = re.firstMatch(in: name, range: NSRange(location: 0, length: ns.length)),
+              let v = Int(ns.substring(with: m.range(at: 1))) else { return 0 }
+        return v
     }
 
     func pickFiles(kind: InputKind) {
