@@ -242,6 +242,71 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 
 挂载点按**目录**识别，而不是按名字：各游戏的挂载名不同（多数是 `rom`，《王国之泪》是 `content`）。
 
+## 支持的游戏
+
+本仓库自带 46 个游戏 profile。profile 决定了一个游戏能不能构建——build ID、内存布局、
+shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 归档层，让大体积游戏能装得下。
+
+| 游戏 | Title ID | 状态 |
+|---|---|---|
+| Super Mario Odyssey | `0100000000010000` | 上游报告 iPhone 可玩 |
+| Ace Attorney Investigations Collection | `010005501E68C000` | 有 profile，未在手机上验证 |
+| Hollow Knight: Silksong | `010013C00E930000` | 有 profile，未在手机上验证 |
+| Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 有 profile，未在手机上验证 |
+| Super Mario Bros. Wonder | `010015100B514000` | 上游报告 iPhone 可玩 |
+| Raging Loop | `010020400E1C2000` | 有 profile，未在手机上验证 |
+| ANIMAL WELL | `010020D01AD24000` | 上游报告 iPhone 可玩 |
+| Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 上游报告 iPhone 可玩 |
+| Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 上游报告 iPhone 可玩 |
+| Celeste | `01002B30028F6000` | 有 profile，未在手机上验证 |
+| The Great Ace Attorney Chronicles | `010036E00FB20000` | 上游报告 iPhone 可玩 |
+| FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | 有 profile，未在手机上验证 |
+| 13 Sentinels: Aegis Rim | `01003FC01670C000` | 上游报告 iPhone 可玩 |
+| DARK SOULS: REMASTERED | `01004AB00A260000` | 有 profile，未在手机上验证 |
+| Monster Train 2 | `010051701FB46000` | 上游报告 iPhone 可玩 |
+| OCTOPATH TRAVELER 0 | `01005270232F2000` | 有 profile，未在手机上验证 |
+| Hades | `0100535012974000` | 上游报告 iPhone 可玩 |
+| Fire Emblem: Three Houses | `010055D009F78000` | 上游报告 iPhone 可玩 |
+| FINAL FANTASY RESONANCE | `0100606026F12000` | 上游报告 iPhone 可玩 |
+| Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 有 profile，未在手机上验证 |
+| Unicorn Overlord | `010069401ADB8000` | 有 profile，未在手机上验证 |
+| The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 上游报告 iPhone 可玩 |
+| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 有 profile，未在手机上验证 |
+| Animal Crossing: New Horizons | `01006F8002326000` | 有 profile，未在手机上验证 |
+| AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | 上游报告 iPhone 可玩 |
+| The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 上游报告 iPhone 可玩 |
+| AI: THE SOMNIUM FILES | `010089B00D09C000` | 上游报告 iPhone 可玩 |
+| STEINS;GATE RE:BOOT | `01008BC024FDE000` | 有 profile，未在手机上验证 |
+| Metroid Dread | `010093801237C000` | 上游报告 iPhone 可玩 |
+| Super Mario Galaxy | `010099C022B96000` | 上游报告 iPhone 可玩 |
+| Captain Toad: Treasure Tracker | `01009BF0072D4000` | 有 profile，未在手机上验证 |
+| Hades II | `0100A00019DE0000` | **本 fork 已验证** —— Hades II —— 构建、安装、在 iPhone 上运行；33 个文件的归档 |
+| Cuphead | `0100A5C00D162000` | 有 profile，未在手机上验证 |
+| Fire Emblem Engage | `0100A6301214E000` | 上游报告 iPhone 可玩 |
+| Absolum | `0100A83022A22000` | 有 profile，未在手机上验证 |
+| DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 有 profile，未在手机上验证 |
+| Monster Hunter Rise | `0100B04011742000` | 有 profile，未在手机上验证 |
+| Catherine: Full Body | `0100BF00112C0000` | 有 profile，未在手机上验证 |
+| Rhythm Heaven Groove | `0100D9F01D474000` | 有 profile，未在手机上验证 |
+| Luigi's Mansion 3 | `0100DCA0064A6000` | 上游报告 iPhone 可玩 |
+| Patrick's Parabox | `0100E44016C22000` | 有 profile，未在手机上验证 |
+| Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 有 profile，未在手机上验证 |
+| The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | **本 fork 已验证** —— 王国之泪 —— 构建、安装、在 iPhone 上运行；304,243 个文件归档成 127 片，逐字节校验通过 |
+| Pokémon Legends: Z-A | `0100F43008C44000` | 有 profile，未在手机上验证 |
+| Brain Memory Training Academy | `0100F5D01DA3A000` | 有 profile，未在手机上验证 |
+| Super Mario Galaxy 2 | `0100FD8022DAA000` | 有 profile，未在手机上验证 |
+
+"Verified here" means the whole chain was exercised on this fork: build, install on an iPhone, run,
+and (for the archive) every file byte-compared against the source. "上游报告 iPhone 可玩"
+means the upstream project reports it working; this fork has not re-tested those. A profile alone
+does not guarantee a title boots — the host changes a game needs are part of upstream's work, and
+this fork follows it.
+
+
+「本 fork 已验证」表示完整走通了整条链路：构建、装到 iPhone、运行，归档还逐字节比对过源文件。
+「上游报告 iPhone 可玩」是上游项目的结果，本 fork 未重新测试。只有 profile 不保证游戏能启动——
+游戏所需的宿主改动属于上游工作，本 fork 跟随上游。
+
 ## 验证情况
 
 - **《王国之泪》**（0100F2C0115B6000，v1.0.0 + 更新 1.4.3）：304,243 个文件打成 127 个文件；

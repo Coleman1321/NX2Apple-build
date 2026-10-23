@@ -25,10 +25,6 @@ modules	main subsdk0 sdk
 romfs_marker	asset/MaterialEditor.rdb.bin
 zip_store	.bin:.bin1:.bin2:.bin3:.file:.rdb:.webm:.metallib
 
-# SDK 9: the shared-font address points at the TTF itself, and the game wants NVN API 53 (as SDK 8 / 10)
-shared_font	ttf
-device_api	53.313
-
 # ---- Memory ----
 # The NPDM declares no system resource (META +0x14 = 0): the game uses SetHeapSize. Link's Awakening's partition until measured
 mem_reserve	0x100000000
@@ -45,16 +41,21 @@ mem_used	0x4800000
 # nvnMemoryPoolFlushMappedRange; without the upload the intro movie stayed black under its "+ Skip" prompt
 tex_flush_upload	on
 
-# ---- NVN driver constant segments (Mario's values, the translator's built-in layout) ----
-nvn_tex_base	0x20
-nvn_tex_slots	32
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
+# ---- Presentation ----
+# The Switch version shows 30 fps and steps the game a fixed amount per update: a KIDS task waits out 1/30 s and steps the game clock by 1/30 s, the battle steps 1 / the game's frame-rate
+# block (30.0), and the event scripts step by the KTGL device's frame rate (59.94 / present interval 2). On 1.3.0 main (patch_nso.py FRAME_STEP) three stubs run the updates at the cap
+# and set all three to it (with only a 1/60 s wait the clock and the battles ran at twice real time); the host paces the presents at 60 fps, 30 when 60 does not hold.
+# 0 = the Switch original
+fps_target	60
+# The updates step by the cap whatever the hold, so holding late frames only paces the screen: frames are shown as soon as they are ready (the 60fps IPA ran battles at 45–57).
+# The iPhone battle's GPU going from 10 to 41 ms a frame was first read as its GPU clock following the hold; the same rise came with no hold at all: the battle runs about 1,000 to
+# 2,800 compute dispatches a frame after its first cutscene, which each had an encoder of their own (nvn_mtl.m dispatch_enc)
+fps_hold	off
+# KTGL binds whole mesh pools (up to ~590,000 vertices) and its soldiers' Half2 / Short2 attributes feed integer shader inputs, which the replay converts on the CPU:
+# over the bound ranges that was millions of vertices a frame in battle (26 fps at any target on the Mac); only over the vertices each draw reads. Shadow vertex inputs
+# (nvn_mtl.m vin_on) now take those attributes on the GPU; this still serves the draws that keep the CPU conversion (transform feedback, DM_NVN_VCONV_CPU=1)
+vconv_range	on
 
 # ---- Shader split ----
 shader_groups	/asset/system.rdb=system /asset/MaterialEditor.rdb=material /asset/FieldEditor4.rdb=field /asset/CharacterEditor.rdb=character /asset/EventMaker3.rdb=event /asset/ScreenLayout.rdb=layout /asset/RRPreview.rdb=preview /asset/KIDSSystemResource.rdb=kids
 shader_note	Hyrule Warriors: Age of Calamity shaders
-shader_main_glslc	on
-shader_separable	on

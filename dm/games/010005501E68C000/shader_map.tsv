@@ -1,4 +1,4 @@
-# kind: evidence  Ace Attorney Investigations Collection shaders (Unity Shader in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)
+# kind: evidence  Ace Attorney Investigations Collection shaders (Unity Shader / GLSLC in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)
 # column 5 records where each key first appears; this game has no PC version to pair with
 package	index	stage	dm_ctl_sha16	source
 ps_assets.bin	0	pixel	0b06b1dd56a1d46b	/Data/StreamingAssets/aa/Switch/gk1_3d_assets_all_1b905485efebcefe1935aa56174b9d06.bundle:CAB-d29090a312ddbfe6a168c5d439c559bc#Unlit/Transparent Colored#var19.1
@@ -4952,3 +4952,14 @@ ps_engine.bin	256	pixel	32643b6d855a41a6	/Data/StreamingAssets/aa/Switch/979ebaa
 vs_engine.bin	256	vertex	9bb9f25b7d580d92	/Data/StreamingAssets/aa/Switch/979ebaa5a17ed2834a47fa1373510580_unitybuiltinshaders_ee931e49447544578e64857d426f80ec.bundle:CAB-4ea63932e2e0a85490d7f9eebee4670d#Unlit/Texture#var19.1
 ps_engine.bin	257	pixel	0830d959f0d373da	/Data/StreamingAssets/aa/Switch/979ebaa5a17ed2834a47fa1373510580_unitybuiltinshaders_ee931e49447544578e64857d426f80ec.bundle:CAB-4ea63932e2e0a85490d7f9eebee4670d#Unlit/Transparent#var19.1
 vs_engine.bin	257	vertex	f8bbf4fbd13d3781	/Data/StreamingAssets/aa/Switch/979ebaa5a17ed2834a47fa1373510580_unitybuiltinshaders_ee931e49447544578e64857d426f80ec.bundle:CAB-4ea63932e2e0a85490d7f9eebee4670d#Unlit/Transparent#var19.1
+vs_main.bin	0	vertex	24e4cd391d993137	main#GLSLC@0x4621478
+vs_main.bin	1	vertex	d19b47f9ea5c3cfe	main#GLSLC@0x4622038
+ps_main.bin	0	pixel	17b082dfef30eba9	main#GLSLC@0x4622cf8
+ps_main.bin	1	pixel	889465df59838dc0	main#GLSLC@0x46239b8
+ps_main.bin	2	pixel	e46f75eec323df1d	main#GLSLC@0x4624778
+ps_main.bin	3	pixel	a23dda46c07f800d	main#GLSLC@0x4625638
+ps_main.bin	4	pixel	bf76784f461275c7	main#GLSLC@0x46262f8
+ps_main.bin	5	pixel	abcdb66b44f1313d	main#GLSLC@0x46270b8
+vs_main.bin	2	vertex	f3a2af4f812f7366	main#GLSLC@0x4627f78
+ps_main.bin	6	pixel	987c069874bbe974	main#GLSLC@0x4628b38
+cs_main.bin	0	compute	552bbc8ffc2459e4	main#GLSLC@0x46296f8

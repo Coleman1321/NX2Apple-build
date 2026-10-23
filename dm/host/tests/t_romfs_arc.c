@@ -18,8 +18,9 @@ int main(int argc, char **argv) {
     CHECK(romfsarc_active(), "active after open");
     CHECK(h.file_count > 0 && h.dir_count > 0 && h.shard_count > 0, "header counts");
 
-    // Root listing: every entry is reachable and the count agrees
+    // Every file: stat it, read it whole, and read it in two halves at an offset
     romfsarc_ent *ents = calloc(4096, sizeof *ents);
+    char path[1024] = "";
     int listed = romfsarc_list("", ents, 4096);
     CHECK(listed > 0, "root has entries, got %d", listed);
     CHECK(listed == romfsarc_count(""), "list and count agree at the root: %d vs %d", listed, romfsarc_count(""));

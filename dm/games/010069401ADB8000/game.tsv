@@ -2,7 +2,7 @@
 # Format: see dm/games/README.md
 # Vanillaware's own engine (as 13 Sentinels: Aegis Rim), SDK 16.2.4, NVN; all data is in 7 CRI CPK archives (Unicorn.CPK, UnicornPatch.CPK and one per language), audio is CRI ADX2 with Opus streams
 #   (nn::codec's hardware multi-stream decoder, replaced by the SDK's software one in hle_codec.c).
-# The shaders are not in RomFS: 2188 GLSLC compiler outputs (magic 0x19866891) are compiled into main's read-only segment (1725 distinct shaders, read by shader_split.py, see shader_main_glslc)
+# The shaders are not in RomFS: 2188 GLSLC compiler outputs (magic 0x19866891) are compiled into main's read-only segment (1725 distinct shaders, read by shader_split.py glslc_shaders)
 # The two DLC (indices 1 and 2) are licences only: their RomFS holds just the SDK's placeholder file
 
 # ---- Identity ----
@@ -40,18 +40,6 @@ mem_used	0x5c00000
 # without it a thread's ring heap keeps base 0 and the game writes to 0x268 right after the title screen
 alloc_big_align	on
 
-# ---- NVN driver constant segments (dmsh_build.py at packaging, nvn_mtl.m filled at run time) ----
-# Mario's values. All 1725 shaders translate with these bases and every binding resolves to a slot (dmsh_build: 0 shaders with unresolved bindings); textures go through bindless handles
-nvn_tex_base	0x20
-nvn_tex_slots	32
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
-
-# ---- Shader split (shader_split.py; GLSLC outputs in main) ----
-shader_main_glslc	on
-# Each GLSLC output becomes a single-stage program, and the program bound per draw combines a vertex and a pixel shader: the pair table is written as a cover (shader_split.py separable_pairs)
-shader_separable	on
+# ---- Shader split (shader_split.py: GLSLC outputs in main, each a single-stage program; the program bound per draw combines a vertex and a pixel shader) ----
 shader_groups	/=romfs
 shader_note	Unicorn Overlord shaders

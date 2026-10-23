@@ -23,10 +23,8 @@ package	v327680
 shader_versions	v327680
 
 # ---- Graphics ----
-# Vulkan through the host's layer (dm/gfx/vk/hle_vk.m). Hagi generates its GX shaders as SPIR-V at run time from data/database/pip/pipelineDB.pip during "Initializing system...":
-# 3,089 modules with the 56 built into main. The NSP script captures them by booting the game on the Mac (vk_capture.tsv lists the keys); vk_shaders.py translates the capture
-graphics	vulkan
-shader_vk_capture	on
+# main imports Vulkan, not NVN: the host's Vulkan layer (dm/gfx/vk/hle_vk.m). Hagi generates its GX shaders as SPIR-V at run time from data/database/pip/pipelineDB.pip during "Initializing system...":
+# 3,089 modules with the 56 built into main, and the RomFS has no SPIR-V file, so the NSP script captures them by booting the game on the Mac (vk_capture.tsv lists the keys); vk_shaders.py translates the capture
 
 # ---- Files ----
 # load order as on Horizon: main, subsdk*, sdk; subsdk1–4 (GLSLC, nn::pcm, NVIDIA's OpenGL and Vulkan drivers) are replaced by the host's Vulkan layer and not loaded
@@ -42,14 +40,6 @@ mem_reserve	0x40000000
 mem_alias	0x10000000
 mem_stack	0x10000000
 app_pool	0xCD500000
-
-# ---- NVN driver constant segments (Mario's values; the game has no NVN shaders) ----
-nvn_tex_base	0x20
-nvn_tex_slots	32
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
 
 # ---- Shader split ----
 shader_note	Super Mario Galaxy has no NVN shaders (its SPIR-V shaders go through the Vulkan layer)

@@ -263,6 +263,67 @@ past the end would return the next file's bytes).
 The mount is recognised by its **directory**, not its name: titles differ (`rom` for most games,
 `content` for Tears of the Kingdom).
 
+## Games
+
+46 game profiles ship with this repository. A profile is what makes a build possible —
+the game's build IDs, memory layout, shader tables and per-game switches — and this fork adds the
+RomFS archive layer on top, so a large game can be installed at all.
+
+| Game | Title ID | Status |
+|---|---|---|
+| Super Mario Odyssey | `0100000000010000` | Playable on an iPhone (upstream) |
+| Ace Attorney Investigations Collection | `010005501E68C000` | Profile present; not verified on a phone |
+| Hollow Knight: Silksong | `010013C00E930000` | Profile present; not verified on a phone |
+| Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | Profile present; not verified on a phone |
+| Super Mario Bros. Wonder | `010015100B514000` | Playable on an iPhone (upstream) |
+| Raging Loop | `010020400E1C2000` | Profile present; not verified on a phone |
+| ANIMAL WELL | `010020D01AD24000` | Playable on an iPhone (upstream) |
+| Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | Playable on an iPhone (upstream) |
+| Hyrule Warriors: Age of Calamity | `01002B00111A2000` | Playable on an iPhone (upstream) |
+| Celeste | `01002B30028F6000` | Profile present; not verified on a phone |
+| The Great Ace Attorney Chronicles | `010036E00FB20000` | Playable on an iPhone (upstream) |
+| FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | Profile present; not verified on a phone |
+| 13 Sentinels: Aegis Rim | `01003FC01670C000` | Playable on an iPhone (upstream) |
+| DARK SOULS: REMASTERED | `01004AB00A260000` | Profile present; not verified on a phone |
+| Monster Train 2 | `010051701FB46000` | Playable on an iPhone (upstream) |
+| OCTOPATH TRAVELER 0 | `01005270232F2000` | Profile present; not verified on a phone |
+| Hades | `0100535012974000` | Playable on an iPhone (upstream) |
+| Fire Emblem: Three Houses | `010055D009F78000` | Playable on an iPhone (upstream) |
+| FINAL FANTASY RESONANCE | `0100606026F12000` | Playable on an iPhone (upstream) |
+| Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | Profile present; not verified on a phone |
+| Unicorn Overlord | `010069401ADB8000` | Profile present; not verified on a phone |
+| The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | Playable on an iPhone (upstream) |
+| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | Profile present; not verified on a phone |
+| Animal Crossing: New Horizons | `01006F8002326000` | Profile present; not verified on a phone |
+| AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | Playable on an iPhone (upstream) |
+| The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | Playable on an iPhone (upstream) |
+| AI: THE SOMNIUM FILES | `010089B00D09C000` | Playable on an iPhone (upstream) |
+| STEINS;GATE RE:BOOT | `01008BC024FDE000` | Profile present; not verified on a phone |
+| Metroid Dread | `010093801237C000` | Playable on an iPhone (upstream) |
+| Super Mario Galaxy | `010099C022B96000` | Playable on an iPhone (upstream) |
+| Captain Toad: Treasure Tracker | `01009BF0072D4000` | Profile present; not verified on a phone |
+| Hades II | `0100A00019DE0000` | **Verified here** — Hades II — builds, installs and runs on an iPhone; 33-file archive |
+| Cuphead | `0100A5C00D162000` | Profile present; not verified on a phone |
+| Fire Emblem Engage | `0100A6301214E000` | Playable on an iPhone (upstream) |
+| Absolum | `0100A83022A22000` | Profile present; not verified on a phone |
+| DRAGON QUEST VII Reimagined | `0100A9D01C446000` | Profile present; not verified on a phone |
+| Monster Hunter Rise | `0100B04011742000` | Profile present; not verified on a phone |
+| Catherine: Full Body | `0100BF00112C0000` | Profile present; not verified on a phone |
+| Rhythm Heaven Groove | `0100D9F01D474000` | Profile present; not verified on a phone |
+| Luigi's Mansion 3 | `0100DCA0064A6000` | Playable on an iPhone (upstream) |
+| Patrick's Parabox | `0100E44016C22000` | Profile present; not verified on a phone |
+| Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | Profile present; not verified on a phone |
+| The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | **Verified here** — Tears of the Kingdom — builds, installs and runs on an iPhone; 304,243 files into 127 archive shards, byte-verified |
+| Pokémon Legends: Z-A | `0100F43008C44000` | Profile present; not verified on a phone |
+| Brain Memory Training Academy | `0100F5D01DA3A000` | Profile present; not verified on a phone |
+| Super Mario Galaxy 2 | `0100FD8022DAA000` | Profile present; not verified on a phone |
+
+"Verified here" means the whole chain was exercised on this fork: build, install on an iPhone, run,
+and (for the archive) every file byte-compared against the source. "Playable on an iPhone (upstream)"
+means the upstream project reports it working; this fork has not re-tested those. A profile alone
+does not guarantee a title boots — the host changes a game needs are part of upstream's work, and
+this fork follows it.
+
 ## Verified on
 
 - **Tears of the Kingdom** (0100F2C0115B6000, v1.0.0 + update 1.4.3): 304,243 files packed into 127

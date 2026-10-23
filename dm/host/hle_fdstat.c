@@ -21,8 +21,8 @@ static void *fdstat_main(void *arg) {
             if (S_ISSOCK(st.st_mode)) { sock++; continue; } if (S_ISFIFO(st.st_mode)) { pipe_++; continue; } if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode)) { dev++; continue; }
             char p[MAXPATHLEN] = ""; if (fcntl(fd, F_GETPATH, p) || !p[0]) { if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) other++; else kq++; continue; }
             if (S_ISDIR(st.st_mode)) dir++;
-            if (strstr(p, "romfs") || strstr(p, "RomFS") || strstr(p, "/data/hd/") || strstr(p, ".casc") || strstr(p, "/Data/data/")) romfs++;
-            else if (strstr(p, "/save") || strstr(p, ".d2s") || strstr(p, ".d2i") || strstr(p, "/user/")) save++;
+            if (strstr(p, "romfs") || strstr(p, "RomFS")) romfs++;
+            else if (strstr(p, "/save")) save++;
             else if (strstr(p, ".log") || strstr(p, "boot.txt") || strstr(p, ".jsonl") || strstr(p, ".tsv")) logf++;
             else if (strstr(p, "/Caches/") || strstr(p, "/cache/") || strstr(p, ".metallib") || strstr(p, "/tmp/") || strstr(p, "/var/folders/")) cache++;
             else { other++; if (sk < 300) { const char *b = strrchr(p, '/'); sk += snprintf(sample + sk, sizeof sample - sk, " %s", b ? b + 1 : p); } } }

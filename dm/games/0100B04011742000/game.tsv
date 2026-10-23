@@ -29,7 +29,6 @@ romfs_marker	re_chunk_000.pak.patch_001.pak
 zip_store	.pak:.metallib
 
 # ---- Graphics ----
-graphics	nvn
 # RE Engine fills small textures from the CPU in place (the menu cursor's 8 × 8 BC1 texture: 32 bytes written into a CPU-visible pool, no packaged layout, no WriteTexels), so they must be uploaded
 # from guest memory (without these keys the cursor highlight composited black on black and the menus looked frozen)
 tex_flush_upload	on
@@ -48,18 +47,6 @@ app_pool	0xCD500000
 # SetHeapSize asked for the pool − 64 MB − bss (0xc9000000) with the default, but the loaded modules take 0x13fa4000 (main alone 314 MB of text + ro + data), so the request failed at boot:
 # used memory must cover them, as on hardware. With 328 MB the heap is 2.88 GB
 mem_used	0x14800000
-
-# ---- NVN driver constant segments ----
-# Two texture handle tables, both in use (a census of the translated shaders' texture names): bound / combined handles at c2 0x20 + 8 × slot (nvnCommandBufferBindTexture; fp_t_tcb_8 … _1E),
-# separate texture binds at 0x168 + 8 × slot (fp_t_tcb_5A, fp_t_cb196610_1017815A), separate samplers at 0x568; many shaders take a constant sampler ID instead (handle type 3, fp_t_cb65538_3041005C)
-nvn_tex_base	0x20
-nvn_tex_slots	32
-nvn_septex_base	0x168
-nvn_septex_slots	128
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
 
 # ---- Shader split ----
 shader_groups	re_chunk=sdf

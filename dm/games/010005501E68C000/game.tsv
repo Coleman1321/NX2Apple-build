@@ -40,15 +40,6 @@ mem_alias	0x118000000
 mem_stack	0x10000000
 app_pool	0x40000000
 
-# ---- NVN driver constant segments (dmsh_build.py at packaging, nvn_mtl.m filled at run time) ----
-# Engage's layout (Unity binds separate textures and samplers): c2 texture handle table 0x168 + 8 r (128 slots), separate sampler table 0x568 + 8 r
-nvn_tex_base	0x168
-nvn_tex_slots	128
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
-
 # ---- Shader split (shader_split.py; Unity Shader objects, read by unityfs.py) ----
 # engine built-ins (the unitybuiltinshaders bundle, Resources/) go to engine, the player's serialized files to data, the other Addressables bundles to assets
 shader_groups	_unitybuiltinshaders_=engine /Resources/=engine /StreamingAssets/=assets /Data/=data

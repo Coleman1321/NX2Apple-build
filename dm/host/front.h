@@ -4,14 +4,9 @@
 void front_run(void (*guest)(void));
 // The CAMetalLayer the graphics backend presents frames to (NULL when there is no window)
 void *front_metal_layer(void);
-// Game output resolution (the rewriter's PARAMS resolution parameter slot): docked = 1 docked mode / 0 handheld mode, returns (u64)height << 32 | width.
-// The original game's constants are 1600x900 / 1280x720 (16:9); front ends with a different screen aspect ratio widen at the same height, and the game natively renders at the new width and re-lays out the UI (width ≤ 4096).
+// The highest refresh rate of the window's screen in Hz, 0 = not known (Mac front_mac.m; none on iOS, whose screens run at multiples of 60 Hz). Any thread
+int front_screen_max_fps(void);
 #include <stdint.h>
-uint64_t front_game_res(int docked);
-// Whether the front end runs true fullscreen (the picture fills the whole window at the screen's
-// native aspect ratio). iOS only; the Mac front end has no implementation, callers treat it as 0.
-// The iOS gamepad uses it to normalize touch points on the whole view instead of the 16:9 block.
-int front_ios_true_fullscreen(void);
 // Text input box (for the software keyboard swkbd): the main thread shows a native input box and the calling thread blocks until the user confirms / cancels.
 // All text is UTF-8; max_chars is the maximum character count (0 = unlimited, only a hint for the front end; truncation is done uniformly by the caller hle_swkbd.c in UTF-16 units).
 // Confirm returns 1 and writes the result into out (including the terminating 0); cancel returns 0;
@@ -24,7 +19,7 @@ void dm_host_preload_start(int argc, char **argv);
 
 // Touchscreen (implemented by the host's hle_touch.c; called by the iOS / Mac front end): whenever the set of touch points changes (down / move / up / cancel) the whole set is pushed once; n = 0 = all lifted.
 // id = finger slot number 0–15 (the lowest free slot on down, unchanged until up; used directly as finger_id); x / y = normalized coordinates [0,1) on the output frame, origin at top left.
-// The host converts to the panel coordinates the game reads, 1280x720 (x·1280, y·720, the way main 0x1b65260 reads them), and latches short taps (a down and up between two reads is reported at least once). May be called from any thread.
+// The host converts to the panel coordinates the game reads, 1280x720 (x·1280, y·720), and latches short taps (a down and up between two reads is reported at least once). May be called from any thread.
 typedef struct { uint32_t id; float x, y; } dm_touch;
 void dm_touch_set(const dm_touch *t, int n);
 

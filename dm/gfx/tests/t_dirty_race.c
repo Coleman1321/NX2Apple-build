@@ -1,4 +1,4 @@
-// Ordering race between "set read-only" and "unprotect before write" in dirty-page tracking (from d2r-mobile ef9b1ff13's t_dirty_race.c, stubs adapted to this repository's tracking table).
+// Ordering race between "set read-only" and "unprotect before write" in dirty-page tracking (originally a test of the host this one started as, stubs adapted to this repository's tracking table).
 // Scene: thread A, in nvn_dirty_protect, has already recorded the page state as "protected" while its mprotect has not landed yet; thread B now arrives with prep_write (the unprotect done before the host writes into guest memory,
 // for example the movie decoder thread writing a frame into texture storage, or a disk read into a guest buffer). Old implementation: B sets the state back to "none", then A's mprotect lands => the page is read-only while its state is "none" --
 //   when the host reads a file into it again: prep_write sees state "none" and skips, the system call does not go through the page-fault handler and fails with EFAULT; when a game thread writes directly: the page-fault handler only returns "re-execute" and spins forever.

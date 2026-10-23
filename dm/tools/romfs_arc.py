@@ -29,7 +29,6 @@ HDR = 64
 FILEREC = 32
 DIRREC = 16
 CHILD_DIR = 0x80000000
-MAX_SHARDS = 256   # must match romfs_arc.c (one fd slot per shard)
 
 
 def fnv1a(data, h=0xCBF29CE484222325):
@@ -63,37 +62,24 @@ def walk(root):
 
 
 def plan_shards(files, shard_bytes):
-    """Assign every file to a shard. Files are grouped by their top-level directory so one shard
-    holds one kind of content, and each group is cut greedily into shards of at most shard_bytes.
-    A single file larger than shard_bytes gets a shard of its own (the cap is a packing target, not
-    a hard limit), so a shard can exceed it when it holds such a file alone."""
+    """Assign every file a shard. Files are grouped by top-level directory, keeping the walk order
+    (path order) inside a group; a group is cut into shards of at most shard_bytes."""
     by_top = collections.OrderedDict()
     for rel, size in files:
-        parts = rel.split("/", 1)
-        top = parts[0] if len(parts) > 1 else ""   # a file at the root has no group of its own
+        top = rel.split("/", 1)[0]
         by_top.setdefault(top, []).append((rel, size))
-    # Big groups first, so the shard count stays close to size total / shard_bytes
+    # Big groups first, so the shard count stays close to the size total / shard_bytes
     order = sorted(by_top.items(), key=lambda kv: -sum(s for _, s in kv[1]))
-    assign = {}
-    shard = 0                    # the shard currently being filled
-    cur = 0                      # bytes placed in it
-    used_any = False             # whether the current shard holds anything
-    for _top, items in order:
+    assign, shard = {}, 0
+    for top, items in order:
+        cur = 0
         for rel, size in items:
-            # Start a new shard when the next file would overflow this one. A file that is itself
-            # larger than the cap still goes into a fresh shard, alone.
-            if used_any and cur + size > shard_bytes:
+            if cur and cur + size > shard_bytes:
                 shard += 1
                 cur = 0
-                used_any = False
             assign[rel] = (shard, cur)
             cur += size
-            used_any = True
-        # A group boundary ends the current shard, so one shard never mixes two top-level directories
-        if used_any:
-            shard += 1
-            cur = 0
-            used_any = False
+        shard += 1
     return assign, shard
 
 
@@ -103,13 +89,6 @@ def pack(romfs, base, shard_mib):
     total = sum(s for _, s in files)
     print(f"pack: {len(files):,} files, {len(dirs):,} directories, {total / 2**30:.2f} GiB", flush=True)
     assign, nshard = plan_shards(files, shard_bytes)
-    # The reader keeps one fd slot per shard (MAX_SHARDS in romfs_arc.h) and rejects an index above
-    # it. Fail here instead of producing an archive the app cannot open, and say how to fix it.
-    if nshard > MAX_SHARDS:
-        # Minimum shard size that fits the total into MAX_SHARDS, rounded up to a whole MiB
-        need_mib = max(1, (total + MAX_SHARDS - 1) // MAX_SHARDS // (1 << 20) + 1)
-        sys.exit(f"[RED] {nshard} shards needed, but the reader supports {MAX_SHARDS}. "
-                 f"Raise --shard-mib to at least {need_mib}.")
     print(f"pack: {nshard} shards of at most {shard_mib} MiB", flush=True)
 
     # Shard files: written in path order within each shard
@@ -131,10 +110,7 @@ def pack(romfs, base, shard_mib):
                         out.write(buf)
                         left -= len(buf)
                 written += size
-        sz = os.path.getsize(path)
-        # Sub-MiB shards are real (a group of tiny files); show KiB so they do not read as empty
-        shown = f"{sz / 2**20:.0f} MiB" if sz >= (1 << 20) else f"{sz / 1024:.0f} KiB"
-        print(f"\r  shard {i + 1}/{nshard}: {shown}", end="", flush=True)
+        print(f"\r  shard {i + 1}/{nshard}: {os.path.getsize(path) / 2**20:.0f} MiB", end="", flush=True)
     print(f"\n  wrote {written / 2**30:.2f} GiB in {nshard} shards", flush=True)
 
     # Name pool

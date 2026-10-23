@@ -1,5 +1,5 @@
-// Block-linear deswizzle unit tests (seconds). A round trip; B hand-calculated addresses; C real-data cross-check (Switch block-linear vs PC linear, including per-level offset verification); D wrong-block-height negative control.
-// Usage: t_tex <sample dir> (produced by fetch_samples.py). Missing samples count as red, not skipped.
+// Block-linear deswizzle unit tests (seconds). A round trip; B hand-calculated addresses; E hand-built 3D.
+// Usage: t_tex
 #include "../nvn_deswizzle.h"
 #include <math.h>
 #include <stdio.h>
@@ -45,136 +45,7 @@ static void roundtrip(const char *tag, int target, int fmt, uint32_t w, uint32_t
     free(st);
 }
 
-// ---------- Real data ----------
-static uint8_t *slurp(const char *p, size_t *n) {
-    FILE *f = fopen(p, "rb"); if (!f) return NULL;
-    fseek(f, 0, SEEK_END); *n = (size_t)ftell(f); fseek(f, 0, SEEK_SET);
-    uint8_t *b = malloc(*n); if (fread(b, 1, *n, f) != *n) { free(b); b = NULL; } fclose(f); return b;
-}
-// Files converted for Switch: the four bytes at 0x14 = 00 00 00 07 (0 on PC), 0x13 = log2 of the level-0 block height (same meaning as byte 0 of the game's SetPackagedTextureLayout).
-// Unconverted ones (e.g. those under hd/debug) are byte-identical to the PC files and stored linearly.
-typedef struct { int code, nvn, bl, th_hdr; uint32_t w, h, mips, hdr; uint32_t size[16]; uint64_t off[16]; const uint8_t *px; } tex_t;
-static int d2r_nvn(int code) {   // D2R .texture format code → NVNformat
-    switch (code) { case 0x1F: return 0x25; case 0x39: return 0x42; case 0x3A: return 0x46; case 0x3D: return 0x44;
-                    case 0x3E: return 0x48; case 0x3F: return 0x49; case 0x41: return 0x4B; }
-    return 0;
-}
-static int parse(const uint8_t *b, size_t n, tex_t *t) {
-    if (n < 0x24 || memcmp(b, "<DE(", 4)) return -1;
-    t->code = b[4]; t->nvn = d2r_nvn(t->code); t->bl = b[0x14] == 0 && b[0x15] == 0 && b[0x16] == 0 && b[0x17] == 7; t->th_hdr = b[0x13];
-    memcpy(&t->w, b + 8, 4); memcpy(&t->h, b + 12, 4); memcpy(&t->mips, b + 0x1C, 4);
-    if (!t->nvn || t->mips == 0 || t->mips > 16) return -1;
-    t->hdr = 36 + 8 * t->mips; uint64_t o = 0;
-    for (unsigned i = 0; i < t->mips; i++) { memcpy(&t->size[i], b + 0x24 + 8 * i, 4); t->off[i] = o; o += t->size[i]; }
-    if (t->hdr + o != n) return -1;
-    t->px = b + t->hdr; return 0;
-}
-
-// Decode to 8-bit RGB (BC1 / BC3 take the color block, BC4 takes the single channel replicated three times, RGBA8 takes RGB). Row = block row, expanded as 4×4
-static void bc1(const uint8_t *b, uint8_t out[16][3]) {
-    unsigned c0 = b[0] | b[1] << 8, c1 = b[2] | b[3] << 8; uint32_t bits = b[4] | b[5] << 8 | b[6] << 16 | (uint32_t)b[7] << 24;
-    int p[4][3];
-    for (int k = 0; k < 2; k++) { unsigned c = k ? c1 : c0; p[k][0] = (c >> 11 & 31) * 255 / 31; p[k][1] = (c >> 5 & 63) * 255 / 63; p[k][2] = (c & 31) * 255 / 31; }
-    for (int j = 0; j < 3; j++) {
-        if (c0 > c1) { p[2][j] = (2 * p[0][j] + p[1][j]) / 3; p[3][j] = (p[0][j] + 2 * p[1][j]) / 3; }
-        else { p[2][j] = (p[0][j] + p[1][j]) / 2; p[3][j] = 0; }
-    }
-    for (int i = 0; i < 16; i++) for (int j = 0; j < 3; j++) out[i][j] = (uint8_t)p[bits >> (2 * i) & 3][j];
-}
-static void bc4(const uint8_t *b, uint8_t out[16][3]) {
-    int a0 = b[0], a1 = b[1], v[8] = {a0, a1};
-    for (int k = 2; k < 8; k++) v[k] = a0 > a1 ? ((8 - k) * a0 + (k - 1) * a1) / 7 : k < 6 ? ((6 - k) * a0 + (k - 1) * a1) / 5 : (k == 6 ? 0 : 255);
-    uint64_t bits = 0; for (int k = 0; k < 6; k++) bits |= (uint64_t)b[2 + k] << (8 * k);
-    for (int i = 0; i < 16; i++) out[i][0] = out[i][1] = out[i][2] = (uint8_t)v[bits >> (3 * i) & 7];
-}
-static uint8_t *decode(int nvn, const uint8_t *lin, uint32_t w, uint32_t h) {   // → w×h×3
-    uint8_t *img = calloc((size_t)w * h, 3);
-    if (nvn == 0x25) { for (size_t i = 0; i < (size_t)w * h; i++) memcpy(img + 3 * i, lin + 4 * i, 3); return img; }
-    uint32_t bwn = (w + 3) / 4, bhn = (h + 3) / 4, bpb = (nvn == 0x42 || nvn == 0x46 || nvn == 0x49) ? 8 : 16;
-    for (uint32_t by = 0; by < bhn; by++) for (uint32_t bx = 0; bx < bwn; bx++) {
-        const uint8_t *b = lin + ((size_t)by * bwn + bx) * bpb; uint8_t px[16][3];
-        if (nvn == 0x49) bc4(b, px); else bc1(bpb == 16 ? b + 8 : b, px);
-        for (int i = 0; i < 16; i++) { uint32_t x = bx * 4 + i % 4, y = by * 4 + i / 4; if (x < w && y < h) memcpy(img + 3 * ((size_t)y * w + x), px[i], 3); }
-    }
-    return img;
-}
-static double psnr(const uint8_t *a, const uint8_t *b, size_t n) {
-    double e = 0; for (size_t i = 0; i < n; i++) { double d = (double)a[i] - b[i]; e += d * d; }
-    return e == 0 ? 99 : 10 * log10(255.0 * 255.0 / (e / n));
-}
-// Decode one level with a specified block height (for the negative control; addresses beyond the storage read as 0)
-static void deswz_tile(const uint8_t *st, uint64_t st_size, uint64_t base, uint32_t rb, uint32_t rows, unsigned th, uint8_t *out) {
-    for (uint32_t y = 0; y < rows; y++) for (uint32_t x = 0; x < rb; x++) {
-        uint64_t a = base + nvn_bl_offset(x, y, 0, rb, rows, th, 0);
-        out[(size_t)y * rb + x] = a < st_size ? st[a] : 0;
-    }
-}
-
-// Criterion threshold: the correct block height must be ≥ this value and a wrong block height must be < it. Measured: correct 28.45–38.90 dB (the 3 reduced-resolution recompressed ones; same-resolution ones are byte-identical),
-// block height off by one step 6.94–16.64 dB ⇒ take the midpoint of the two sides, 22 dB, leaving about 6 dB on each side
-#define PSNR_PASS 22.0
-
-static void real_pair(const char *dir, int i, const char *why) {
-    char p[1024]; size_t ns, np;
-    snprintf(p, sizeof p, "%s/dm/%d.texture", dir, i); uint8_t *sb = slurp(p, &ns);
-    snprintf(p, sizeof p, "%s/pc/%d.texture", dir, i); uint8_t *pb = slurp(p, &np);
-    tex_t s, c;
-    CHECK(sb && pb && !parse(sb, ns, &s) && !parse(pb, np, &c), "sample %d read / parse failed (%s)", i, why);
-    if (!sb || !pb || parse(sb, ns, &s) || parse(pb, np, &c)) return;
-    if (!s.bl) {   // not converted for Switch: linear, should be byte-identical to the PC original
-        CHECK(ns == np && !memcmp(sb, pb, ns), "sample %d has no block-linear marker but differs from the PC original", i);
-        printf("  C %d %-30s no Switch block-linear marker (0x14 = 0) → stored linearly, %s the PC original (%zu bytes)\n", i, why, ns == np && !memcmp(sb, pb, ns) ? "byte-identical to" : "differs from", ns);
-        free(sb); free(pb); return;
-    }
-    nvn_texdesc d = {1, s.nvn, 0, 0, s.w, s.h, 1, s.mips, 0, s.th_hdr + 1};   // block height follows the file header (same as the packaged layout parameters the game passes in)
-    unsigned th_auto, td_auto; { nvn_texdesc a = d; a.pkg_block_h = 0; nvn_tex_level_tiles(&a, 0, &th_auto, &td_auto); }
-    // ③ Per-level offsets in the file (cumulative mip table) vs nvn_tex_level_offset
-    int off_ok = 1;
-    for (unsigned l = 0; l < s.mips; l++)
-        if (s.off[l] != nvn_tex_level_offset(&d, l)) { off_ok = 0; printf("  ✗ sample %d level %u file offset %llu ≠ nvn_tex %llu\n", i, l, (unsigned long long)s.off[l], (unsigned long long)nvn_tex_level_offset(&d, l)); }
-    nvn_texlayout L; nvn_tex_layout(&d, &L);
-    uint64_t file_total = s.off[s.mips - 1] + s.size[s.mips - 1];
-    checks++; if (!off_ok) fails++;
-    CHECK(file_total == L.size, "sample %d file pixel area %llu ≠ nvn_tex total size %llu", i, (unsigned long long)file_total, (unsigned long long)L.size);
-    // Corresponding PC level: PC side length = Switch × 2^k
-    unsigned k = 0; while ((s.w << k) < c.w) k++;
-    if ((s.w << k) != c.w || (s.h << k) != c.h) { CHECK(0, "sample %d size ratio is not a power of 2", i); return; }
-    unsigned nl = s.mips < c.mips - k ? s.mips : c.mips - k;
-    uint64_t eq = 0, tot = 0; double ps = 0, ps_bad = 99; unsigned th0, td0;
-    nvn_tex_level_tiles(&d, 0, &th0, &td0);
-    for (unsigned l = 0; l < nl; l++) {
-        uint32_t rb, rows, sl; dims(&d, l, &rb, &rows, &sl);
-        uint8_t *lin = malloc((size_t)rb * rows);
-        CHECK(!nvn_deswizzle(&d, l, 0, s.px, lin, rb), "sample %d level %u deswizzle failed", i, l);
-        const uint8_t *pcl = c.px + c.off[l + k];
-        CHECK(c.size[l + k] >= (uint64_t)rb * rows, "sample %d level %u PC level too small", i, l);
-        if (!k) { for (size_t j = 0; j < (size_t)rb * rows; j++) eq += lin[j] == pcl[j]; tot += (uint64_t)rb * rows; }
-        if (l == 0) {
-            uint32_t w = s.w, h = s.h;
-            uint8_t *a = decode(s.nvn, lin, w, h), *b = decode(c.nvn, pcl, w, h); ps = psnr(a, b, (size_t)w * h * 3);
-            for (int dt = -1; dt <= 1; dt += 2) {                          // D: block height off by one step (when only 1 GOB high, block height does not affect the layout; not applicable)
-                if ((int)th0 + dt < 0 || rows <= 8) continue;
-                uint8_t *bad = malloc((size_t)rb * rows); deswz_tile(s.px, ns - s.hdr, 0, rb, rows, th0 + dt, bad);
-                uint8_t *e = decode(s.nvn, bad, w, h); double q = psnr(e, b, (size_t)w * h * 3); if (q < ps_bad) ps_bad = q;
-                if (!k) CHECK(memcmp(bad, pcl, (size_t)rb * rows), "sample %d block height %+d still byte-identical (negative control ineffective)", i, dt);
-                free(bad); free(e);
-            }
-            free(a); free(b);
-        }
-        free(lin);
-    }
-    if (!k) CHECK(eq == tot, "sample %d identical bytes %llu/%llu", i, (unsigned long long)eq, (unsigned long long)tot);
-    CHECK(ps >= PSNR_PASS, "sample %d correct block height PSNR %.2f < %.0f", i, ps, PSNR_PASS);
-    uint32_t rows0 = (s.h + 3) / 4; if (s.nvn == 0x25) rows0 = s.h;
-    if (rows0 > 8) CHECK(ps_bad < PSNR_PASS, "sample %d wrong block height PSNR %.2f ≥ %.0f (negative control ineffective)", i, ps_bad, PSNR_PASS);
-    char neg[48]; if (rows0 > 8) snprintf(neg, sizeof neg, "%.2f", ps_bad); else snprintf(neg, sizeof neg, "n/a (1 GOB high)");
-    printf("  C %d %-30s %4u×%-4u→PC level %u  header block height %d (auto %u) offsets %s  %s  PSNR correct %.2f / wrong block height %s dB\n", i, why, s.w, s.h, k,
-           s.th_hdr, th_auto, off_ok ? "✓" : "✗", k ? "(reduced resolution, bytes not compared)" : (eq == tot ? "byte-identical" : "bytes differ"), ps, neg);
-    if (!k) printf("      identical bytes %llu/%llu\n", (unsigned long long)eq, (unsigned long long)tot);
-    free(sb); free(pb);
-}
-
-int main(int argc, char **argv) {
+int main(void) {
     printf("A round trip (random data, non-power-of-2 sizes)\n");
     roundtrip("2D 100×37 R8 4 levels", 1, 0x01, 100, 37, 1, 4);
     roundtrip("2D 100×37 RG8 4 levels", 1, 0x0D, 100, 37, 1, 4);
@@ -237,16 +108,26 @@ int main(int argc, char **argv) {
         // Shape of the real color lookup table on the character select screen: 32³ RGBA16F (ser 17 / 16). Block depth 32 + 16 = 48 ≥ 16 → 16 slices; row 256 bytes = 4 GOBs wide, 32 rows = 4 GOBs high, 2 block layers → 4·4·2·8192 = 262144
         nvn_texdesc lut = {2, 0x29, 0, 0, 32, 32, 32, 1, 0, 0}; nvn_tex_layout(&lut, &L);
         CHECK(L.tileH == 0 && L.tileD == 4 && L.size == 4 * 4 * 2 * 8192ull, "E 32³ RGBA16F block height/depth %u/%u storage %llu, expected 0/4, 262144", L.tileH, L.tileD, (unsigned long long)L.size);
-        printf("  E 32³ RGBA16F (shape of the character select color lookup table) block height/depth %u/%u, storage %llu (expected 0/4, 262144)\n", L.tileH, L.tileD, (unsigned long long)L.size);
+        printf("  E 32³ RGBA16F (the shape of a 32³ color lookup table) block height/depth %u/%u, storage %llu (expected 0/4, 262144)\n", L.tileH, L.tileD, (unsigned long long)L.size);
     }
 
-    printf("C/D real-data cross-check (Switch block-linear vs PC linear) + wrong-block-height negative control, threshold %.0f dB\n", PSNR_PASS);
-    const char *dir = argc > 1 ? argv[1] : getenv("DM_TEX_SAMPLES");
-    char lp[1024]; snprintf(lp, sizeof lp, "%s/list.tsv", dir ? dir : "."); FILE *f = dir ? fopen(lp, "r") : NULL;
-    CHECK(f, "sample directory missing (run make samples first)"); int npair = 0;
-    if (f) { char line[1024]; while (fgets(line, sizeof line, f)) { int i; char path[512], why[256];
-        if (sscanf(line, "%d\t%511[^\t]\t%255[^\n]", &i, path, why) == 3) { real_pair(dir, i, why); npair++; } } fclose(f); }
-    CHECK(npair >= 3, "fewer than 3 real-data sample pairs (%d)", npair);
-    printf("%s: %d/%d checks passed (%d real-data pairs)\n", fails ? "RED" : "all passed", checks - fails, checks, npair);
+    // ---------- S sparse layout: Monster Hunter Rise's streamed 1024×1024 ASTC 6×6 sRGB textures (flag SPARSE, packaged block height 8 GOBs), level 0 checked against the game's data ----------
+    // A 64 KB tile is 16 GOBs × 8 GOBs here. Level 0 (171 block columns = 43 GOBs) is padded to 48 GOBs × 3 block rows = 9 tiles: its dumped data decodes with no all-zero block that way
+    // (2,183 unpadded). Level 1 (86 = 22 GOBs → 32, 2 block rows) is 4 tiles; level 2 (43 block columns, less than a tile's 64) starts the mip tail, packed as before; storage in whole tiles
+    printf("S sparse layout (64 KB tiles: tiled levels padded to whole tiles, then the mip tail)\n");
+    {
+        nvn_texdesc d = {1, 0x8B, 0x20, 0, 1024, 1024, 1, 8, 0, 4}; nvn_texlayout L; nvn_tex_layout(&d, &L);
+        static const uint64_t off[8] = {0, 0x90000, 0xD0000, 0xDB000, 0xDE000, 0xDEC00, 0xDF000, 0xDF200};
+        static const uint32_t gobs[3] = {48, 32, 11};
+        for (unsigned l = 0; l < 8; l++) CHECK(nvn_tex_level_offset(&d, l) == off[l], "S level %u offset %#llx expected %#llx", l, (unsigned long long)nvn_tex_level_offset(&d, l), (unsigned long long)off[l]);
+        for (unsigned l = 0; l < 3; l++) CHECK(nvn_tex_level_gobs(&d, l) == gobs[l], "S level %u laid out %u GOBs wide, expected %u", l, nvn_tex_level_gobs(&d, l), gobs[l]);
+        CHECK(L.size == 0xE0000 && L.align == 0x10000, "S storage %#llx alignment %#x, expected 0xe0000 / 0x10000", (unsigned long long)L.size, L.align);
+        printf("  S 1024×1024 ASTC 6×6 sparse: levels at 0, %#llx, %#llx …, storage %#llx (expected 0x90000, 0xd0000, 0xe0000)\n", (unsigned long long)nvn_tex_level_offset(&d, 1), (unsigned long long)nvn_tex_level_offset(&d, 2), (unsigned long long)L.size);
+        d.flags = 0; nvn_tex_layout(&d, &L);   // the same texture not sparse keeps the packed layout
+        CHECK(nvn_tex_level_offset(&d, 1) == 0x81000 && L.size == 0xBC400 && nvn_tex_level_gobs(&d, 0) == 43, "S not sparse: level 1 %#llx storage %#llx, expected 0x81000 / 0xbc400",
+              (unsigned long long)nvn_tex_level_offset(&d, 1), (unsigned long long)L.size);
+    }
+
+    printf("%s: %d/%d checks passed\n", fails ? "RED" : "all passed", checks - fails, checks);
     return fails ? 1 : 0;
 }

@@ -19,8 +19,8 @@ pad_layout	full
 # The frame-interval controller (60 fps cuts in patch_nso.py) and dynamic resolution read the GPU time between the frame's two timestamp reports: each report takes its segment's GPU start / end
 gpu_timestamps	segment
 # 60 fps (30 on the Switch): the host decides each frame's step in whole vsyncs and holds the frame that long (rewriter stubs at setWaitVsyncInterval and VFR::updateInterval,
-# patch_nso.py FRAME_STEP); 30 when 60 does not hold, game time = real time. DM_FPS_TARGET=30 (Documents/env.txt on the iPhone) saves power; DM_FRAME_STEP=legacy runs the game's own
-# interval controller with the 60 fps cuts instead
+# patch_nso.py FRAME_STEP); 30 when 60 does not hold, game time = real time. DM_FPS_TARGET=30 (Documents/env.txt on the iPhone) saves power; 0 runs the game's own
+# interval controller (with the 60 fps cuts, which also serve while the game's VFR override is set)
 fps_target	60
 
 # ---- Versions ----
@@ -40,15 +40,6 @@ mem_reserve	0x100000000
 mem_alias	0x10000000
 mem_stack	0x10000000
 app_pool	0xCD500000
-
-# ---- NVN driver constant segments (dmsh_build.py at packaging, nvn_mtl.m filled at run time) ----
-# Mario's values until measured over all shaders
-nvn_tex_base	0x20
-nvn_tex_slots	32
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
 
 # ---- Shader split (shader_split.py) ----
 shader_groups	/Shader/=shader /Effect/=effect /Layout/=layout /System/=gsys /Terrain/=terrain

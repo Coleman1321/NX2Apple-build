@@ -37,22 +37,13 @@ mem_alias	0xC8000000
 mem_stack	0x10000000
 app_pool	0xCD500000
 
-# ---- NVN driver constant segments ----
-# Measured over all translated shaders: separate textures at c2 0x168 + 8 x slot and separate samplers at 0x568 + 8 x slot (Ryujinx handles fp_t_cb196610_1056805A ...: words 0x5A / 0x15A), as Engage
-nvn_tex_base	0x168
-nvn_tex_slots	128
-nvn_samp_base	0x568
-nvn_img_base	0x120
-nvn_img_slots	8
-nvn_ssbo_bases	vs=0x110 ps=0x510 cs=0x310
-# 61 vertex shaders pick one of several c2 table slots at run time (texture slots 0-10, samplers 0-4), which the translator cannot trace to one slot: slot indices in c2, the bound slots in its arrays
+# ---- NVN ----
+# 61 vertex shaders pick one of several c2 table slots at run time (separate texture slots 0-10, samplers 0-4), which the translator cannot trace to one slot: slot indices in c2, the bound slots in its arrays
 tex_dyn_slots	on
 
 # ---- Shader split ----
 # The decoded shader code archives: the engine's global shaders and the game's material shaders
 shader_groups	ShaderArchive-Global-=global ShaderArchive-=game
 shader_note	OCTOPATH TRAVELER 0 shaders
-# The shaders are in the shader code archives of the pak (ShaderArchive-*.ushaderbytecode), each one Oodle-compressed; the NSP script decodes them on the Mac with the game's own Oodle (uepak.py, DM_OODLE_JOB)
-shader_ue_decode	on
-# Unreal combines vertex and pixel shaders per draw from its pipeline state: every vertex shader is made to link with any pixel shader
-shader_separable	on
+# The shaders are in the shader code archives of the pak (ShaderArchive-*.ushaderbytecode), each one Oodle-compressed; the NSP script decodes them on the Mac with the game's own Oodle (uepak.py, DM_OODLE_JOB),
+# as for any game with Unreal paks. Unreal combines vertex and pixel shaders per draw from its pipeline state, so every vertex shader is made to link with any pixel shader (shader_split.py separable_pairs)

@@ -18,10 +18,8 @@ static void t_free(void *p) { if (!p) return; atomic_fetch_sub(&g_live_blocks, 1
 #undef calloc
 #undef free
 
-pthread_key_t g_key18, g_keytls, g_keytlr, g_keygate, g_keyres[2], g_keyaspect, g_keyaspectui;
+pthread_key_t g_key18, g_keytls, g_keytlr, g_keygate;
 void dm_gate(void) {}
-uint64_t dm_game_res(int i) { (void)i; return 0; }
-uint64_t front_game_res(int i) { (void)i; return 0; }
 
 static int fails, checks;
 #define EXPECT(name, want, got) do { long w_ = (long)(want), g_ = (long)(got); checks++; printf("%-46s expected %-8ld → got %-8ld %s\n", name, w_, g_, w_ == g_ ? "✓" : "✗"); if (w_ != g_) fails++; } while (0)

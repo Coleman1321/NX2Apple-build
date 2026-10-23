@@ -13,10 +13,12 @@ UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
 void front_ios_boot(void);
 int front_ios_boot_ok(void);
+bool dm_show_launcher(void *view_controller, void (*done)(void));   // Launcher.swift: false = no launcher (no dm/launcher.json, or DM_LAUNCHER=0)
 
 static CAMetalLayer *g_layer;
 static void front_ios_power_watch(void);
 static void front_ios_audio_watch(void);
+static UILabel *front_ios_fps_label(void);
 
 @interface DmGameView : UIView
 @end
@@ -41,7 +43,12 @@ static void front_ios_audio_watch(void);
 @interface DmRootVC : UIViewController
 @property (nonatomic, strong) DmGameView *game;
 @property (nonatomic, strong) UIView *pad;
+@property (nonatomic, strong) UILabel *fps;
+@property (nonatomic) BOOL launched;
+- (void)startGame;
 @end
+static DmRootVC *g_root;
+static void launcher_done(void) { [g_root startGame]; }
 @implementation DmRootVC
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -55,25 +62,41 @@ static void front_ios_audio_watch(void);
         [self.view addSubview:lb]; return;
     }
     front_ios_audio_watch();
+}
+// The game view, the pad and the frame-rate counter are made once the launcher has set the switches they read (DM_SHOW_FPS, DM_METAL_HUD); the host's loading began at app launch (main.m)
+- (void)startGame {
+    if (self.game) return;
+    if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) setenv("MTL_HUD_ENABLED", "1", 0);   // Metal reads it when a device is made: before the game view makes its own (an env file's DM_METAL_HUD sets it in main.m already)
     self.game = [[DmGameView alloc] initWithFrame:self.view.bounds];
     [self.view addSubview:self.game];
     g_layer = (CAMetalLayer *)self.game.layer;
+    if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: Metal performance HUD on (DM_METAL_HUD)"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
     self.pad = dm_gamepad_view(self.view.bounds);
     self.pad.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.pad];
+    self.fps = front_ios_fps_label();   // above the pad, which hides while a controller is connected
+    if (self.fps) [self.view addSubview:self.fps];
+    [self.view setNeedsLayout]; [self.view layoutIfNeeded];
+    UIApplication.sharedApplication.idleTimerDisabled = YES;
+    front_ios_boot();
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGRect b = self.view.bounds; if (!self.game) return;
-    if (front_ios_true_fullscreen()) {   // true fullscreen: the Metal layer covers the whole window;
-        // the game's picture (at the screen's own aspect ratio) already fills it — nothing to center
-        self.game.frame = b; return;
-    }
     CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
     if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
+    if (self.fps) {   // the top row's free stretch: right of DmGamepad.m's L3 key (102 + 17 of its units from the safe edge), level with − / + (22 units down); u is its unit
+        CGRect s = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets); CGFloat u = MIN(b.size.height / 430.0, 1.3);
+        self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), 64, 22);
+    }
 }
-- (void)viewDidAppear:(BOOL)a { [super viewDidAppear:a]; UIApplication.sharedApplication.idleTimerDisabled = YES; front_ios_boot(); }
+- (void)viewDidAppear:(BOOL)a {
+    [super viewDidAppear:a];
+    if (self.launched || !front_ios_boot_ok()) return;
+    self.launched = YES; g_root = self;
+    if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];   // the settings screen first (Launcher.swift), when the app has one
+}
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }   // Edge gestures need two swipes, to avoid accidental exits
 - (BOOL)prefersStatusBarHidden { return YES; }
@@ -82,51 +105,42 @@ static void front_ios_audio_watch(void);
 UIViewController *front_ios_root(void) { return [DmRootVC new]; }
 
 // Thermal state and screen brightness for the power and present rows every 300 frames (hle_nvn.c; its weak defaults return -1 on the Mac). thermalState: 0 nominal, 1 fair, 2 serious, 3 critical.
-// Brightness is read on the main thread at start and on each change; every change of the thermal state is logged with the time since launch
+// Brightness is read on the main thread at start and on each change; every change of the thermal state and of Low Power Mode (which lowers the CPU clock) is logged with the time since launch
 static _Atomic double g_brightness = -1;
 int dm_thermal_now(void) { return (int)NSProcessInfo.processInfo.thermalState; }
+int dm_low_power_now(void) { return NSProcessInfo.processInfo.lowPowerModeEnabled; }   // the frame step does not probe in it (hle_nvn.c fstep_cpu_slowed)
 double dm_brightness_now(void) { return g_brightness; }
 static void front_ios_power_watch(void) {
     g_brightness = UIScreen.mainScreen.brightness;
     [NSNotificationCenter.defaultCenter addObserverForName:UIScreenBrightnessDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) { (void)n; g_brightness = UIScreen.mainScreen.brightness; }];
     [NSNotificationCenter.defaultCenter addObserverForName:NSProcessInfoThermalStateDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
         (void)n; LOG("front end: thermal state → %d (%.0f s after launch)", dm_thermal_now(), (now_ns() - g_t0_ns) / 1e9); }];
-    LOG("front end: thermal state %d, brightness %.2f", dm_thermal_now(), g_brightness);
+    [NSNotificationCenter.defaultCenter addObserverForName:NSProcessInfoPowerStateDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
+        (void)n; LOG("front end: Low Power Mode → %s (%.0f s after launch)", dm_low_power_now() ? "on" : "off", (now_ns() - g_t0_ns) / 1e9); }];
+    LOG("front end: thermal state %d, brightness %.2f, Low Power Mode %s", dm_thermal_now(), g_brightness, dm_low_power_now() ? "on" : "off");
+}
+
+// Frame-rate counter: the frames put on screen in the last second (nvn_mtl.m counts them for NVN and for the Vulkan layer alike; frames the display link merged away are not counted).
+// On when the IPA was built with it (the NSP script's SHOW_FPS / --show-fps → DMShowFPS in Info.plist); DM_SHOW_FPS=0 / 1 in Documents/env.txt overrides that without a rebuild. NULL when off
+uint64_t mtl_present_count(void);
+static UILabel *front_ios_fps_label(void) {
+    const char *e = getenv("DM_SHOW_FPS");
+    if (!(e ? atoi(e) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue])) return nil;
+    UILabel *l = [UILabel new];
+    l.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightSemibold]; l.textColor = UIColor.whiteColor; l.textAlignment = NSTextAlignmentCenter;
+    l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45]; l.layer.cornerRadius = 6; l.layer.masksToBounds = YES; l.userInteractionEnabled = NO;
+    l.text = @"-- fps";
+    __block uint64_t n0 = mtl_present_count(); __block double t0 = CACurrentMediaTime();
+    [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+        (void)t; uint64_t n = mtl_present_count(); double now = CACurrentMediaTime();
+        if (now - t0 < 1.5) l.text = [NSString stringWithFormat:@"%.0f fps", (n - n0) / (now - t0)];   // a longer span is the time in the background: no reading
+        n0 = n; t0 = now;
+    }];
+    LOG("front end: frame-rate counter on");
+    return l;
 }
 
 void *front_metal_layer(void) { return (__bridge void *)g_layer; }
-// True fullscreen: the game renders at the screen's native aspect ratio (not stretched) — the game
-// picture fills the whole window, and the 16:9 floor is gone. Hades II and the other Unity-family
-// titles support any aspect ratio (they are widescreen games on the PC). DM_GAME_RES=WxH overrides
-// (DM_GAME_RES=1600x900 restores the original 16:9 output as a negative control). The handheld
-// profile keeps the original 720 height at the screen's aspect ratio.
-static int g_fullscreen = -1;   // decided once, from the screen ratio (and DM_FULL_OFF)
-uint64_t front_game_res(int docked) {
-    static double aspect; static unsigned fw, fh; static BOOL native;
-    if (!aspect) {
-        CGRect b = UIScreen.mainScreen.nativeBounds;
-        aspect = fmax(b.size.width, b.size.height) / fmin(b.size.width, b.size.height);
-        native = YES;
-        const char *e = getenv("DM_GAME_RES");
-        if (e && sscanf(e, "%ux%u", &fw, &fh) == 2) { aspect = (double)fw / fh; native = NO; }
-        else { fw = (unsigned)fmax(b.size.width, b.size.height); fh = (unsigned)fmin(b.size.width, b.size.height); }
-        if (native) {   // a screen narrower than 16:9 (iPads) keeps the 16:9 output with black bars
-            const char *off = getenv("DM_FULL_OFF");
-            if (aspect < 16.0 / 9.0 - 0.01 || (off && atoi(off))) { native = NO; aspect = 16.0 / 9.0; fh = (unsigned)llround(fw * 9.0 / 16.0 / 2) * 2; }
-        }
-        if (native) g_fullscreen = 1;
-        LOG("front end: game picture %ux%u (aspect %.3f%s)", fw, fh, aspect, g_fullscreen == 1 ? ", true fullscreen" : native ? "" : ", forced by DM_GAME_RES");
-    }
-    if (fw && docked && native) return (uint64_t)fh << 32 | fw;   // docked + native screen: the screen's own pixels
-    if (docked) {   // a forced or 16:9-floored aspect at the docked height
-        unsigned h = 900, w = (unsigned)llround(h * aspect / 8) * 8;
-        if (native) { h = fh; w = fw; }
-        return (uint64_t)h << 32 | w;
-    }
-    uint64_t h = 720, w = (uint64_t)llround(h * aspect / 8) * 8;   // handheld: the original 720 height
-    return h << 32 | w;
-}
-int front_ios_true_fullscreen(void) { if (g_fullscreen < 0) front_game_res(1); return g_fullscreen == 1; }
 void front_run(void (*guest)(void)) { guest(); }   // Already on main.m's big-stack thread
 
 // Software keyboard: show a UIAlertController on the main thread, the calling thread waits for the result
@@ -147,15 +161,15 @@ int front_text_input(const char *title, const char *sub, const char *guide, cons
         if (!vc) { dispatch_semaphore_signal(done); return; }
         [vc presentViewController:ac animated:YES completion:nil];
     });
-    guest_clock_freeze_for(2, 1);
+    // The guest clock keeps running meanwhile, as on the Switch (hle_swkbd.c): a freeze here as well stopped Octopath Traveler 0's frame loop for as long as the box was up and made its sound stutter
+    // (4,977 ms and 2,577 ms frames, 5,181 wakeups a second). The inline keyboard freezes around its own call (hle_swkbd.c)
     dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-    guest_clock_freeze_for(2, 0);
     if (!r) return 0;
     snprintf(out, out_cap, "%s", text.UTF8String ? text.UTF8String : "");
     return 1;
 }
 
-// Save write failed (most likely the phone's storage is full): show a notice on the main thread without blocking the game (as d2r-mobile does). hle_fs.c calls this when a save transaction is refused or a mount has to fall back to read-only;
+// Save write failed (most likely the phone's storage is full): show a notice on the main thread without blocking the game. hle_fs.c calls this when a save transaction is refused or a mount has to fall back to read-only;
 // the iOS front end used not to implement it, so there was only a log line and the player never learned that progress was not being saved
 void front_save_failed(int err) {
     LOG("front end: save data write failed errno=%d, telling the player", err);
