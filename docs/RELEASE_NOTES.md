@@ -1,7 +1,3 @@
-# NS Port Builder v0.2.0 — release notes
-
-This is the text of the [v0.2.0 release](https://github.com/LNPANDY/nxnative-romfs-archive/releases/tag/v0.2.0). The v0.1.0 notes are kept in the git history. 中文说明在英文下方。
-
 Bilingual interface: the app now speaks English, and Chinese only when your device does.
 
 <details>
@@ -35,9 +31,27 @@ Everything else is unchanged from v0.1.0: four inputs picked separately, depende
 one-click install, progress parsed from the script's own stage lines, and automatic RomFS archive
 shards.
 
+### Fixed in v0.2.1
+
+**A build could fail with a Python syntax error.** If the app picked
+`/usr/bin/python3` (the 3.9 that ships with the Xcode command line tools), the
+build stopped with `SyntaxError: f-string: unmatched '['` in
+`build_ipa_from_nsp.py`. Nested same-quote strings inside an f-string need Python
+3.12; the script now avoids that construct and parses on 3.9.
+
+The dependency check is also stricter: an interpreter older than 3.9 is skipped
+instead of chosen, and the row now says whether the problem is **too old** or
+**missing packages** — the two need different fixes. Every `.py` in the
+repository is checked against 3.9.
+
+**Requirement: Python 3.9 or newer, with `lz4`, `capstone`, `fonttools` and
+`backports.zstd`.** The app's dependency panel installs the packages into the
+interpreter it picked; if no suitable Python exists, install one (python.org or
+`brew install python`) and press Check again.
+
 ## What this build is
 
-[`NS-Port-Builder-macOS-arm64.zip`](https://github.com/LNPANDY/nxnative-romfs-archive/releases/download/v0.2.0/NS-Port-Builder-macOS-arm64.zip)
+[`NS-Port-Builder-macOS-arm64.zip`](https://github.com/LNPANDY/nxnative-romfs-archive/releases/download/v0.2.1/NS-Port-Builder-macOS-arm64.zip)
 — the app itself, ad-hoc signed, Apple Silicon, macOS 13+. Unzip it anywhere and double-click.
 Because the signature is ad-hoc, the first launch needs right-click → Open, or
 `xattr -dr com.apple.quarantine "NS Port Builder.app"`.
@@ -96,9 +110,23 @@ report what you find.
 
 其余功能与 v0.1.0 相同：四项输入分开选、依赖检测与一键安装、从脚本自身阶段行解析的进度、自动生成 RomFS 归档分片。
 
+### v0.2.1 修复
+
+**构建可能因 Python 语法错误失败。** 如果 App 选中了 `/usr/bin/python3`（Xcode 命令行工具
+自带的 3.9），构建会在 `build_ipa_from_nsp.py` 报
+`SyntaxError: f-string: unmatched '['`。f-string 里嵌套同种引号是 Python 3.12 的特性，
+脚本现在改用 `str.format`，3.9 也能正常解析。
+
+依赖检测也收紧了：低于 3.9 的解释器会被跳过而不是选中，面板会区分**版本太旧**和**缺包**两种
+情况——两者的解决办法不同。仓库里所有 `.py` 都通过了 3.9 语法检查。
+
+**要求：Python 3.9 或更新，并装有 `lz4`、`capstone`、`fonttools`、`backports.zstd`。**
+App 的依赖面板会把包装到它选中的那个解释器里；如果找不到合适的 Python，请自行安装
+（python.org 或 `brew install python`）后点「Check again」。
+
 ## 这个包是什么
 
-[`NS-Port-Builder-macOS-arm64.zip`](https://github.com/LNPANDY/nxnative-romfs-archive/releases/download/v0.2.0/NS-Port-Builder-macOS-arm64.zip) 就是 App 本身，ad-hoc 签名，Apple Silicon，macOS 13+。解压到任意位置双击即可。因为用的是 ad-hoc 签名，**首次启动需要右键 → 打开**，或者执行 `xattr -dr com.apple.quarantine "NS Port Builder.app"`。
+[`NS-Port-Builder-macOS-arm64.zip`](https://github.com/LNPANDY/nxnative-romfs-archive/releases/download/v0.2.1/NS-Port-Builder-macOS-arm64.zip) 就是 App 本身，ad-hoc 签名，Apple Silicon，macOS 13+。解压到任意位置双击即可。因为用的是 ad-hoc 签名，**首次启动需要右键 → 打开**，或者执行 `xattr -dr com.apple.quarantine "NS Port Builder.app"`。
 
 **这只是前端。** 它调用的是 [nxnative-romfs-archive](https://github.com/LNPANDY/nxnative-romfs-archive) 里的脚本，所以这台 Mac 上还需要 clone 那个仓库。App 会自己找：放在仓库旁边能自动发现，找不到就用「Choose repository…」指定一次（目录里有 `dm/tools/nx_extract/Program.cs` 才算真正的仓库，那一行会变绿）。
 
