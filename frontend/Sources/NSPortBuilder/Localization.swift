@@ -147,6 +147,8 @@ enum L10n {
         "msg.archiveIpaOnly": ("IPA 已生成，归档失败", "IPA built, but the archive failed"),
         "msg.done": ("完成：IPA 与 romfs 归档已生成，按下面三步装到手机", "Done: the IPA and the romfs archive are ready — three steps below"),
         "prog.archiveDone": ("归档就绪：%@", "archive ready: %@"),
+        "prog.archiveReused": ("复用上次归档（%d 个文件未变）", "reused the previous archive (%d files unchanged)"),
+        "msg.archiveReused": ("归档未变，复用 %@", "archive unchanged, reusing %@"),
         "msg.archiveLog": ("归档：%@ → %@", "Archive: %@ → %@"),
     ]
 

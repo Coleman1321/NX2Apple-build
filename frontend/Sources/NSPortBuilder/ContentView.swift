@@ -325,6 +325,41 @@ final class BuildModel: ObservableObject {
         do { try p.run() } catch { fail(String(format: t("msg.launchFailed"), error.localizedDescription)) }
     }
 
+    /// The build's last step is done either way: release the button and show the outcome.
+    func finishBuild(ok: Bool, note: String) {
+        running = false
+        done = ok
+        doneNote = note
+    }
+
+    /// (file count, bytes) of a RomFS tree — the reuse fingerprint's content part.
+    nonisolated static func treeStats(_ dir: String) -> (count: Int, bytes: Int)? {
+        let fm = FileManager.default
+        guard let en = fm.enumerator(atPath: dir) else { return nil }
+        var count = 0, bytes = 0
+        while let rel = en.nextObject() as? String {
+            let s = ((try? fm.attributesOfItem(atPath: dir + "/" + rel))?[.size] as? Int) ?? 0
+            count += 1; bytes += s
+        }
+        return (count, bytes)
+    }
+
+    nonisolated static func writeStamp(source: String, version: String, to path: String) {
+        guard let s = treeStats(source) else { return }
+        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                                 withIntermediateDirectories: true)
+        try? "\(version)\t\(s.count)\t\(s.bytes)".write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// The stamped (version, count, bytes) versus the source tree's now: nil = pack again.
+    nonisolated static func archiveReusable(source: String, version: String, stamp: String) -> Int? {
+        guard let s = treeStats(source) else { return nil }
+        let parts = stamp.split(separator: "\t")
+        guard parts.count == 3, parts[0] == version,
+              Int(parts[1]) == s.count, Int(parts[2]) == s.bytes else { return nil }
+        return s.count
+    }
+
     private func fail(_ why: String) { running = false; doneNote = why; say("✗ " + why); cleanupStaging() }
 
     func stop() {
@@ -426,6 +461,22 @@ final class BuildModel: ObservableObject {
         // Documents/romfs wants, so it can be copied onto the phone without renaming.
         let dest = (outDir.isEmpty ? (basePath as NSString).deletingLastPathComponent : outDir) + "/romfs"
         try? fm.createDirectory(atPath: dest, withIntermediateDirectories: true)
+        // Reuse: packing is a multi-GB write, and the extracted RomFS is itself reused by the
+        // script — so when the source tree's (version, file count, bytes) matches the stamp left
+        // in the folder, the shards are already correct and the pack is skipped. A different
+        // version changes the extract; a same-version re-extract of the same NSPs reproduces the
+        // same tree.
+        let stampPath = dest + "/.packstamp"
+        if let stamp = try? String(contentsOfFile: stampPath, encoding: .utf8), !stamp.isEmpty,
+           let reused = Self.archiveReusable(source: romfs, version: v, stamp: stamp) {
+            archivePath = dest
+            stages.append(Stage(id: 1000, name: t("prog.archive"), state: .done,
+                                detail: String(format: t("prog.archiveReused"), reused)))
+            say(String(format: t("msg.archiveReused"), dest))
+            cleanupStaging()
+            finishBuild(ok: true, note: t("msg.done"))
+            return
+        }
         // a previous pack's shards must not survive a smaller new pack (the index names its own
         // shards, but stale higher-numbered files would sit there confusingly)
         for old in ((try? fm.contentsOfDirectory(atPath: dest)) ?? [])
@@ -438,7 +489,9 @@ final class BuildModel: ObservableObject {
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath)
-        p.arguments = [repoPath + "/dm/tools/romfs_arc.py", "pack", romfs, dest, "--shard-mib", "200"]
+        // base = dest + "/romfs": the pack writes romfs.idx + romfs.NN INSIDE the folder
+        // (base = dest would leave them as siblings of an empty folder)
+        p.arguments = [repoPath + "/dm/tools/romfs_arc.py", "pack", romfs, dest + "/romfs", "--shard-mib", "200"]
         p.environment = ["PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "PYTHONPATH": repoPath + "/dm/tools"]
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
@@ -449,7 +502,10 @@ final class BuildModel: ObservableObject {
         p.terminationHandler = { [weak self] st in DispatchQueue.main.async {
             guard let self else { return }
             self.cleanupStaging()
-            if st.terminationStatus == 0 { self.archivePath = dest }
+            if st.terminationStatus == 0 {
+                self.archivePath = dest
+                Self.writeStamp(source: romfs, version: v, to: dest + "/.packstamp")
+            }
             if let i = self.stages.firstIndex(where: { $0.id == idx }) {
                 self.stages[i].state = st.terminationStatus == 0 ? .done : .failed
                 self.stages[i].detail = st.terminationStatus == 0
