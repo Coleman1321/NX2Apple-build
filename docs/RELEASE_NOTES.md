@@ -1,3 +1,7 @@
+# NS Port Builder v0.2.1 — release notes
+
+This is the text of the [v0.2.1 release](https://github.com/LNPANDY/nxnative-romfs-archive/releases/tag/v0.2.1); v0.2.0 (bilingual interface) and v0.1.0 are in the git history. 中文说明在英文下方。
+
 Bilingual interface: the app now speaks English, and Chinese only when your device does.
 
 <details>
