@@ -1371,10 +1371,23 @@ def main(args=None):
     env = dict(os.environ, PATH=os.pathsep.join(TOOL_PATHS + [os.environ.get('PATH', '/usr/bin:/bin:/usr/sbin:/sbin')]))
     env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)
     # nx_extract is a framework-dependent app: without DOTNET_ROOT the host refuses to start it even
-    # when dotnet is on PATH (~/.dotnet is not a registered install location). Also into os.environ:
-    # some steps run without env= and inherit this process's environment.
+    # when dotnet is on PATH (~/.dotnet is not a registered install location). The root is parsed from
+    # `dotnet --list-runtimes` rather than assumed to be the binary's directory: Homebrew's
+    # /opt/homebrew/bin/dotnet is a symlink into Cellar and its runtime lives in …/libexec, so
+    # dirname gave …/bin and the apphost failed to find its runtime (nx_extract exit code 131).
+    # Also into os.environ: some steps run without env= and inherit this process's environment.
     if not env.get('DOTNET_ROOT') and (dn := shutil.which('dotnet', path=env['PATH'])):
-        env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT'] = str(Path(dn).resolve().parent)
+        root = None
+        try:
+            out = subprocess.run([dn, '--list-runtimes'], capture_output=True, text=True, timeout=60).stdout
+            for ln in out.splitlines():
+                if not ln.startswith('Microsoft.NETCore.App'): continue
+                p = ln[ln.rfind('[') + 1:ln.rfind(']')] if '[' in ln else ''
+                if p.endswith('/shared/Microsoft.NETCore.App'): root = p[:-len('/shared/Microsoft.NETCore.App')]
+                elif p: root = p
+                break
+        except Exception: pass
+        env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT'] = root or str(Path(dn).resolve().parent)
     env.setdefault('J', str(os.cpu_count() or 8))   # shader_split.py's and dmsh_build.py's workers (their default is 8)
     py = sys.executable
     app, fam = scan_nsps(nsp_dir)

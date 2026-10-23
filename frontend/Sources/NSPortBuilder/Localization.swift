@@ -95,6 +95,7 @@ enum L10n {
         "dep.python": ("Python + 包", "Python + packages"),
         "dep.python.hint": ("lz4 capstone fonttools backports.zstd", "lz4 capstone fonttools backports.zstd"),
         "dep.python.missing": ("%@ 缺包", "%@ is missing packages"),
+        "dep.install.fail": ("安装失败（退出码 %d），见下方日志", "Install failed (exit code %d) — see the log below"),
         "dep.python.old": ("Python %@ 太旧（需要 %@ 或更新）；系统的 /usr/bin/python3 没有这些包",
                            "Python %@ is too old (need %@ or newer); the system /usr/bin/python3 has none of these packages"),
 

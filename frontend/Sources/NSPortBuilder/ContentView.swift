@@ -82,6 +82,7 @@ final class BuildModel: ObservableObject {
     @Published var deps: [Dep] = []
     @Published var depsChecked = false
     @Published var pythonPath = ""
+    @Published var dotnetPath = ""
 
     /// Interface language: the device's at first launch, then whatever the toggle was set to.
     @Published var lang: Lang = Lang.initial() {
@@ -242,8 +243,13 @@ final class BuildModel: ObservableObject {
         p.executableURL = URL(fileURLWithPath: py)
         p.arguments = args
         p.currentDirectoryURL = URL(fileURLWithPath: repoPath)
+        // The root of the runtime the apphost looks for: derived from the detected installation,
+        // not assumed to be ~/.dotnet (Homebrew keeps it in …/opt/dotnet/libexec). Both variables
+        // carry the same root, as the apphost checks the arch-specific one first.
+        let droot = Self.dotnetRoot(for: dotnetPath.isEmpty ? "dotnet" : dotnetPath)
+                     ?? (dotnetPath as NSString).deletingLastPathComponent
         p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-                         "DOTNET_ROOT": NSHomeDirectory() + "/.dotnet",
+                         "DOTNET_ROOT": droot, "DOTNET_ROOT_ARM64": droot,
                          "USER": NSUserName(), "HOME": NSHomeDirectory(), "LANG": "en_US.UTF-8"]
         let pipe = Pipe()
         p.standardOutput = pipe; p.standardError = pipe
@@ -449,6 +455,65 @@ final class BuildModel: ObservableObject {
     /// (an f-string only 3.12 can parse) instead of a clear message here.
     nonisolated static let minPython = (3, 9)
 
+    /// The interpreter probe: lz4 / capstone / fontTools always, and zstd from either source —
+    /// `compression.zstd` is built in from Python 3.14 and `backports.zstd` (which declares
+    /// Python < 3.14) is the only option before that. Requiring the backport unconditionally
+    /// rejected an otherwise working Homebrew Python 3.15 (issue #1).
+    nonisolated static let importProbe = """
+        import lz4, capstone, fontTools
+        try:
+            from compression import zstd
+        except ImportError:
+            from backports import zstd
+        """
+
+    /// The interpreter the packages are installed into when no system Python has them. A venv
+    /// rather than `pip install --user`: Homebrew's Python is externally managed (PEP 668) and
+    /// refuses --user, and this leaves the user's environment untouched. Injectable so tests can
+    /// use a scratch directory.
+    nonisolated static var venvDir = NSHomeDirectory() + "/Library/Application Support/NS Port Builder/venv"
+
+    nonisolated static func venvPython() -> String { venvDir + "/bin/python3" }
+
+    nonisolated static func importsOK(_ py: String) -> Bool { runOK(py, ["-c", importProbe]) }
+
+    /// backports.zstd declares Python < 3.14, so it is only installed where it is needed.
+    nonisolated static func pipPackages(_ version: (Int, Int)) -> [String] {
+        version < (3, 14) ? ["lz4", "capstone", "fonttools", "backports.zstd"] : ["lz4", "capstone", "fonttools"]
+    }
+
+    /// Create the venv (reusing an existing one) and install the packages into it. Returns the
+    /// combined output so a failure can be shown instead of swallowed — the pip output used to go
+    /// to a pipe nobody read, and `externally-managed-environment` never reached the user.
+    nonisolated static func makeVenv(base: String) -> (ok: Bool, log: String) {
+        var log = ""
+        func run(_ exe: String, _ args: [String]) -> Bool {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
+            let out = Pipe(), err = Pipe()
+            p.standardOutput = out; p.standardError = err; p.standardInput = FileHandle.nullDevice
+            p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": NSHomeDirectory()]
+            do { try p.run() } catch { log += "could not start \(exe): \(error.localizedDescription)\n"; return false }
+            // both pipes are drained on this thread (before waitUntilExit, so the child cannot
+            // block on a full pipe), and the log string keeps a single owner
+            let outData = out.fileHandleForReading.readDataToEndOfFile()
+            let errData = err.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            log += String(data: outData, encoding: .utf8) ?? ""
+            log += String(data: errData, encoding: .utf8) ?? ""
+            return p.terminationStatus == 0
+        }
+        let vpy = venvPython()
+        if !FileManager.default.isExecutableFile(atPath: vpy) {
+            log += "$ \(base) -m venv \(venvDir)\n"
+            try? FileManager.default.createDirectory(atPath: (venvDir as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            guard run(base, ["-m", "venv", venvDir]) else { return (false, log + "venv creation failed\n") }
+        }
+        let pkgs = pipPackages(pythonVersion(vpy) ?? minPython).joined(separator: " ")
+        log += "$ \(vpy) -m pip install \(pkgs)\n"
+        let ok = run(vpy, ["-m", "pip", "install"] + pipPackages(pythonVersion(vpy) ?? minPython))
+        return (ok && importsOK(vpy), log)
+    }
+
     /// "3.12.4" → (3, 12). nil when the interpreter cannot be run.
     nonisolated static func pythonVersion(_ path: String) -> (Int, Int)? {
         let p = Process()
@@ -493,10 +558,46 @@ final class BuildModel: ObservableObject {
         for c in cands where !c.isEmpty && seen.insert(c).inserted {
             guard FileManager.default.isExecutableFile(atPath: c), let v = pythonVersion(c) else { continue }
             guard v >= minPython else { continue }
-            if runOK(c, ["-c", "import lz4, capstone, fontTools, backports.zstd"]) { return (c, true) }
+            if importsOK(c) { return (c, true) }
             if fallback == nil || v > fallback!.1 { fallback = (c, v) }
         }
-        return (fallback?.0 ?? "/usr/bin/python3", false)
+        // No system interpreter has the packages: the venv (existing, or created by 安装) is next.
+        let vpy = venvPython()
+        if FileManager.default.isExecutableFile(atPath: vpy) {
+            if importsOK(vpy) { return (vpy, true) }
+            return (vpy, false)   // exists but incomplete: 安装 finishes it
+        }
+        return (fallback?.0 ?? vpy, false)
+    }
+
+    /// The runtime root of a dotnet installation, parsed from `dotnet --list-runtimes`. It cannot
+    /// be assumed to be the binary's directory: Homebrew's /opt/homebrew/bin/dotnet is a symlink
+    /// into Cellar, and the runtime lives in …/libexec, so a hardcoded ~/.dotnet left the apphost
+    /// without a runtime and nx_extract died with exit code 131 (issue #2).
+    nonisolated static func parseDotnetRoot(_ listRuntimes: String) -> String? {
+        for ln in listRuntimes.split(separator: "\n") {
+            guard ln.hasPrefix("Microsoft.NETCore.App"), let a = ln.firstIndex(of: "["), let b = ln.lastIndex(of: "]") else { continue }
+            let p = String(ln[ln.index(after: a)..<b])
+            for suffix in ["/shared/Microsoft.NETCore.App", "\\shared\\Microsoft.NETCore.App"] where p.hasSuffix(suffix) {
+                return String(p.dropLast(suffix.count))
+            }
+            return p
+        }
+        return nil
+    }
+
+    nonisolated static func dotnetRoot(for dotnet: String) -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: dotnet)
+        p.arguments = ["--list-runtimes"]
+        let pipe = Pipe()
+        p.standardOutput = pipe; p.standardError = Pipe(); p.standardInput = FileHandle.nullDevice
+        p.environment = ["HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return parseDotnetRoot(out) ?? ((dotnet as NSString).deletingLastPathComponent)
     }
 
     nonisolated static func findDotnet() -> (path: String, ok: Bool) {
@@ -560,10 +661,12 @@ final class BuildModel: ObservableObject {
         depsChecked = false
         DispatchQueue.global(qos: .userInitiated).async {
             let d = Self.detectDepsSync()
-            let (py, pyOK) = Self.findPython()
+            let (py, _) = Self.findPython()
+            let (dn, _) = Self.findDotnet()
             DispatchQueue.main.async {
                 self.deps = d
-                self.pythonPath = pyOK ? py : "/usr/bin/python3"
+                self.pythonPath = py                     // the interpreter the build runs under
+                self.dotnetPath = FileManager.default.isExecutableFile(atPath: dn) ? dn : ""
                 self.depsChecked = true
             }
         }
@@ -578,19 +681,47 @@ final class BuildModel: ObservableObject {
         deps[i].installing = true
         let cmd = dep.installCmd
         DispatchQueue.global(qos: .userInitiated).async {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/bash")
-            p.arguments = ["-c", cmd.map { $0.contains(" ") ? "'" + $0 + "'" : $0 }.joined(separator: " ")]
-            p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-                             "HOME": NSHomeDirectory(), "NONINTERACTIVE": "1", "USER": NSUserName()]
-            p.standardOutput = Pipe(); p.standardError = Pipe()
-            p.standardInput = FileHandle.nullDevice
-            try? p.run(); p.waitUntilExit()
+            var ok = true
+            if dep.id == "python" {
+                // A venv of our own rather than pip --user: Homebrew's Python is externally
+                // managed (PEP 668) and refuses --user, which used to fail silently.
+                let r = Self.makeVenv(base: self.pythonPath)
+                DispatchQueue.main.async { self.append("\n--- 安装输出 ---\n" + r.log) }
+                ok = r.ok
+            } else {
+                ok = Self.runCaptured(["/bin/bash", "-c",
+                     cmd.map { $0.contains(" ") ? "'" + $0 + "'" : $0 }.joined(separator: " ")],
+                     env: ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                           "HOME": NSHomeDirectory(), "NONINTERACTIVE": "1", "USER": NSUserName()])
+                { line in DispatchQueue.main.async { self.append(line + "\n") } }
+            }
             DispatchQueue.main.async {
                 if let j = self.deps.firstIndex(where: { $0.id == dep.id }) { self.deps[j].installing = false }
+                if !ok { self.doneNote = String(format: self.t("dep.install.fail"), 1) }
                 self.checkDeps()
             }
         }
+    }
+
+    /// Run a command, streaming its output line by line to `line`. Returns success.
+    nonisolated static func runCaptured(_ args: [String], env: [String: String], line: @escaping (String) -> Void) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: args[0])
+        p.arguments = Array(args.dropFirst())
+        p.environment = env
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out; p.standardError = err; p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { line("could not start \(args[0]): \(error.localizedDescription)"); return false }
+        for h in [out.fileHandleForReading, err.fileHandleForReading] {
+            h.readabilityHandler = { hd in
+                if let s = String(data: hd.availableData, encoding: .utf8) {
+                    for l in s.split(separator: "\n") { line(String(l)) }
+                }
+            }
+        }
+        p.waitUntilExit()
+        out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
+        return p.terminationStatus == 0
     }
 
     var allDepsPresent: Bool { depsChecked && deps.allSatisfy { $0.present } }
