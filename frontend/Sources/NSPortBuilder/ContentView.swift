@@ -81,6 +81,16 @@ final class BuildModel: ObservableObject {
 
     @Published var deps: [Dep] = []
     @Published var depsChecked = false
+    /// Whether the dependency list is expanded. nil = not chosen yet: open while something is
+    /// missing (that is when the rows matter), collapsed once everything is green — a set-up
+    /// machine never needs the rows again. A manual toggle overrides and is remembered.
+    @Published var depsExpanded: Bool? = UserDefaults.standard.object(forKey: "depsExpanded") as? Bool {
+        didSet { if let v = depsExpanded { UserDefaults.standard.set(v, forKey: "depsExpanded") } }
+    }
+    var depsOpen: Bool { depsExpanded ?? !(depsChecked && allDepsPresent) }
+    func toggleDeps() {
+        depsExpanded = !(depsExpanded ?? !allDepsPresent)
+    }
     @Published var pythonPath = ""
     @Published var dotnetPath = ""
 
@@ -930,19 +940,33 @@ struct ContentView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    sectionHeader("wrench.and.screwdriver", m.t("dep.title"))
-                    if !m.depsChecked {
-                        ProgressView().controlSize(.small)
-                        Text(m.t("dep.checking")).font(.system(size: 12)).foregroundStyle(.secondary)
-                    } else if m.allDepsPresent {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        Text(m.t("dep.allReady")).font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
-                    } else {
-                        Text(String(format: m.t("dep.missing"), m.deps.filter { !$0.present }.count))
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
+                    // the whole left side toggles the list; only 重新检测 stays a button of its own
+                    Button { withAnimation(.easeInOut(duration: 0.18)) { m.toggleDeps() } } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: m.depsOpen ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 12)
+                            sectionHeader("wrench.and.screwdriver", m.t("dep.title"))
+                            if !m.depsChecked {
+                                ProgressView().controlSize(.small)
+                                Text(m.t("dep.checking")).font(.system(size: 12)).foregroundStyle(.secondary)
+                            } else if m.allDepsPresent {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                Text(m.t("dep.allReady")).font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
+                            } else {
+                                Text(String(format: m.t("dep.missing"), m.deps.filter { !$0.present }.count))
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
+                            }
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .help(m.depsOpen ? (m.lang == .zh ? "收起" : "Collapse") : (m.lang == .zh ? "展开" : "Expand"))
+                    Spacer(minLength: 8)
                     Button(m.t("dep.recheck")) { m.checkDeps() }.controlSize(.small)
                 }
+                if m.depsOpen {
                 VStack(spacing: 7) {
                     ForEach(m.deps, id: \.id) { d in
                         HStack(spacing: 10) {
@@ -970,6 +994,7 @@ struct ContentView: View {
                             }
                         }
                     }
+                }
                 }
             }.padding(8)
         }
