@@ -820,8 +820,8 @@ HLE_FORCE("_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc", "fsp-srv → 
     HP(path); struct stat st;
     if (ROMFSARC_IS_SYNTH(hp)) {   // archive entry or directory, from the index
         const char *rel = ROMFSARC_SYNTH_REL(hp);
-        uint32_t sh; uint64_t of, sz2;
-        if (romfsarc_stat_file(rel, &sh, &of, &sz2)) { *out = ENT_FILE; return RES_OK; }
+        uint32_t sh; uint64_t of, szf;
+        if (romfsarc_stat_file(rel, &sh, &of, &szf)) { *out = ENT_FILE; return RES_OK; }
         if (romfsarc_is_dir(rel)) { *out = ENT_DIR; return RES_OK; }
         errno = ENOENT; return err_res("stat", hp);
     }
