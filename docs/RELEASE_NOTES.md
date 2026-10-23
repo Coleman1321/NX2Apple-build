@@ -1,59 +1,120 @@
-# NS Port Builder v0.3.1 — release notes
+# NS Port Builder v0.4.0 — release notes
 
-This is the text of the [v0.3.1 release](https://github.com/LNPANDY/nxnative-romfs-archive/releases/tag/v0.3.1), which fixes issues [#1](https://github.com/LNPANDY/nxnative-romfs-archive/issues/1) and [#2](https://github.com/LNPANDY/nxnative-romfs-archive/issues/2). 中文说明在英文下方。
+This is the text of the [v0.4.0 release](https://github.com/LNPANDY/NX2Apple/releases/tag/v0.4.0). Earlier releases (v0.3.x, v0.2.x, v0.1.0) are on the releases page; their links redirect through the rename. 中文说明在英文下方。
 
-Two reported builds that failed on machines the first release never met: a Homebrew Python 3.15 and a Homebrew .NET. Both are fixed. Thank you @carbonimax for two excellent reports.
+Three releases in one: a GUI that carries a first-time user from NSPs to a working install, an automated link to upstream, and the recovery of two features a sync had silently dropped.
 
-## Fixed: Python 3.14+ was rejected, and installs failed silently (#1)
+<details>
+<summary>Screenshot (click to expand)</summary>
 
-- The dependency probe required `backports.zstd`, which declares Python < 3.14. Python 3.14 has `compression.zstd` built in, so a perfectly good Homebrew Python 3.15 was reported as missing packages. The probe now accepts either: `compression.zstd` where it exists, the backport where it does not.
-- The 安装 button ran `pip install --user`, which Homebrew's externally-managed Python refuses under PEP 668 — and the output went to a pipe nobody read. Packages now install into a **dedicated virtual environment** (`~/Library/Application Support/NS Port Builder/venv`) created from the best interpreter found. Your system Python is never touched. `backports.zstd` is only installed where it is actually needed (before 3.14).
-- Install output streams into the log window and a failure says so.
+<img src="../frontend/screenshots/main-window-en.png" width="620" alt="NS Port Builder">
 
-## Fixed: Homebrew dotnet built the extractor, then the extractor could not start (#2)
+</details>
 
-The app detected `/opt/homebrew/bin/dotnet` fine, then launched the build with a hardcoded `DOTNET_ROOT=~/.dotnet`. Homebrew's runtime lives in `…/opt/dotnet/libexec`, so the generated apphost found no runtime and `nx_extract` exited 131.
+## New: the archive folder is ready to copy, with an install guide
 
-`DOTNET_ROOT` (and `DOTNET_ROOT_ARM64`) are now derived from the detected installation via `dotnet --list-runtimes`, which resolves symlinks and layout differences between Homebrew, the `.pkg` installer and `dotnet-install.sh`. The build script had the same bug in its own derivation; fixed there too.
+The shards now land in a **`romfs/` folder** — `romfs.idx` plus the shards — next to the NSPs. That is exactly the layout the game app's `Documents/romfs` wants, so the folder is copied onto the phone **without renaming**. A previous pack's shards are cleared first, so a smaller new pack never leaves stale files behind.
 
-## Verified
+When the build finishes, the window gains an **"安装到 iPhone"** group: the three steps (install the IPA with AltStore / Sideloadly → copy the whole `romfs` folder into the game app's Documents through the Files app → launch), the IPA and folder paths, and a Reveal-in-Finder button for each — no more digging through directories.
 
-- The root parser handles Homebrew output, the standard `~/.dotnet` layout and backslash paths; the real `~/.dotnet` derives itself.
-- A venv created from the package-less system Python 3.9 installs all four packages and passes the probe (PEP 668 never involved).
-- A fake Homebrew tree (symlinked `bin`, runtime in `libexec`) derives `…/opt/dotnet/libexec`; the old code derived `…/bin`.
+## New: the dependency list collapses
 
-## Requirements (updated)
+The eight dependency rows only matter while setting a machine up. The section is now a disclosure: collapsed automatically once everything is green, open while something is missing, and your manual choice is remembered.
+
+## New: the README lists each game's required update version
+
+The build checks the update NSP's display version against the profile's registered build, so the games table now has an **"Update required" column** — the exact version each game needs (e.g. Tears of the Kingdom `1.4.3`, Mario Kart 8 Deluxe `4.0.0`), with "无（v0）" for games that need no update.
+
+## The repository is now NX2Apple
+
+Renamed from `nxnative-romfs-archive` — old links redirect automatically. The README opening was rewritten around what the project has become, and the legal section was substantially expanded (what the project contains and what it cannot do, trademarks, user responsibility, takedowns, no warranty).
+
+## Also since v0.3.1
+
+- **48 games** (up from 46): Mario Kart 8 Deluxe and Balatro, plus the upstream host work behind them.
+- **One translation chain version** for every game (upstream's fix for issue #78): the stale-header failure that stopped the first Animal Crossing build can no longer happen.
+- **The automated upstream sync** (`.github/workflows/sync-upstream.yml`, daily): re-applies the fork's features onto upstream's tree, verifies (Python 3.9 parse, archive reader test, macOS host build), pushes — or opens an issue with the log. The replay tests caught and recovered two features the earlier wholesale sync had dropped: `romfs.idx` recognition and the Hades II update support.
+
+## What this build is
+
+[`NS-Port-Builder-macOS-arm64.zip`](https://github.com/LNPANDY/NX2Apple/releases/download/v0.4.0/NS-Port-Builder-macOS-arm64.zip) — the app itself, ad-hoc signed, Apple Silicon, macOS 13+. Unzip, then right-click → Open on first launch (or `xattr -dr com.apple.quarantine "NS Port Builder.app"`).
+
+**This is a front end only.** It drives the scripts of [NX2Apple](https://github.com/LNPANDY/NX2Apple), so clone that repository on the same Mac; the app finds it automatically and otherwise you pick it once with Choose repository….
+
+## Verified games
+
+| Game | Update required | Status |
+|---|---|---|
+| **Tears of the Kingdom** | 1.4.3 (v720896) | Verified — builds, installs and runs on an iPhone; 304,243 files into 127 archive shards, byte-verified |
+| **Hades II** | 1.0.137848 (v1) | Verified — builds, installs and runs on an iPhone; 33-file archive |
+
+**Every other game is unverified by this fork.** Twenty-odd are reported playable upstream; the full table with per-game versions is in the README. If you try another title, expect to bring it up yourself, and please report what you find.
+
+## Requirements
 
 - An Apple Silicon Mac, macOS 13+
-- **Python 3.9+** with `lz4`, `capstone`, `fontTools`, and zstd from `compression.zstd` (3.14+) or `backports.zstd` — the app's dependency panel manages a venv with all of this; you never pip-install by hand
-- .NET SDK 10 — Homebrew, the .pkg installer and `dotnet-install.sh` all work now
+- **Python 3.9+** with `lz4`, `capstone`, `fontTools`, and zstd (`compression.zstd` on 3.14+, `backports.zstd` before) — the dependency panel manages a venv with all of this
+- .NET SDK 10 (Homebrew, .pkg and dotnet-install.sh all work)
+- ~6 GB free beyond the NSPs; the shader compile is the long step
+- Your own game files and `prod.keys` — nothing is bundled
+
+## Legal
+
+No Nintendo code, assets, firmware or keys are included anywhere. The pipeline requires your own dumps and your own keys and talks to no server. Not affiliated with or endorsed by Nintendo; trademarks belong to their owners. Personal-backup laws differ by country — you are responsible for your jurisdiction, and the outputs are for your own hardware only. See the README's Legal section for the full statement, including takedown handling.
 
 ---
 
 # 中文说明
 
-两个来自真实机器的构建失败：一台是 Homebrew 的 Python 3.15，一台是 Homebrew 的 .NET。都已修复。感谢 @carbonimax 的两份高质量报告。
+三件事合成一个版本：把第一次构建的用户从 NSP 一路带到装好的图形界面、与上游的自动联动、以及找回两次同步中静默丢失的特性。
 
-## 修复：Python 3.14+ 被误判缺包，安装静默失败（#1）
+## 新增：归档文件夹直接可拷贝，附安装引导
 
-- 依赖探针原来写死了 `backports.zstd`（它声明只支持 Python < 3.14），而 3.14 起标准库自带 `compression.zstd`，于是 Homebrew 的 Python 3.15 被误报缺包。现在两者都接受：有内置用内置，没有用 backport。
-- 「安装」按钮原来跑 `pip install --user`，Homebrew 的受管 Python 会在 PEP 668 下拒绝——而且输出进了没人读的管道。现在包装进**专用虚拟环境**（`~/Library/Application Support/NS Port Builder/venv`），用检测到的最佳解释器创建，完全不碰系统 Python。`backports.zstd` 只在真正需要时（3.14 之前）安装。
-- 安装输出实时进日志窗口，失败会明确提示。
+分片现在落在 **`romfs/` 文件夹**——`romfs.idx` 加分片文件——就在 NSP 旁边。这正是游戏 App 的 `Documents/romfs` 要的布局，整个文件夹**不用改名**直接拷上手机。打包前会清掉上一轮的旧分片，新包变小也不会留残留文件。
 
-## 修复：Homebrew 的 dotnet 能编译，但生成的程序起不来（#2）
+构建完成后，窗口出现**「安装到 iPhone」**分组：三步（AltStore / Sideloadly 装 IPA → 用文件 App 把 romfs 文件夹整个拷进游戏 App 的 Documents → 启动），附 IPA 和文件夹的路径，以及各自的「在访达中显示」按钮——不用再自己翻目录。
 
-App 检测 `/opt/homebrew/bin/dotnet` 正常，构建时却写死 `DOTNET_ROOT=~/.dotnet`。Homebrew 的运行时在 `…/opt/dotnet/libexec`，所以 apphost 找不到运行时，`nx_extract` 退出码 131。
+## 新增：依赖列表可折叠
 
-现在 `DOTNET_ROOT`（和 `DOTNET_ROOT_ARM64`）通过 `dotnet --list-runtimes` 从检测到的安装推导，符号链接和 Homebrew / .pkg / dotnet-install.sh 三种布局都能解析。构建脚本里同样的推导也有同样的 bug，一并修复。
+八行依赖只在装机时需要看。现在是一个可折叠分组：全绿后自动收起，缺东西时自动展开，手动选择会被记住。
 
-## 验证
+## 新增：README 列出每个游戏的所需版本
 
-- 根目录解析器覆盖 Homebrew 输出、标准 `~/.dotnet` 布局和反斜杠路径；真实 `~/.dotnet` 正确推导。
-- 用无包的系统 Python 3.9 真实创建 venv，四个包全部装上且探针通过（全程未触碰 PEP 668）。
-- 伪造 Homebrew 目录（bin 符号链接、运行时在 libexec）推导出 `…/opt/dotnet/libexec`；旧代码得到 `…/bin`。
+构建会用 profile 注册的 build 严格校验更新包的显示版本，所以游戏表加了**「需要的更新包」列**——每个游戏的精确版本（如王国之泪 `1.4.3`、马里奥赛车 8 `4.0.0`），无需更新的标「无（v0）」。
 
-## 环境要求（更新）
+## 仓库更名为 NX2Apple
+
+从 `nxnative-romfs-archive` 改名——旧链接自动跳转。README 开头围绕项目现在的形态重写，法律声明大幅扩充（项目包含什么、做不到什么、商标、用户责任、下架处理、无担保）。
+
+## v0.3.1 之后还包含
+
+- **48 个游戏**（原 46）：新增马里奥赛车 8 豪华版和 Balatro，以及它们需要的宿主工作。
+- **所有游戏共用一个翻译链版本**（上游对 issue #78 的修复）：第一次动物森友会构建碰到的过期 header 失败不会再发生。
+- **自动上游同步**（`.github/workflows/sync-upstream.yml`，每天）：把 fork 特性重新应用到上游新树，验证后推送；补丁对不上就开 issue 附日志。回放测试抓到并恢复了更早的整树替换丢掉的两个特性：`romfs.idx` 识别和 Hades II 更新支持。
+
+## 这个包是什么
+
+[`NS-Port-Builder-macOS-arm64.zip`](https://github.com/LNPANDY/NX2Apple/releases/download/v0.4.0/NS-Port-Builder-macOS-arm64.zip) 就是 App 本身，ad-hoc 签名，Apple Silicon，macOS 13+。解压后首次启动右键 → 打开（或执行 `xattr -dr com.apple.quarantine "NS Port Builder.app"`）。
+
+**这只是前端。** 它调用 [NX2Apple](https://github.com/LNPANDY/NX2Apple) 的脚本，所以同一台 Mac 上需要 clone 那个仓库；App 会自动发现，找不到就点 Choose repository… 选一次。
+
+## 已验证的游戏
+
+| 游戏 | 需要的更新包 | 状态 |
+|---|---|---|
+| **塞尔达传说：王国之泪** | 1.4.3 (v720896) | 已验证 —— 构建、安装、在 iPhone 上运行；304,243 个文件归档成 127 片，逐字节校验通过 |
+| **Hades II** | 1.0.137848 (v1) | 已验证 —— 构建、安装、在 iPhone 上运行；33 个文件的归档 |
+
+**其他游戏本 fork 均未验证。** 二十余个上游报告 iPhone 可玩；完整表格（含每个游戏的版本）在 README。试别的游戏请做好自行 bring-up 的准备，欢迎反馈。
+
+## 环境要求
 
 - Apple Silicon Mac，macOS 13+
-- **Python 3.9+**，`lz4`、`capstone`、`fontTools`，以及 zstd（3.14+ 用内置的 `compression.zstd`，更早用 `backports.zstd`）——这些由 App 的依赖面板通过 venv 管理，不需要手动 pip
-- .NET SDK 10 —— Homebrew、.pkg 安装器、dotnet-install.sh 三种方式都支持
+- **Python 3.9+**，装有 `lz4`、`capstone`、`fontTools`，以及 zstd（3.14+ 用内置 `compression.zstd`，更早用 `backports.zstd`）——依赖面板通过 venv 全部管理
+- .NET SDK 10（Homebrew / .pkg / dotnet-install.sh 三种都支持）
+- 除 NSP 外约 6 GB 空间；shader 编译是最慢的一步
+- 你自己的游戏文件和 `prod.keys`——不含任何数据
+
+## 法律
+
+任何地方都不包含任天堂的代码、资源、固件或密钥。流水线需要你自己的导出文件和自己的密钥，不连接任何服务器。与任天堂无关联、未获认可；商标归权利人所有。个人备份的法律各地不同——请自行确认所在地法律，产物仅用于自己的硬件。完整声明（含下架处理）见 README 的法律一节。

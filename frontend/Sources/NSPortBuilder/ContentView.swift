@@ -127,10 +127,10 @@ final class BuildModel: ObservableObject {
         seeds.append(bundle.deletingLastPathComponent().deletingLastPathComponent()
                          .deletingLastPathComponent().deletingLastPathComponent().path)
         seeds.append(FileManager.default.currentDirectoryPath)
-        seeds.append(NSHomeDirectory() + "/ZCodeProject/nxnative-romfs-archive")
-        seeds.append(NSHomeDirectory() + "/nxnative-romfs-archive")
-        seeds.append(NSHomeDirectory() + "/Documents/nxnative-romfs-archive")
-        seeds.append(NSHomeDirectory() + "/Desktop/nxnative-romfs-archive")
+        for base in ["/ZCodeProject/", "/", "/Documents/", "/Desktop/"] {
+            seeds.append(NSHomeDirectory() + base + "NX2Apple")
+            seeds.append(NSHomeDirectory() + base + "nxnative-romfs-archive")   // clones made before the rename still resolve
+        }
         var seen = Set<String>()
         for s in seeds where !s.isEmpty && seen.insert(s).inserted {
             var d = s

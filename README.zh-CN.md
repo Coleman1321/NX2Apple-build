@@ -1,12 +1,27 @@
-# nxnative + RomFS 归档
+# NX2Apple
 
-在 iPhone 和 iPad 上原生运行你自己的 Switch 游戏 —— 并让那些资源文件太大（或太多）的游戏也能装上。
+**在 iPhone 或 iPad 上玩你自己的 Switch 游戏。** 把一个 macOS App 指向你自己导出的游戏文件，它会跑完整条
+流水线：解包、为 Apple 芯片重写游戏代码、把 shader 翻译成 Metal、打包出一个装得进手机的瘦身 IPA 和分片
+RomFS 归档——最后告诉你把文件装上设备的三步。
 
-本仓库是 **[nxnative](https://github.com/seedds/nxnative) 加了一个新子系统：RomFS 归档**。运行游戏的一切
-—— NSO 重写器、Horizon 宿主层、NVN-on-Metal、各游戏的 profile —— 都是上游的工作。新增的是把一棵
-RomFS 目录树打包成约 100 个文件、并让 App 直接读取的能力，这让大体积游戏可以安装，也让游戏文件一次即可拷完。
+<img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
 
-[English](README.md) | 简体中文
+项目基于 **[nxnative](https://github.com/seedds/nxnative)**——NSO 重写器、Horizon 宿主层、NVN-on-Metal、
+各游戏的 profile 都是上游的工作，本 fork 自动跟随上游。在此之上它增加了：
+
+- **给普通用户的图形界面。** [NS Port Builder](frontend/README.md) 引导第一次接触的用户完成整个构建：
+  四项输入分开选（或一个文件夹全选）、设备依赖检测并一键安装、来自构建自身的实时进度、最后是带
+  「在访达中显示」按钮的安装引导。默认英文；中文设备显示中文。
+- **RomFS 归档。** 《王国之泪》的 304,243 个文件变成 127 个分片——这就是 iOS 从
+  `PackageExtractionFailed` 安装失败到安装成功之间的差别（细节见下）。
+- **构建中断可续。** 解包、DLC、模块改写和 shader 编译都会保留复用：失败或中途停止的构建从上次继续，
+  参数没变的重新构建直接复用一切（上游管线的特性；App 用自己的构建目录来驱动它）。
+- **自动跟随上游。** 每天一次的 GitHub Actions 把本 fork 的特性重新应用 upstream 新树，验证（脚本解析、
+  归档读取测试、macOS 宿主编译）后推送——补丁对不上时开 issue 附日志，不推送。
+- **48 个游戏 profile**，每个游戏需要的更新包版本单独列出。两个在本 fork 完整验证；二十余个上游报告
+  iPhone 可玩（表格见下）。
+
+[English](README.md) | 简体中文 · 原名 `nxnative-romfs-archive`（旧链接会自动跳转到这里）。
 
 ---
 
@@ -66,7 +81,7 @@ cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
 
 它调用的就是命令行那套脚本，下面的说明全部适用；细节见
 [frontend/README.md](frontend/README.md)。打包好的 App 和英中双语发布说明（含已验证游戏清单）在
-[Releases 页面](https://github.com/LNPANDY/nxnative-romfs-archive/releases)，仓库内也存了一份：
+[Releases 页面](https://github.com/LNPANDY/NX2Apple/releases)，仓库内也存了一份：
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md)。
 
 ## 跟随上游更新
@@ -86,8 +101,8 @@ cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
 Homebrew 工具和 Python 包，然后打 IPA。
 
 ```bash
-git clone https://github.com/<you>/nxnative-romfs-archive.git
-cd nxnative-romfs-archive
+git clone https://github.com/<you>/NX2Apple.git
+cd NX2Apple
 brew install xcodegen zstd spirv-cross
 brew install --cask dotnet-sdk
 python3 -m pip install lz4 capstone fonttools backports.zstd
@@ -363,7 +378,23 @@ resident + headroom：约 3,375 MB = 未生效，6–8 GB = 已生效）见
 
 ## 法律
 
-本仓库不含任何游戏代码、美术、文本、数据表或着色器，也不分发这些内容。你需要自己合法持有的游戏副本
-和 `prod.keys`。归档工具只读取你已在自己机器上导出的游戏文件，不上传任何数据。
+**本项目是什么。** 一个为你**已拥有**的游戏做构建的工具。它读取你在自己机器上从自己的卡带和购买中
+导出的文件，产出一个装到你自己的设备上的安装包。本仓库、App 和任何 Release 中都不包含、也不分发
+任天堂的代码、美术、文本、数据、着色器、固件、密钥或任何其他受版权保护的内容。
 
-与任天堂及任何游戏发行商均无关联。
+**它做不到什么。** 整条流水线没有游戏和密钥的来源：必须由用户提供自己的 `prod.keys` 和自己的
+NSP/XCI 导出文件，且不连接任何服务器。它不绕过、不移除、也不再分发任何保护——LibHac 用用户自己的
+密钥打开用户自己的导出文件，和主机读取卡带执行的是同一种操作。
+
+**商标。** 与任天堂无关联，也未获得其赞助或认可。"Nintendo Switch" 及各游戏名称是任天堂株式会社的
+商标；其他商标归各自权利人所有。
+
+**你的责任。** 制作个人备份副本的法律因国家而异，有些地方完全不允许。你有责任了解并遵守所在地的
+法律，并且绝不分发游戏文件、密钥或由它们构建出的安装包——本项目的产物仅供在你自己的硬件上个人使用。
+喜欢哪个游戏，请购买它。
+
+**下架。** 如果你认为本仓库中的任何内容侵犯了你的权利，请开 issue 或直接联系维护者；有效的权利
+主张会得到及时处理，包括删除相关内容乃至整个仓库。
+
+**无担保。** 本软件按 [LICENSE](LICENSE) 中的许可证（本 fork 在上游之上有所附加，见致谢）以"现状"
+提供，不附带任何明示或默示的担保。使用风险自负。

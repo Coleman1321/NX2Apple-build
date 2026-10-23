@@ -1,15 +1,34 @@
-# nxnative + RomFS Archive
+# NX2Apple
 
-Run your own Nintendo Switch games natively on iPhone and iPad — and ship games whose resource
-files are too large (or too numerous) for a normal iOS install.
+**Play your own Nintendo Switch games on an iPhone or iPad.** Point a macOS app at your own game
+dumps and it runs the whole pipeline: unpack, rewrite the game's code for Apple silicon, translate
+its shaders to Metal, and pack a slim IPA plus a sharded RomFS archive that a phone can actually
+install — then tells you the three steps to get it onto the device.
 
-This repository is **[nxnative](https://github.com/seedds/nxnative) with one new subsystem: a RomFS
-archive**. Everything about running the game — the NSO rewriter, the Horizon host, the NVN-on-Metal
-layer, the per-game profiles — is upstream work. What is new here is a way to pack a RomFS tree into
-~100 files and have the app read it directly, which makes large games installable and their files
-copyable in one operation.
+<img src="frontend/screenshots/main-window-en.png" width="620" alt="NS Port Builder">
 
-English | [简体中文](README.zh-CN.md)
+The project is based on **[nxnative](https://github.com/seedds/nxnative)** — the NSO rewriter, the
+Horizon host, the NVN-on-Metal layer and the per-game profiles are upstream work, and this fork
+follows upstream automatically. What it adds:
+
+- **A GUI app for everyone.** [NS Port Builder](frontend/README.md) walks a first-time user through
+  the whole build: four inputs picked separately (or one folder for all), device dependencies
+  detected and installed with one click, progress from the build's own stages, and an install guide
+  with Reveal-in-Finder buttons at the end. English by default; Chinese on Chinese devices.
+- **A RomFS archive.** Tears of the Kingdom's 304,243 files become 127 shards — the difference
+  between an iOS install that fails with `PackageExtractionFailed` and one that works (details
+  below).
+- **Interrupted builds resume.** Extraction, DLC, module rewrite and shader compilation are kept
+  and reused: a failed or stopped build continues where it left off, and a rebuild after a tweak
+  reuses everything unchanged (upstream's pipeline; the app drives it with its own build folder).
+- **Follows upstream automatically.** A daily GitHub Actions job re-applies the fork's features onto
+  upstream's tree, verifies the result (script parse, archive reader test, a macOS host build) and
+  pushes — or opens an issue with the log when a patch no longer fits.
+- **48 game profiles** with the required update version listed per game. Two are verified end to end
+  on this fork; twenty-odd are reported playable on an iPhone upstream (table below).
+
+English | [简体中文](README.zh-CN.md) · Formerly `nxnative-romfs-archive` (the old links redirect
+here).
 
 ---
 
@@ -73,7 +92,7 @@ everything else**) and the `中文` / `EN` button in the title bar switches at a
 It runs the same scripts the command line does, so everything below still applies; see
 [frontend/README.md](frontend/README.md). The prebuilt app, and the release notes in English and
 Chinese (including which games are verified), are on the
-[releases page](https://github.com/LNPANDY/nxnative-romfs-archive/releases) and in
+[releases page](https://github.com/LNPANDY/NX2Apple/releases) and in
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md).
 
 ## Staying current with upstream
@@ -95,8 +114,8 @@ The archive feature does not change the normal build. Follow upstream's
 packages, then pack an IPA.
 
 ```bash
-git clone https://github.com/<you>/nxnative-romfs-archive.git
-cd nxnative-romfs-archive
+git clone https://github.com/<you>/NX2Apple.git
+cd NX2Apple
 brew install xcodegen zstd spirv-cross
 brew install --cask dotnet-sdk
 python3 -m pip install lz4 capstone fonttools backports.zstd
@@ -391,8 +410,29 @@ All of the emulation work is other people's. This repository adds the archive su
 
 ## Legal
 
-This repository contains no game code, art, text, data tables or shaders, and distributes none. You
-need your own legally owned copy of a game and its `prod.keys`. The archive tool only reads the game
-files you already extracted on your own machine; nothing is uploaded anywhere.
+**What this project is.** A build tool for games you already own. It reads dumps you made of your
+own cartridges and purchases, on your own machine, and produces a package for your own device.
+Nothing in this repository, in the app, or in any release contains or distributes Nintendo's code,
+art, text, data, shaders, firmware, keys or any other copyrighted material.
 
-Not affiliated with Nintendo or any game publisher.
+**What it cannot do.** The pipeline has no source of games or keys: it requires the user's own
+`prod.keys` and their own NSP/XCI dumps, and it talks to no server. It does not bypass, strip or
+redistribute any protection — LibHac opens the user's own dumps with the user's own keys, the same
+operation a console performs on a cartridge.
+
+**Trademarks.** Not affiliated with, sponsored by or endorsed by Nintendo. "Nintendo Switch" and
+game titles are trademarks of Nintendo Co., Ltd.; all other trademarks belong to their respective
+owners.
+
+**Your responsibility.** Laws on making a personal backup copy differ by country; some places do
+not allow it at all. You are responsible for knowing and following the law where you live, and for
+never distributing game files, keys or the packages built from them — the project's outputs are for
+personal use on your own hardware only. If you enjoy a game, buy it.
+
+**Takedowns.** If you believe anything in this repository infringes your rights, open an issue or
+contact the maintainer directly; valid claims will be actioned promptly, up to removing content or
+the repository.
+
+**No warranty.** The software is provided "as is" under the licenses in [LICENSE](LICENSE) (this
+fork adds to upstream's; see the credits) — without warranty of any kind, express or implied. Use
+it at your own risk.
