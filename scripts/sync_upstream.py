@@ -276,9 +276,11 @@ fi
 
 def patch_build_ipa(t):
     if 'placeholder signature' in t: return skip('build_ipa.sh entitlements (already patched)')
-    old = 'xcodegen generate -q > /dev/null || die "xcodegen"'
-    if old not in t: fail('dm/ios/tools/build_ipa.sh: xcodegen anchor missing')
-    t = t.replace(old, ENT + old, 1)
+    old = '''APP=$DD/Build/Products/Release-iphoneos/DmIOS.app
+[ -n "$APP" ] && [ -d "$APP" ] || die "no built app"; t "app: $APP"
+'''
+    if old not in t: fail('dm/ios/tools/build_ipa.sh: APP anchor missing (upstream moved the app definition)')
+    t = t.replace(old, old + ENT, 1)
     old2 = '''MAPS+=("$P/romfs=$ROMFS")
 t "pack IPA (already-compressed game files stored, everything else deflated)"'''
     if old2 not in t: fail('dm/ios/tools/build_ipa.sh: pack anchor missing')

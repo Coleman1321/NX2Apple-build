@@ -105,17 +105,6 @@ if [ "$PREPARE_XCODE" = YES ] && [ -n "${DM_ENTITLEMENTS-default}" ]; then
   echo "CODE_SIGN_ENTITLEMENTS = Gen/DmIOS.entitlements" >> Gen/dm.xcconfig
   t "entitlements: $(plutil -convert json -o - Gen/DmIOS.entitlements)"
 fi
-# The unsigned IPA: an unsigned binary has no signature for a sideloader to read entitlements from,
-# so the request would be lost (AltStore reads the signature it replaces). Sign ad-hoc with the
-# entitlement first; the sideloader strips this signature and carries the entitlement over.
-if [ "$PREPARE_XCODE" != YES ] && [ -n "${DM_ENTITLEMENTS-default}" ]; then
-  if [ -n "${DM_ENTITLEMENTS:-}" ]; then cp "$DM_ENTITLEMENTS" "$APP/DmIOS.entitlements" || die "copy DM_ENTITLEMENTS"
-  else printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-    '<plist version="1.0"><dict><key>com.apple.developer.kernel.increased-memory-limit</key><true/></dict></plist>' > "$APP/DmIOS.entitlements" || die "entitlements"; fi
-  codesign --force --sign - --entitlements "$APP/DmIOS.entitlements" "$APP" || die "ad-hoc sign with entitlements (the sideloader re-signs; this only carries the request)"
-  codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q increased-memory-limit || die "entitlements did not make it into the placeholder signature"
-  t "entitlements: increased-memory-limit embedded in the placeholder signature"
-fi
 xcodegen generate -q > /dev/null || die "xcodegen"
 python3 tools/gen_resources.py "$IOS" "$ROMFS" "$MARKER" "$MSL_IOS/$MSLDIR" "$MSLDIR" "$AOC" "$XCODE_DD" "$DM/gfx/nvn/dmsh_chain.h" || die "generate Xcode resource paths"
 if [ "$PREPARE_XCODE" = YES ]; then
@@ -135,6 +124,17 @@ xcodebuild -project DmIOS.xcodeproj -scheme DmIOS -configuration Release -destin
 # SYMROOT and OBJROOT above keep the unsigned build separate from the interactive Xcode app.
 APP=$DD/Build/Products/Release-iphoneos/DmIOS.app
 [ -n "$APP" ] && [ -d "$APP" ] || die "no built app"; t "app: $APP"
+# The unsigned IPA: an unsigned binary has no signature for a sideloader to read entitlements from,
+# so the request would be lost (AltStore reads the signature it replaces). Sign ad-hoc with the
+# entitlement first; the sideloader strips this signature and carries the entitlement over.
+if [ "$PREPARE_XCODE" != YES ] && [ -n "${DM_ENTITLEMENTS-default}" ]; then
+  if [ -n "${DM_ENTITLEMENTS:-}" ]; then cp "$DM_ENTITLEMENTS" "$APP/DmIOS.entitlements" || die "copy DM_ENTITLEMENTS"
+  else printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+    '<plist version="1.0"><dict><key>com.apple.developer.kernel.increased-memory-limit</key><true/></dict></plist>' > "$APP/DmIOS.entitlements" || die "entitlements"; fi
+  codesign --force --sign - --entitlements "$APP/DmIOS.entitlements" "$APP" || die "ad-hoc sign with entitlements (the sideloader re-signs; this only carries the request)"
+  codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q increased-memory-limit || die "entitlements did not make it into the placeholder signature"
+  t "entitlements: increased-memory-limit embedded in the placeholder signature"
+fi
 
 # Straight from the sources: the app without its signature, and without the folders an app built before pack_ipa.py still has (DerivedData keeps resources that left the project;
 # msl/ is also deleted there, it took 1.5 GB of the home disk), then the shader libraries, the add-on content (the RomFS extracted from the player's DLC NSPs, one folder per index:
