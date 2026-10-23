@@ -78,6 +78,8 @@ final class BuildModel: ObservableObject {
     @Published var logTail = ""
     @Published var done = false
     @Published var doneNote = ""
+    @Published var ipaPath = ""      // captured from the script's "output IPA:" line
+    @Published var archivePath = ""  // the romfs folder the pack wrote
 
     @Published var deps: [Dep] = []
     @Published var depsChecked = false
@@ -420,15 +422,23 @@ final class BuildModel: ObservableObject {
             cleanupStaging(); return
         }
         let romfs = extract + "/" + v + "/RomFS"
-        let dest = (outDir.isEmpty ? (basePath as NSString).deletingLastPathComponent : outDir) + "/archive"
+        // The output folder is named romfs and holds romfs.idx + the shards — exactly the layout
+        // Documents/romfs wants, so it can be copied onto the phone without renaming.
+        let dest = (outDir.isEmpty ? (basePath as NSString).deletingLastPathComponent : outDir) + "/romfs"
         try? fm.createDirectory(atPath: dest, withIntermediateDirectories: true)
+        // a previous pack's shards must not survive a smaller new pack (the index names its own
+        // shards, but stale higher-numbered files would sit there confusingly)
+        for old in ((try? fm.contentsOfDirectory(atPath: dest)) ?? [])
+        where old == "romfs.idx" || (old.hasPrefix("romfs.") && old.dropFirst(6).allSatisfy(\.isNumber)) {
+            try? fm.removeItem(atPath: dest + "/" + old)
+        }
         let idx = 1000
         stages.append(Stage(id: idx, name: t("prog.archive"), state: .running, detail: v))
         say(String(format: t("msg.archiveLog"), romfs, dest))
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath)
-        p.arguments = [repoPath + "/dm/tools/romfs_arc.py", "pack", romfs, dest + "/romfs", "--shard-mib", "200"]
+        p.arguments = [repoPath + "/dm/tools/romfs_arc.py", "pack", romfs, dest, "--shard-mib", "200"]
         p.environment = ["PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "PYTHONPATH": repoPath + "/dm/tools"]
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
@@ -439,18 +449,17 @@ final class BuildModel: ObservableObject {
         p.terminationHandler = { [weak self] st in DispatchQueue.main.async {
             guard let self else { return }
             self.cleanupStaging()
+            if st.terminationStatus == 0 { self.archivePath = dest }
             if let i = self.stages.firstIndex(where: { $0.id == idx }) {
                 self.stages[i].state = st.terminationStatus == 0 ? .done : .failed
                 self.stages[i].detail = st.terminationStatus == 0
-                    ? dest + "/romfs.idx"
+                    ? String(format: self.t("prog.archiveDone"), dest)
                     : String(format: self.t("msg.archiveFailed"), st.terminationStatus)
             }
             let n = ((try? FileManager.default.contentsOfDirectory(atPath: dest)) ?? []).filter { $0.hasPrefix("romfs") }.count
             self.running = false
             self.done = st.terminationStatus == 0
-            self.doneNote = st.terminationStatus == 0
-                ? String(format: self.t("msg.done"), n, dest)
-                : self.t("msg.archiveIpaOnly")
+            self.doneNote = st.terminationStatus == 0 ? self.t("msg.done") : self.t("msg.archiveIpaOnly")
         }}
         do { try p.run() } catch {
             if let i = stages.firstIndex(where: { $0.id == idx }) {
@@ -818,6 +827,7 @@ struct ContentView: View {
             repository
             inputs
             dependencies
+            if m.done { installGuide }
             stagesView
             logView
         }
@@ -997,6 +1007,51 @@ struct ContentView: View {
                 }
                 }
             }.padding(8)
+        }
+    }
+
+    // ---- 安装引导（构建完成后出现） ----
+
+    private func reveal(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    private var installGuide: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("iphone.gen3", m.t("install.title"))
+                guideRow(m.t("install.step1"))
+                guideRow(m.t("install.step2"))
+                guideRow(m.t("install.step3"))
+                HStack(spacing: 8) {
+                    Text(m.ipaPath).font(.system(size: 11.5, design: .monospaced))
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        .help(m.ipaPath)
+                    Spacer(minLength: 8)
+                    Button(m.t("install.reveal")) { reveal(m.ipaPath) }.controlSize(.small)
+                }
+                HStack(spacing: 8) {
+                    Text(m.archivePath).font(.system(size: 11.5, design: .monospaced))
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        .help(m.archivePath)
+                    Spacer(minLength: 8)
+                    Button(m.t("install.reveal")) { reveal(m.archivePath) }.controlSize(.small)
+                }
+            }.padding(8)
+        }
+    }
+
+    private func guideRow(_ s: String) -> some View {
+        // "1\t…": the tab splits the step number from the text
+        let parts = s.split(separator: "\t", maxSplits: 1)
+        let num = parts.first.map(String.init) ?? ""
+        let text = parts.count > 1 ? String(parts[1]) : s
+        return HStack(alignment: .top, spacing: 8) {
+            Text(num).font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.green)
+                .frame(width: 16)
+            Text(text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 

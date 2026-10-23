@@ -120,6 +120,12 @@ enum L10n {
         "status.chooseRepo": ("先选择项目仓库", "Choose the project repository first"),
         "status.needInputs": ("还需要选择游戏本体和 prod.keys", "Still need the base game and prod.keys"),
         "status.output": ("输出：%@", "Output: %@"),
+        "install.title": ("安装到 iPhone", "Install on the iPhone"),
+        "install.step1": ("1\t用 AltStore / Sideloadly 安装上面的 IPA", "1\tInstall the IPA above with AltStore / Sideloadly"),
+        "install.step2": ("2\t把上面的 romfs 文件夹整个拷到游戏 App 的 Documents 里（文件 App → 我的 iPhone → 游戏名）",
+                          "2\tCopy the whole romfs folder above into the game app's Documents (Files → On My iPhone → game name)"),
+        "install.step3": ("3\t启动游戏", "3\tLaunch the game"),
+        "install.reveal": ("在访达中显示", "Reveal in Finder"),
 
         // ---- build messages ----
         "msg.running": ("运行：%@", "Running: %@"),
@@ -139,8 +145,9 @@ enum L10n {
         "msg.archiveFailed": ("归档失败（退出码 %d）", "Archive failed (exit code %d)"),
         "msg.archiveNoStart": ("无法启动 romfs_arc.py", "Could not start romfs_arc.py"),
         "msg.archiveIpaOnly": ("IPA 已生成，归档失败", "IPA built, but the archive failed"),
-        "msg.done": ("完成：IPA + 归档 %d 个文件（%@）", "Done: IPA + %d archive files (%@)"),
-        "msg.archiveLog": ("归档：%@ → %@/romfs.idx", "Archive: %@ → %@/romfs.idx"),
+        "msg.done": ("完成：IPA 与 romfs 归档已生成，按下面三步装到手机", "Done: the IPA and the romfs archive are ready — three steps below"),
+        "prog.archiveDone": ("归档就绪：%@", "archive ready: %@"),
+        "msg.archiveLog": ("归档：%@ → %@", "Archive: %@ → %@"),
     ]
 
     static func string(_ key: String, _ lang: Lang) -> String {

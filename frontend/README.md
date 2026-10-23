@@ -29,8 +29,10 @@ their own Switch game files — the GUI counterpart of the repository's scripts.
   plan (unpack, module rewrite, shader compile, IPA pack, archive) with a live
   percentage per stage, not a guessed five-step list.
 - **Archive sharding** as the last step: the extracted RomFS goes through
-  `dm/tools/romfs_arc.py` into ~200 MiB shards, which is what makes the game
-  installable at all (see the [archive docs](../docs/ROMFS_ARCHIVE.md)).
+  `dm/tools/romfs_arc.py` into a `romfs/` folder of ~200 MiB shards — named so it
+  can be copied into the game app's `Documents/` unchanged. When the build
+  finishes the window shows the three installation steps and a Reveal-in-Finder
+  button for the IPA and the folder (see the [archive docs](../docs/ROMFS_ARCHIVE.md)).
 
 ## Run
 
