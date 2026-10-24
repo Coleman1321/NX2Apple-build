@@ -18,7 +18,7 @@ RomFS 归档——最后告诉你把文件装上设备的三步。
   参数没变的重新构建直接复用一切（上游管线的特性；App 用自己的构建目录来驱动它）。
 - **自动跟随上游。** 每天一次的 GitHub Actions 把本 fork 的特性重新应用 upstream 新树，验证（脚本解析、
   归档读取测试、macOS 宿主编译）后推送——补丁对不上时开 issue 附日志，不推送。
-- **48 个游戏 profile**，每个游戏需要的更新包版本单独列出。两个在本 fork 完整验证；二十余个上游报告
+- **48 个游戏 profile**，每个游戏需要的更新包版本单独列出。三个在本 fork 完整验证；二十余个上游报告
   iPhone 可玩（表格见下）。
 
 [English](README.md) | 简体中文 · 原名 `nxnative-romfs-archive`（旧链接会自动跳转到这里）。
@@ -300,7 +300,7 @@ shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 
 | Unicorn Overlord | `010069401ADB8000` | 1.05 (v262144) | 有 profile，未在手机上验证 |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 (v131072) | 上游报告 iPhone 可玩 |
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 (v262144) | 有 profile，未在手机上验证 |
-| Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 (v2228224) | 有 profile，未在手机上验证 |
+| Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 (v2228224) | **本 fork 已验证** —— 构建、安装、在 iPhone 上流畅运行；103,645 个文件归档成 72 片 |
 | AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | 1.0.2 (v131072) | 上游报告 iPhone 可玩 |
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 (v1114112) | 上游报告 iPhone 可玩 |
 | AI: THE SOMNIUM FILES | `010089B00D09C000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |

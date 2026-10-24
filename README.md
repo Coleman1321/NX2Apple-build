@@ -24,7 +24,7 @@ follows upstream automatically. What it adds:
 - **Follows upstream automatically.** A daily GitHub Actions job re-applies the fork's features onto
   upstream's tree, verifies the result (script parse, archive reader test, a macOS host build) and
   pushes — or opens an issue with the log when a patch no longer fits.
-- **48 game profiles** with the required update version listed per game. Two are verified end to end
+- **48 game profiles** with the required update version listed per game. Three are verified end to end
   on this fork; twenty-odd are reported playable on an iPhone upstream (table below).
 
 English | [简体中文](README.zh-CN.md) · Formerly `nxnative-romfs-archive` (the old links redirect
@@ -328,7 +328,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | Unicorn Overlord | `010069401ADB8000` | 1.05 (v262144) | Profile present; not verified on a phone |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 (v131072) | Playable on an iPhone (upstream) |
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 (v262144) | Profile present; not verified on a phone |
-| Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 (v2228224) | Profile present; not verified on a phone |
+| Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 (v2228224) | **Verified here** — builds, installs and runs smoothly on an iPhone; 103,645 files into 72 archive shards |
 | AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | 1.0.2 (v131072) | Playable on an iPhone (upstream) |
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 (v1114112) | Playable on an iPhone (upstream) |
 | AI: THE SOMNIUM FILES | `010089B00D09C000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
