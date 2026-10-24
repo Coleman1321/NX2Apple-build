@@ -1281,6 +1281,7 @@ int mtl_wait(uint64_t fence, uint64_t timeout_ns) {
 
 static void mtl_finish_gpu(void) {
     if (g_fence) mtl_wait(g_fence, UINT64_MAX);
+    if (on_sub_thread()) rec_publish();   // The same deadlock up_begin's publish guards against, on the sibling path: pending upload commits sit as records in the open replay block (rec_commit_upload), and nothing hands the block over mid-submission — a loader's QueueFinish inside a submission (Fire Emblem: Three Houses waits once per resource it uploads) would sleep on g_up_pending forever while the submission cannot end. Publish first: the encode thread commits the batches, their completion handlers drop the counter and wake the waiter. Non-submit threads (suspend, diagnostics) cannot publish the submit thread's open block; their waits resolve once the submission ends
     up_wait_zero(&g_up_pending);
 }
 void mtl_present_flush(void);
