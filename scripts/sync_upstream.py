@@ -257,9 +257,10 @@ static void arc_snapshot(dirh_t *h, const char *hp) {
 
 def patch_makefile(t):
     if 'romfs_arc.c' in t: return skip('Makefile (already patched)')
-    old = 'SRC=main.c loader.c hle.c crash.c probe.c thread.c memstat.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S'
+    # Anchor on the stable SRC prefix: upstream adds and reorders files after hle.c (haptics_apple.m)
+    old = 'SRC=main.c loader.c hle.c '
     if old not in t: fail('dm/host/Makefile: SRC anchor missing (upstream changed the source list)')
-    return done('Makefile SRC', t.replace(old, 'SRC=main.c loader.c hle.c romfs_arc.c crash.c probe.c thread.c memstat.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S', 1))
+    return done('Makefile SRC', t.replace(old, 'SRC=main.c loader.c hle.c romfs_arc.c ', 1))
 
 ENT = '''# The unsigned IPA: an unsigned binary has no signature for a sideloader to read entitlements from,
 # so the request would be lost (AltStore reads the signature it replaces). Sign ad-hoc with the
@@ -363,11 +364,14 @@ def patch_nsp(t):
     return t
 
 def patch_shader_split(t):
+    # Upstream fixed the same 3.9 f-string themselves (d4249e5: a label variable); either fix ends it.
+    if 'label = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))' in t: return skip('shader_split.py (upstream fixed it)')
     if 'a backslash cannot sit inside an f-string expression' in t: return skip('shader_split.py (already patched)')
     old = '''        ue_inline_shaders(d, f'/{rel}#{re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))}', out)'''
     if old not in t: fail('dm/gfx/tools/shader_split.py: ue_inline_shaders anchor missing')
-    new = '''        _sub = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))   # a backslash cannot sit inside an f-string expression before 3.12
-        ue_inline_shaders(d, '/{}#{}'.format(rel, _sub), out)'''
+    # The same shape as upstream's own fix (d4249e5), so the marker holds whichever of the two applied
+    new = '''        label = re.sub(r"^(\\.\\./)+", "", os.path.normpath(pk.mount + name))   # a backslash cannot sit inside an f-string expression before 3.12
+        ue_inline_shaders(d, f'/{rel}#{label}', out)'''
     return done('shader_split.py 3.9', t.replace(old, new, 1))
 
 NVM = 'dm/gfx/nvn/nvn_mtl.m'
@@ -434,7 +438,7 @@ MARKERS = {
     'dm/host/Makefile': 'romfs_arc.c',
     'dm/ios/tools/build_ipa.sh': 'DM_FULL_ROMFS',
     'scripts/build_ipa_from_nsp.py': '--work-dir',
-    'dm/gfx/tools/shader_split.py': 'a backslash cannot sit inside an f-string expression',
+    'dm/gfx/tools/shader_split.py': "ue_inline_shaders(d, f'/{rel}#{label}', out)",
     'dm/ios/Sources/main.m': 'romfs.idx',
     'dm/gfx/nvn/nvn_mtl.m': 'hand it over before waiting on g_up_pending',
     'dm/games/0100A00019DE0000/game.tsv': 'build	v1	1.0.137848',
