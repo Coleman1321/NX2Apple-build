@@ -1,0 +1,48 @@
+sync ebe75c9 → 156d3c2
+177 upstream file changes under dm scripts docs AGENTS.md ref
+  = nvn_mtl.m up_begin publish (already patched)
+  + nvn_mtl.m finish publish
+  = shader_split.py (upstream fixed it)
+  + Makefile SRC
+  + build_ipa.sh slim + entitlements
+  + NSP script work-dir arg
+  + NSP script work-dir paths
+  + NSP script DOTNET_ROOT
+  = NSP script 3.9 survey note (upstream no longer has the pattern)
+  = NSP script 3.9 not-brought-up note (upstream no longer has the pattern)
+  = NSP script 3.9 derived note (upstream no longer has the pattern)
+177 files taken from upstream
+  = hle_fs.c include (already patched)
+  = hle_fs.c synthetic path (already patched)
+  = hle_fs.c MountRom (already patched)
+  = hle_fs.c archive handles (already patched)
+  = hle_fs.c OpenFile (already patched)
+  = hle_fs.c ReadFile (already patched)
+  = hle_fs.c GetFileSize (already patched)
+  = hle_fs.c CloseFile (already patched)
+  = hle_fs.c GetEntryType (already patched)
+  = hle_fs.c snapshot helper (already patched)
+  = hle_fs.c OpenDirectory (already patched)
+  = hle_fs.c ReadDirectory guard (already patched)
+  = hle_fs.c CloseDirectory guard (already patched)
+  = Makefile (already patched)
+  = build_ipa.sh entitlements (already patched)
+  = NSP script work-dir arg (already patched)
+  = NSP script work-dir paths (already patched)
+  = NSP script DOTNET_ROOT (already patched)
+  = NSP script 3.9 survey note (upstream no longer has the pattern)
+  = NSP script 3.9 not-brought-up note (upstream no longer has the pattern)
+  = NSP script 3.9 derived note (upstream no longer has the pattern)
+  = shader_split.py (upstream fixed it)
+  = main.m romfs.idx (already patched)
+  = nvn_mtl.m up_begin publish (already patched)
+  = nvn_mtl.m finish publish (already patched)
+  = Hades II profile (already patched)
+--- verify ---
+  + every .py parses on the Python 3.9 floor
+  + build_ipa.sh: bash -n OK
+  + archive reader test passed
+  … building the macOS host for 01006F8002326000 (a few minutes)
+  + host build OK (01006F8002326000)
+
+SYNC OK — commit and push from the caller
