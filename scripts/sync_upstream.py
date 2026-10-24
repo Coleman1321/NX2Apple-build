@@ -375,23 +375,25 @@ def patch_nvn_mtl(t):
     # The fork's fix for the iOS save-load freeze (NX2Apple issue #4): an upload batch's commit can sit
     # recorded in the open replay block (rec_commit_upload) while the submit thread sleeps on a slot or
     # on g_up_pending — nothing else hands the block over mid-submission, so the submission can never
-    # end and the wait never resolves. Both waits publish the block first.
+    # end and the wait never resolves. Upstream independently fixed the up_begin half (Little Nightmares
+    # II, their comment in up_begin); ours is kept for the case their tree loses it, and the
+    # mtl_finish_gpu half (a loader's QueueFinish mid-submission) is ours alone.
     P = [
-        ('up_begin publish', 'the iOS save-load freeze of NX2Apple issue #4', [(
+        ('up_begin publish', ['the iOS save-load freeze of NX2Apple issue #4', "Little Nightmares II's first render passes"], [(
             '''    unsigned slot = g_up_seq++ % 3;
     up_wait_zero(&g_up_alloc_busy[slot]);''',
             '''    unsigned slot = g_up_seq++ % 3;
     if (atomic_load(&g_up_alloc_busy[slot])) rec_publish();   // The commit of the batch that still holds this slot sits in the open replay block (rec_commit_upload). Hand the block to the encode thread before sleeping on the slot: a submit thread that opens a 4th batch within one submission would otherwise wait forever — nothing else hands the block over mid-submission, and the submission cannot end while up_begin blocks (the iOS save-load freeze of NX2Apple issue #4)
     up_wait_zero(&g_up_alloc_busy[slot]);''')]),
-        ('finish publish', 'hand it over before waiting on g_up_pending', [(
+        ('finish publish', ['hand it over before waiting on g_up_pending'], [(
             '''    if (g_fence) mtl_wait(g_fence, UINT64_MAX);
     up_wait_zero(&g_up_pending);''',
             '''    if (g_fence) mtl_wait(g_fence, UINT64_MAX);
     if (on_sub_thread()) rec_publish();   // Pending upload commits sit in the open replay block: hand it over before waiting on g_up_pending, or a loader's QueueFinish mid-submission (Three Houses-style per-resource waits) sleeps forever. Other threads (suspend, diagnostics) cannot publish the submit thread's block; their waits resolve once the submission ends
     up_wait_zero(&g_up_pending);''')]),
     ]
-    for name, marker, pairs in P:
-        if marker in t:
+    for name, markers, pairs in P:
+        if any(m in t for m in markers):
             skip(f'nvn_mtl.m {name} (already patched)'); continue
         for old, new in pairs:
             if old not in t: fail(f'{NVM}: patch "{name}" anchor missing: {old[:70]!r}')
@@ -434,7 +436,7 @@ MARKERS = {
     'scripts/build_ipa_from_nsp.py': '--work-dir',
     'dm/gfx/tools/shader_split.py': 'a backslash cannot sit inside an f-string expression',
     'dm/ios/Sources/main.m': 'romfs.idx',
-    'dm/gfx/nvn/nvn_mtl.m': 'the iOS save-load freeze of NX2Apple issue #4',
+    'dm/gfx/nvn/nvn_mtl.m': 'hand it over before waiting on g_up_pending',
     'dm/games/0100A00019DE0000/game.tsv': 'build	v1	1.0.137848',
 }
 PATCHERS = {
