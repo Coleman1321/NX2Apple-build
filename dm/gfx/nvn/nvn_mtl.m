@@ -1261,6 +1261,7 @@ int mtl_wait(uint64_t fence, uint64_t timeout_ns) {
 
 static void mtl_finish_gpu(void) {
     if (g_fence) mtl_wait(g_fence, UINT64_MAX);
+    if (on_sub_thread()) rec_publish();   // Pending upload commits sit in the open replay block: hand it over before waiting on g_up_pending, or a loader's QueueFinish mid-submission (Three Houses-style per-resource waits) sleeps forever. Other threads (suspend, diagnostics) cannot publish the submit thread's block; their waits resolve once the submission ends
     up_wait_zero(&g_up_pending);
 }
 void mtl_present_flush(void);
@@ -1581,6 +1582,7 @@ static void up_begin(void) {
     up_owner_check("up_begin");
     if (g_up_cb) return;
     unsigned slot = g_up_seq++ % 3;
+    if (atomic_load(&g_up_alloc_busy[slot])) rec_publish();   // The commit of the batch that still holds this slot sits in the open replay block (rec_commit_upload). Hand the block to the encode thread before sleeping on the slot: a submit thread that opens a 4th batch within one submission would otherwise wait forever — nothing else hands the block over mid-submission, and the submission cannot end while up_begin blocks (the iOS save-load freeze of NX2Apple issue #4)
     up_wait_zero(&g_up_alloc_busy[slot]);
     atomic_store(&g_up_alloc_busy[slot], 1); g_up_cur_slot = slot;
     [g_up_alloc4[slot] reset];
