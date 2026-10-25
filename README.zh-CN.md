@@ -1,8 +1,8 @@
 # NX2Apple
 
-**在 iPhone 或 iPad 上玩你自己的 Switch 游戏。** 把一个 macOS App 指向你自己导出的游戏文件，它会跑完整条
-流水线：解包、为 Apple 芯片重写游戏代码、把 shader 翻译成 Metal、打包出一个装得进手机的瘦身 IPA 和分片
-RomFS 归档——最后告诉你把文件装上设备的三步。
+**你的 Switch 游戏，跑在你的 iPhone 上。** 不是模拟器，也不用碰命令行：一个 macOS App 拿你自己导出的
+游戏文件，点几下就把整件事做完——解包、为 Apple 芯片重写游戏代码、把 shader 翻译成 Metal、打包出装得进
+手机的瘦身 IPA 和分片 RomFS 归档（16 GB 的大作也装得上），最后告诉你装上设备的三步。
 
 <img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
 

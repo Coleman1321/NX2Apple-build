@@ -1,9 +1,10 @@
 # NX2Apple
 
-**Play your own Nintendo Switch games on an iPhone or iPad.** Point a macOS app at your own game
-dumps and it runs the whole pipeline: unpack, rewrite the game's code for Apple silicon, translate
-its shaders to Metal, and pack a slim IPA plus a sharded RomFS archive that a phone can actually
-install — then tells you the three steps to get it onto the device.
+**Your Switch games, running on your iPhone.** Not an emulator, and no terminal: a macOS app takes
+your own game dumps and does the whole thing with a few clicks — unpack, rewrite the game's code for
+Apple silicon, translate its shaders to Metal, pack a slim IPA plus a sharded RomFS archive that a
+phone can actually install (even a 16 GB game), and then tells you the three steps to get it onto
+the device.
 
 <img src="frontend/screenshots/main-window-en.png" width="620" alt="NS Port Builder">
 
