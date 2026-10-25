@@ -13,6 +13,9 @@
 [![Games](https://img.shields.io/badge/games-58-blue)](#supported-games)
 [![Verified](https://img.shields.io/badge/verified_on_an_iPhone-3-success)](#supported-games)
 
+[![English](https://img.shields.io/badge/🇺🇸_English-current-blue)](README.md)
+[![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-available-green)](README.zh-CN.md)
+
 <img src="frontend/screenshots/hero-features-en.png" width="100%" alt="NX2Apple — Switch games on your iPhone">
 
 A macOS app takes your own game dumps and does the whole thing with a few clicks — unpack, rewrite
