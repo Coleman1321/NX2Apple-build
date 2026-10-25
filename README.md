@@ -13,15 +13,16 @@
 [![Games](https://img.shields.io/badge/games-58-blue)](#supported-games)
 [![Verified](https://img.shields.io/badge/verified_on_an_iPhone-3-success)](#supported-games)
 
-[![English](https://img.shields.io/badge/🇺🇸_English-current-blue)](README.md)
-[![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-available-green)](README.zh-CN.md)
-
 <img src="frontend/screenshots/hero-features-en.png" width="100%" alt="NX2Apple — Switch games on your iPhone">
 
 A macOS app takes your own game dumps and does the whole thing with a few clicks — unpack, rewrite
 the game's code for Apple silicon, translate its shaders to Metal, pack a slim IPA plus a sharded
 RomFS archive that a phone can actually install (even a 16 GB game), and then tells you the three
 steps to get it onto the device.
+
+### 🌏 [阅读中文版说明 →](README.zh-CN.md)
+
+**中文用户请看这里**：[简体中文 README](README.zh-CN.md)（完整翻译，含全部 58 款游戏的中文名）
 
 **Formerly `nxnative-romfs-archive`** — old links redirect here.
 
