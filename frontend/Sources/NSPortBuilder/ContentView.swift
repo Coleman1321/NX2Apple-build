@@ -80,6 +80,9 @@ final class BuildModel: ObservableObject {
     @Published var doneNote = ""
     @Published var ipaPath = ""      // captured from the script's "output IPA:" line
     @Published var archivePath = ""  // the romfs folder the pack wrote
+    /// Where this build's folder actually is: --work-dir when the checkout has it, else the script's
+    /// default under the input folder (issue #5 — an upstream checkout has no --work-dir).
+    var effectiveWorkDir = ""
 
     @Published var deps: [Dep] = []
     @Published var depsChecked = false
@@ -117,6 +120,16 @@ final class BuildModel: ObservableObject {
 
     nonisolated static func isRepo(_ dir: String) -> Bool {
         FileManager.default.fileExists(atPath: dir + "/dm/tools/nx_extract/Program.cs")
+    }
+
+    /// Whether the checkout's build script has this fork's `--work-dir` (issue #5): an upstream
+    /// nxnative checkout, or a ZIP of an older release, stops with "unrecognized arguments" when the
+    /// app passes it. Read from the script's own argparse rather than assumed — the option is the
+    /// fork's, not upstream's.
+    nonisolated static func repoSupportsWorkDir(_ dir: String) -> Bool {
+        let script = dir + "/scripts/build_ipa_from_nsp.py"
+        guard let text = try? String(contentsOfFile: script, encoding: .utf8) else { return false }
+        return text.contains("'--work-dir'") || text.contains("\"--work-dir\"")
     }
 
     nonisolated static func findRepo() -> String {
@@ -534,6 +547,15 @@ final class BuildModel: ObservableObject {
 
         let tidHex = Self.titleID(basePath).map { String(format: "%016llX", $0) } ?? "game"
         let workDir = (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + "_build"
+        // This fork's --work-dir keeps the build folder (extracted files, shader cache, the romfs
+        // archive) outside the NSPs' folder. An upstream checkout or an older ZIP does not have the
+        // option and would stop with "unrecognized arguments" (issue #5), so ask the script; without
+        // it the script's own default (<input>/<title ID>_build) is used and the archive step follows
+        // whatever folder the build reports.
+        let hasWorkDir = Self.repoSupportsWorkDir(repoPath)
+        if !hasWorkDir {
+            say(t("msg.noWorkDir"))
+        }
         // A compressed dump (NSZ / XCZ) needs nsz in the interpreter the build runs under; it is not
         // part of the dependency probe (most builds never see one), so install it here, once, only
         // when such a file is actually selected — otherwise the build stops with "pip install nsz".
@@ -554,8 +576,12 @@ final class BuildModel: ObservableObject {
             }
         }
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
-                    "--work-dir", workDir, "--progress", "lines"]
+                    "--progress", "lines"]
+        if hasWorkDir { args += ["--work-dir", workDir] }
         if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
+        // The archive step packs whatever folder the build reported; without --work-dir that is the
+        // script's default, which is the same workDir unless a separate output folder was chosen.
+        effectiveWorkDir = hasWorkDir ? workDir : (inputDir as NSString).appendingPathComponent(tidHex + "_build")
         say(String(format: t("msg.running"), py) + " " + args.joined(separator: " "))
 
         let p = Process()
@@ -582,7 +608,7 @@ final class BuildModel: ObservableObject {
                 self.flushLines()
                 if status.terminationStatus == 0 {
                     self.markAllDone()
-                    self.packArchive(workDir: workDir)   // keeps running=true until the archive is done
+                    self.packArchive(workDir: self.effectiveWorkDir)   // keeps running=true until the archive is done
                 } else {
                     if let i = self.stages.lastIndex(where: { $0.state == .running }) {
                         self.stages[i].state = .failed

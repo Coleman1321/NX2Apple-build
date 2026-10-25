@@ -176,6 +176,8 @@ enum L10n {
         "msg.running": ("运行：%@", "Running: %@"),
         "msg.installingNsz": ("选中的是 NSZ / XCZ 压缩格式，正在给构建用的 Python 安装 nsz…",
                               "The selected dump is NSZ / XCZ — installing nsz into the build's Python…"),
+        "msg.noWorkDir": ("这个仓库不是 NX2Apple 的最新版本（构建脚本没有 --work-dir）：按脚本默认布局构建。建议换用 NX2Apple 仓库以获得归档复用与断点续传",
+                          "This checkout is not the latest NX2Apple (its build script has no --work-dir): using the script's default layout. Switch to the NX2Apple repository for archive reuse and resumable builds"),
         "msg.nszFailed": ("nsz 安装失败（构建用的 Python：%@）——网络不通？或手动执行 pip install nsz",
                           "Could not install nsz (build Python: %@) — network trouble? Or run pip install nsz by hand"),
         "msg.stopped": ("已停止", "Stopped"),
