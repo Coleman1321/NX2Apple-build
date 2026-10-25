@@ -23,7 +23,7 @@ the game's code for Apple silicon, translate its shaders to Metal, pack a slim I
 RomFS archive that a phone can actually install (even a 16 GB game), and then tells you the three
 steps to get it onto the device.
 
-**中文用户请看这里**：[简体中文 README](README.zh-CN.md)（完整翻译，含全部 58 款游戏的中文名）
+**中文用户请看这里**：[简体中文 README](README.zh-CN.md)
 
 **Formerly `nxnative-romfs-archive`** — old links redirect here.
 
