@@ -7,8 +7,8 @@ import SwiftUI
 // The four inputs are picked separately — base game, update, add-on content (DLC),
 // prod.keys — because they are not always in one folder. When they are (the common
 // case) the folder is passed straight to the script; otherwise a staging folder of
-// symlinks is built and the script's --work-dir keeps the real build folder next to
-// the base game.
+// symlinks is built, with its build folder linked to persistent storage next to
+// the base game (or in the selected output folder).
 
 // MARK: - Pieces
 
@@ -279,10 +279,22 @@ final class BuildModel: ObservableObject {
         } else { staging = nil }
 
         let tidHex = Self.titleID(basePath).map { String(format: "%016llX", $0) } ?? "game"
-        let workDir = (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + "_build"
+        // Use the script's default <inputDir>/<title ID>_build layout for
+        // compatibility with checkouts without --work-dir. Keep staged builds
+        // outside the temporary folder.
+        let workDir = (staging == nil ? baseDir : (outDir.isEmpty ? baseDir : outDir)) + "/" + tidHex + "_build"
+        if staging != nil {
+            do {
+                try FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
+                try FileManager.default.createSymbolicLink(atPath: inputDir + "/" + tidHex + "_build",
+                                                          withDestinationPath: workDir)
+            } catch { fail(t("msg.stagingFailed")); return }
+        }
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
-                    "--work-dir", workDir, "--progress", "lines"]
-        if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
+                    "--keep-extracted", "--progress", "lines"]
+        if !outDir.isEmpty || staging != nil {
+            args += ["-o", (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + ".ipa"]
+        }
         say(String(format: t("msg.running"), py) + " " + args.joined(separator: " "))
 
         let p = Process()

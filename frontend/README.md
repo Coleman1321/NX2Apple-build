@@ -16,9 +16,10 @@ their own Switch game files — the GUI counterpart of the repository's scripts.
   multi-select) and `prod.keys`. `选整个文件夹…` still fills all four at once by
   title ID — `…000` is the base, `…800` the update, `base + 0x1000 + n` add-on
   content, and 0-byte files are skipped. When the files live in different
-  folders the app stages them as symlinks in a temporary folder and passes the
-  script `--work-dir`, so the extracted game files and the IPA still land next
-  to the base game rather than in `/tmp`.
+  folders the app stages them as symlinks in a temporary folder and links its
+  build directory to persistent storage beside the base game (or in the selected
+  output folder). The IPA output is passed with `-o`; `--keep-extracted` keeps
+  the RomFS available for archive packing.
 - **Dependency detection with one-click install**: Xcode + iOS SDK, the Metal
   Toolchain, Homebrew, `xcodegen` / `zstd` / `spirv-cross`, the .NET SDK and the
   Python packages. Every row shows ✓ / ✗ and, when missing, an 安装 button that
