@@ -22,7 +22,7 @@
 shader 翻译成 Metal、打包出装得进手机的瘦身 IPA 和分片 RomFS 归档（16 GB 的大作也装得上），最后告诉
 你装上设备的三步。
 
-### 🌏 [Read this in English →](README.md)
+**English readers** — the [English README](README.md) covers everything.
 
 **原名 `nxnative-romfs-archive`** —— 旧链接会自动跳转到这里。
 
