@@ -1,31 +1,134 @@
-# NX2Apple
+# 🎮 NX2Apple
 
-**你的 Switch 游戏，跑在你的 iPhone 上。** 不是模拟器，也不用碰命令行：一个 macOS App 拿你自己导出的
-游戏文件，点几下就把整件事做完——解包、为 Apple 芯片重写游戏代码、把 shader 翻译成 Metal、打包出装得进
-手机的瘦身 IPA 和分片 RomFS 归档（16 GB 的大作也装得上），最后告诉你装上设备的三步。
+**你的 Switch 游戏，跑在你的 iPhone 上。**
 
-<img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
+<div align="center">
 
-项目基于 **[nxnative](https://github.com/seedds/nxnative)**——NSO 重写器、Horizon 宿主层、NVN-on-Metal、
-各游戏的 profile 都是上游的工作，本 fork 自动跟随上游。在此之上它增加了：
+**不是模拟器。不用命令行。一个 macOS App 点几下就把整个构建做完。**
 
-- **给普通用户的图形界面。** [NS Port Builder](frontend/README.md) 引导第一次接触的用户完成整个构建：
-  四项输入分开选（或一个文件夹全选）、设备依赖检测并一键安装、来自构建自身的实时进度、最后是带
-  「在访达中显示」按钮的安装引导。默认英文；中文设备显示中文。
-- **RomFS 归档。** 《王国之泪》的 304,243 个文件变成 127 个分片——这就是 iOS 从
-  `PackageExtractionFailed` 安装失败到安装成功之间的差别（细节见下）。
-- **构建中断可续。** 解包、DLC、模块改写和 shader 编译都会保留复用：失败或中途停止的构建从上次继续，
-  参数没变的重新构建直接复用一切（上游管线的特性；App 用自己的构建目录来驱动它）。
-- **自动跟随上游。** 每天一次的 GitHub Actions 把本 fork 的特性重新应用 upstream 新树，验证（脚本解析、
-  归档读取测试、macOS 宿主编译）后推送——补丁对不上时开 issue 附日志，不推送。
-- **58 个游戏 profile**，每个游戏需要的更新包版本单独列出。三个在本 fork 完整验证；二十九个上游报告
-  iPhone 可玩（表格见下）。
+[![Stars](https://img.shields.io/github/stars/LNPANDY/NX2Apple?style=social)](https://github.com/LNPANDY/NX2Apple/stargazers)
+[![Forks](https://img.shields.io/github/forks/LNPANDY/NX2Apple?style=social)](https://github.com/LNPANDY/NX2Apple/network/members)
+[![Issues](https://img.shields.io/github/issues/LNPANDY/NX2Apple)](https://github.com/LNPANDY/NX2Apple/issues)
+[![License](https://img.shields.io/github/license/LNPANDY/NX2Apple)](LICENSE)
+[![游戏](https://img.shields.io/badge/游戏-58-blue)](#支持的游戏)
+[![已验证](https://img.shields.io/badge/iPhone_实测通过-3-success)](#支持的游戏)
 
-[English](README.md) | 简体中文 · 原名 `nxnative-romfs-archive`（旧链接会自动跳转到这里）。
+[![English](https://img.shields.io/badge/🇺🇸_English-available-green)](README.md)
+[![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前-blue)](README.zh-CN.md)
+
+<img src="frontend/screenshots/main-window.png" width="640" alt="NS Port Builder">
+
+</div>
+
+一个 macOS App 拿你自己导出的游戏文件，点几下就把整件事做完——解包、为 Apple 芯片重写游戏代码、把
+shader 翻译成 Metal、打包出装得进手机的瘦身 IPA 和分片 RomFS 归档（16 GB 的大作也装得上），最后告诉
+你装上设备的三步。
+
+> **原名 `nxnative-romfs-archive`** —— 旧链接会自动跳转到这里。
 
 ---
 
-## 问题
+## 📖 这是什么
+
+本仓库是 **[nxnative](https://github.com/seedds/nxnative)** 的社区 fork——NSO 重写器、Horizon 宿主层、
+NVN-on-Metal、各游戏的 profile 都是上游的工作，本 fork 自动跟随上游。在此之上它增加了：
+
+- **🖱️ 给普通用户的图形界面。** [NS Port Builder](frontend/README.md) 引导第一次接触的用户完成整个
+  构建：四项输入分开选（或一个文件夹全选）、设备依赖检测并一键安装、来自构建自身的实时进度、最后是带
+  「在访达中显示」按钮的安装引导。默认英文；中文设备显示中文。**它还会替你下载仓库、并自己更新自己**
+  ——完全不需要懂 git。
+- **📦 RomFS 归档。** 《王国之泪》的 304,243 个文件变成 127 个分片——这就是 iOS 从
+  `PackageExtractionFailed` 安装失败到安装成功之间的差别（细节见下）。
+- **⏸️ 构建中断可续。** 解包、DLC、模块改写和 shader 编译都会保留复用：失败或中途停止的构建从上次
+  继续，参数没变的重新构建直接复用一切。
+- **🔄 自动跟随上游。** 每天一次的 GitHub Actions 把本 fork 的特性重新应用到 upstream 新树，验证
+  （脚本解析、归档读取测试、macOS 宿主编译）后推送——补丁对不上时开 issue 附日志，不推送。
+- **🎯 58 个游戏 profile**，每个游戏需要的更新包版本单独列出。三个在本 fork 完整验证；二十九个上游
+  报告 iPhone 可玩。
+
+---
+
+## 📚 目录
+
+- [✨ 功能一览](#功能一览)
+- [🚀 快速开始](#快速开始)
+- [🎮 支持的游戏](#支持的游戏)
+- [🔧 工作原理](#工作原理)
+- [📝 更新历史](#更新历史)
+- [🤝 参与贡献：着色器与新游戏](#参与贡献着色器与新游戏)
+- [⚠️ 限制](#限制)
+- [🙏 致谢](#致谢)
+- [⚖️ 法律](#法律)
+
+---
+
+## ✨ 功能一览
+
+| | 功能 | 说明 |
+|---|---|---|
+| 🖱️ | **一键构建** | 选好文件，按一下构建。全程不用命令行 |
+| 📦 | **RomFS 归档** | 30 万文件 → 约 100 个分片，16 GB 的大作也装得上 |
+| 🔁 | **断点续传** | 中断的构建接着跑；没变的部分直接复用 |
+| 🧩 | **58 个游戏 profile** | 每个都标注它需要的精确更新版本 |
+| 📲 | **安装引导** | 装到手机的三步，带「在访达中显示」 |
+| 🌏 | **中英双语** | 跟随设备语言，标题栏随时切换 |
+| ⬇️ | **自助安装** | 自动下载仓库，App 自己也能更新自己 |
+| 🔄 | **自动同步上游** | 每天一次，带验证；补丁失效会开 issue |
+
+---
+
+## 🚀 快速开始
+
+1. **下载 App** —— [最新版本](https://github.com/LNPANDY/NX2Apple/releases/latest)
+   （`NS-Port-Builder-macOS-arm64.zip`）。解压，首次启动右键 → 打开。
+2. **让它把项目取回来** —— 仓库分组里有「下载仓库」按钮（浅克隆到 `~/NX2Apple`）。GitHub 不顺手？
+   面板上有手动 ZIP 的路线。
+3. **选好游戏文件** —— 本体、更新包、DLC 和 `prod.keys`，分开选或一个文件夹全选。
+4. **按构建**，然后照它给出的三步装到手机。
+
+> 环境要求：Apple Silicon Mac + macOS 13+、装了 iOS SDK 的 Xcode、Python 3.9+、.NET SDK 10。
+> App 的依赖面板会逐项检测，能装的直接装。游戏文件和 `prod.keys` 需要你自己的——本仓库不含任何数据。
+
+---
+
+## 🎮 支持的游戏
+
+**3 款在本 fork 完整验证**（构建 → 安装 → 真机可玩）、**29 款上游报告可玩**、**共 58 个 profile**。
+每款游戏需要的精确更新版本见[完整表格](#支持的游戏)。
+
+| 游戏 | 本 fork 验证 | 备注 |
+|---|---|---|
+| **塞尔达传说：王国之泪** | ✅ | 304,243 个文件 → 127 片，逐字节校验 |
+| **Hades II** | ✅ | 33 个文件的归档 |
+| **集合啦！动物森友会** | ✅ | 103,645 个文件 → 72 片，流畅运行 |
+
+---
+
+## 🔧 工作原理
+
+### 🖥️ 图形界面
+
+`frontend/` 是一个 macOS App，用窗口代替终端完成下面的第 2–5 步，给不想读构建日志的人用：四项输入
+分开选（本体、更新、DLC、`prod.keys`）、依赖面板检测并安装缺的东西、脚本真实的阶段列表和实时百分比、
+结束时产出归档分片。
+
+<details>
+<summary><b>问题、解法与归档格式（点开）</b></summary>
+
+```bash
+cd frontend && swift run          # 或双击 frontend/NS Port Builder.app
+```
+
+界面双语：跟随设备（任何中文变体显示中文，**其他一律英文**），标题栏的 `中文` / `EN` 按钮随时切换。
+
+它跑的脚本和命令行完全相同，所以下面的一切同样适用；详见 [frontend/README.md](frontend/README.md)。
+预编译的 App 和中英双语的发布说明（含哪些游戏已验证）在
+[releases 页面](https://github.com/LNPANDY/NX2Apple/releases) 和
+[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md)。
+
+</details>
+
+### 问题
 
 《王国之泪》这样的 RomFS 是 **304,243 个文件 / 15.9 GiB**。这会带来两个故障：
 
@@ -37,7 +140,10 @@
 
 把目录树打成约 100 个分片文件可以同时解决两者：包保持很小，游戏文件作为一个大文件夹一次拷完。
 
-## 做法
+<details>
+<summary><b>归档格式（点开）</b></summary>
+
+### 做法
 
 一种 **ROMFSARC** 归档：一个索引文件加 N 个分片文件。
 
@@ -59,7 +165,9 @@ romfs.00 ... .125        126 个分片，每片 200 MiB，源文件字节原样
 路径查找是对排序后的文件表做二分查找；目录枚举只遍历一段连续的子项区间。索引用 `mmap` 映射，
 分片按需打开，读取直接在分片上 `pread`，所以页缓存照常生效。
 
-## 图形界面
+</details>
+
+## 🖥️ 图形界面
 
 `frontend/` 是一个 macOS App，用窗口代替终端完成下面第 2–5 步，给不想读构建日志的人用：四项输入
 分开选（本体、更新包、DLC、`prod.keys`）、依赖面板自动检测并一键安装缺失项、直接显示脚本自己的
@@ -84,7 +192,36 @@ cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
 [Releases 页面](https://github.com/LNPANDY/NX2Apple/releases)，仓库内也存了一份：
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md)。
 
-## 跟随上游更新
+## 📝 更新历史
+
+最新在上。本 fork 每天跟随上游，标「同步上游」的条目是自动来的。
+
+| 日期 | 版本 | 变更 |
+|---|---|---|
+| 2026-10-26 | v0.4.3 | NSZ/XCZ 压缩格式开箱可用；全新 Xcode 会明说缺 iOS SDK；三个环境陷阱关掉 |
+| 2026-10-25 | v0.4.2 | App 自己下载并更新仓库、也能更新自己；58 款游戏（+10）；读档死锁修复；NuGet 报错自动恢复 |
+| 2026-10-24 | v0.4.1 | 集合啦！动物森友会在 iPhone 上验证通过（103,645 文件 → 72 片）；归档打包复用未变的成果 |
+| 2026-10-23 | v0.4.0 | 归档文件夹直接可拷贝并附安装引导；依赖列表可折叠；表格列出每个游戏的所需版本；更名为 NX2Apple |
+| 2026-10-23 | v0.3.1 | 修复 Homebrew Python 3.15 与 `DOTNET_ROOT` 问题（#1、#2） |
+| 2026-10-22 | v0.3.0 | App 图标，46 款游戏 |
+| 2026-10-21 | v0.2.1 | Python 3.9 构建修复 |
+| 2026-10-20 | v0.2.0 | 中英双语 |
+| 2026-10-20 | v0.1.0 | 首个版本：图形界面、RomFS 归档 |
+
+## 🤝 参与贡献：着色器与新游戏
+
+每款新游戏都需要单独的 bring-up：profile（build ID、内存布局、纹理槽位）、必要时的 shader 读取器、
+以及补丁点。**两种帮忙方式，都有用：**
+
+- **报告一款能跑的游戏** —— 如果你让验证清单之外的游戏跑起来了，开 issue 附上 title ID、更新版本和
+  你做的步骤，它会变成一个别人也能用的 profile。
+- **提交缺失的着色器** —— 如果游戏能跑但首次使用某个效果时卡顿，说明它的 shader 变体不在映射表里。
+  宿主可以导出找不到的部分（`DM_NVN_SHDUMP=<dir>`）；附上它们，我们把它加进 `shader_map.tsv`，
+  所有人都受益。
+
+带完整 `Documents/log.txt` 的 issue 会优先看——那份日志通常能直接指出缺的是什么。
+
+## 🔄 跟随上游更新
 
 一个定时的 GitHub Actions 工作流（`.github/workflows/sync-upstream.yml`，每天 21:30 UTC，也可手动
 触发）跟随 [seedds/nxnative](https://github.com/seedds/nxnative)：通过 `scripts/sync_upstream.py`
@@ -93,7 +230,7 @@ cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
 新建的仓库而非真正的 fork，GitHub 自带的「Sync fork」用不了；上次同步的上游提交记录在
 `.upstream-ref`。
 
-## 使用方法
+## 🛠️ 使用方法
 
 ### 1. 构建 App（与上游相同）
 
@@ -199,7 +336,7 @@ App 会先找 `romfs.idx`（`dm/ios/Sources/main.m` 的 `romfs_locate`）。没�
 <DM_ROMFS>/romfs/romfs.idx
 ```
 
-## 游玩
+## 📲 游玩
 
 **触屏操控。** 两种布局（点顶部中央的按钮切换）：2D（左摇杆、A/B/X/Y、肩键、−/+）和 3D
 （增加十字键、右摇杆和 L3/R3）。未连接手柄时，触到控件以外的区域会送到游戏的触屏。
@@ -220,7 +357,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 发出来（上一次运行的是 `log.prev.txt`）。新场景第一次出现时短促卡顿是正常的：App 会为它
 编译一次图形并记住。
 
-## 换其他游戏
+## 🎯 换其他游戏
 
 归档格式里没有任何与具体游戏绑定的东西：打包工具遍历你给的目录，读取层在那棵树里查路径。换游戏只需要：
 
@@ -243,7 +380,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 上游测试列表里的游戏（4–6 GB）按 200 MiB 大概需要 20–30 片，远低于上限，内存占用也远低于
 《王国之泪》撞上的那个单 App 预算。
 
-## 相对上游的改动
+## 🧩 相对上游的改动
 
 新增 5 个文件，修改 4 个。文件系统层保留原有的路径处理：归档打开时，`host_path_ex` 对归档挂载点上的
 条目返回一个合成路径（`@romfsarc:<guest 路径>`），`OpenFile` / `GetEntryType` / `OpenDirectory`
@@ -266,7 +403,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 
 挂载点按**目录**识别，而不是按名字：各游戏的挂载名不同（多数是 `rom`，《王国之泪》是 `content`）。
 
-## 支持的游戏
+## 🗂️ 支持的游戏
 
 本仓库自带 58 个游戏 profile。profile 决定了一个游戏能不能构建——build ID、内存布局、
 shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 归档层，让大体积游戏能装得下。
@@ -339,7 +476,7 @@ shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 
 「上游报告 iPhone 可玩」是上游项目的结果，本 fork 未重新测试。只有 profile 不保证游戏能启动——
 游戏所需的宿主改动属于上游工作，本 fork 跟随上游。
 
-## 验证情况
+## ✅ 验证情况
 
 - **《王国之泪》**（0100F2C0115B6000，v1.0.0 + 更新 1.4.3）：304,243 个文件打成 127 个文件；
   304,243 个文件全部与源目录逐字节比对通过（`verify: OK`）；游戏从归档正常运行于 macOS
@@ -361,7 +498,7 @@ ad-hoc 签名——无签名的二进制没有可供侧载工具读取 entitleme
 resident + headroom：约 3,375 MB = 未生效，6–8 GB = 已生效）见
 [dm/ios/ENTITLEMENTS.md](dm/ios/ENTITLEMENTS.md)。
 
-## 限制
+## ⚠️ 限制
 
 - **只读。** 归档从不写入；存档和临时数据照旧走各自的挂载点。
 - **大小写敏感查找。** 名称按源目录树原样存储，所以宿主的 APFS 大小写不敏感别名机制对归档条目
@@ -370,7 +507,7 @@ resident + headroom：约 3,375 MB = 未生效，6–8 GB = 已生效）见
 - **索引常驻内存。** 《王国之泪》是 28 MB（其中 17.9 MB 是名称）。分片不常驻。
 - **不做去重或压缩。** 分片是源字节原样，所以 `verify` 就是直接比对，重复打包的结果是确定的。
 
-## 致谢
+## 🙏 致谢
 
 所有模拟相关的工作都是别人的。本仓库在其之上增加了归档子系统：
 
@@ -386,7 +523,7 @@ resident + headroom：约 3,375 MB = 未生效，6–8 GB = 已生效）见
 
 `dm/third_party` 里随附了其他项目及其许可证（[列表](dm/third_party/README.md)）。
 
-## 法律
+## ⚖️ 法律
 
 **本项目是什么。** 一个为你**已拥有**的游戏做构建的工具。它读取你在自己机器上从自己的卡带和购买中
 导出的文件，产出一个装到你自己的设备上的安装包。本仓库、App 和任何 Release 中都不包含、也不分发
