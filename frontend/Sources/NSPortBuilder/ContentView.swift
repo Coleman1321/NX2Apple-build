@@ -258,6 +258,143 @@ final class BuildModel: ObservableObject {
         }
     }
 
+    /// A ZIP copy has no .git: adopt it into git in place (init, remote, fetch, checkout) so the
+    /// update buttons work and the folder keeps its path. A ZIP copy carries no local changes, and
+    /// the checkout resets it to origin/main — the build's own files live outside the repository.
+    func adoptRepoAsGit() {
+        guard !running, !repoBusy, repoOK, !repoIsGit, let git = Self.gitBinary() else { return }
+        repoBusy = true; repoStatus = t("repo.adopting")
+        let dir = repoPath
+        DispatchQueue.global().async {
+            var out = "", ok = true
+            for args in [["init"], ["remote", "add", "origin", Self.repoURL],
+                         ["fetch", "--depth", "1", "origin", "main"],
+                         ["checkout", "-f", "-B", "main", "origin/main"]] {
+                let r = Self.runQuiet([git, "-C", dir] + args, env: Self.gitEnv())
+                out += "$ git \(args.joined(separator: " "))\n\(r.out)\n"
+                if !r.ok { ok = false; break }
+            }
+            if ok { _ = Self.runQuiet([git, "-C", dir, "branch", "--set-upstream-to=origin/main", "main"], env: Self.gitEnv()) }   // checkout -B usually set it
+            DispatchQueue.main.async {
+                self.repoBusy = false
+                self.append(out + "\n")
+                if self.repoIsGit {
+                    self.repoStatus = self.t("repo.adopted")
+                    self.checkRepoUpdates()
+                } else {
+                    self.repoStatus = self.t("repo.adoptFail")
+                }
+            }
+        }
+    }
+
+    // ---- App self-update (GitHub Releases) ----
+
+    /// Bump together with each release tag; the update check compares it with the latest release.
+    static let appVersion = "0.4.2"
+    @Published var appUpdate: (tag: String, url: String)?
+    @Published var appBusy = false
+    @Published var appStatus = ""
+
+    nonisolated static func isNewer(_ tag: String, than current: String) -> Bool {
+        func nums(_ s: String) -> [Int] { s.split(separator: ".").map { Int($0.filter { $0.isNumber }) ?? 0 } }
+        let a = nums(tag), b = nums(current)
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    /// Ask GitHub for the latest release. `silent` (the launch check) only surfaces a found update;
+    /// "up to date" and network failures stay quiet. A slow or blocked network just times out.
+    func checkAppUpdate(silent: Bool = false) {
+        guard !appBusy else { return }
+        appBusy = true
+        if !silent { appStatus = t("app.checking") }
+        URLSession.shared.dataTask(with: URL(string: "https://api.github.com/repos/LNPANDY/NX2Apple/releases/latest")!) { data, _, _ in
+            var found: (String, String)?
+            if let d = data, let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                let tag = obj["tag_name"] as? String ?? ""
+                if Self.isNewer(tag, than: Self.appVersion),
+                   let assets = obj["assets"] as? [[String: Any]] {
+                    for a in assets where (a["name"] as? String) == "NS-Port-Builder-macOS-arm64.zip" {
+                        if let u = a["browser_download_url"] as? String { found = (tag, u) }
+                    }
+                }
+            }
+            DispatchQueue.main.async {
+                self.appBusy = false
+                if let f = found {
+                    self.appUpdate = f
+                    self.appStatus = String(format: self.t("app.found"), f.0)
+                } else if !silent {
+                    self.appStatus = data == nil ? self.t("app.netFail") : self.t("app.upToDate")
+                }
+            }
+        }.resume()
+    }
+
+    /// Download the new release, unzip it beside the running app, swap it in and relaunch. The old
+    /// bundle goes to the Trash; a failure at any step leaves the current app running.
+    func performAppUpdate() {
+        guard let upd = appUpdate, let url = URL(string: upd.url), !appBusy else { return }
+        appBusy = true; appStatus = t("app.downloading")
+        DispatchQueue.global().async {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("nspb-update.zip")
+            try? FileManager.default.removeItem(at: tmp)
+            let sem = DispatchSemaphore(value: 0)
+            URLSession.shared.downloadTask(with: url) { local, _, _ in
+                if let local = local { try? FileManager.default.moveItem(at: local, to: tmp) }
+                sem.signal()
+            }.resume()
+            sem.wait()
+            guard FileManager.default.fileExists(atPath: tmp.path) else {
+                DispatchQueue.main.async { self.appBusy = false; self.appStatus = self.t("app.netFail") }
+                return
+            }
+            DispatchQueue.main.async { self.appStatus = self.t("app.installing") }
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nspb-update", isDirectory: true)
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let unzip = Process()
+            unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            unzip.arguments = ["-x", "-k", tmp.path, dir.path]
+            try? unzip.run(); unzip.waitUntilExit()
+            let newApp = dir.appendingPathComponent("NS Port Builder.app")
+            guard unzip.terminationStatus == 0, FileManager.default.fileExists(atPath: newApp.path) else {
+                DispatchQueue.main.async { self.appBusy = false; self.appStatus = self.t("app.netFail") }
+                return
+            }
+            // Copy the new bundle in beside the running one first: from there on every step is a
+            // same-volume move, and a failure anywhere leaves a working app on disk.
+            let cur = Bundle.main.bundleURL
+            let staging = cur.deletingLastPathComponent().appendingPathComponent("NS Port Builder (new).app")
+            try? FileManager.default.removeItem(at: staging)
+            do {
+                try FileManager.default.copyItem(at: newApp, to: staging)
+                var trash: NSURL?
+                try FileManager.default.trashItem(at: cur, resultingItemURL: &trash)
+                try FileManager.default.moveItem(at: staging, to: cur)
+            } catch {
+                DispatchQueue.main.async {
+                    self.appBusy = false
+                    self.appStatus = String(format: self.t("app.installFail"), error.localizedDescription)
+                }
+                return
+            }
+            let x = Process()   // no Gatekeeper prompt on the swapped-in copy's first launch
+            x.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+            x.arguments = ["-dr", "com.apple.quarantine", cur.path]
+            try? x.run(); x.waitUntilExit()
+            DispatchQueue.main.async {
+                self.appStatus = String(format: self.t("app.relaunching"), upd.tag)
+                NSWorkspace.shared.openApplication(at: cur, configuration: NSWorkspace.OpenConfiguration())
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { exit(0) }
+            }
+        }
+    }
+
     var basePath: String { slot("base").paths.first ?? "" }
     var keysPath: String { slot("keys").paths.first ?? "" }
     var updatePath: String { slot("update").paths.first ?? "" }
@@ -992,7 +1129,8 @@ struct ContentView: View {
         .frame(minWidth: 720, idealWidth: 880, minHeight: 560, idealHeight: 820)
         .onAppear {
             m.checkDeps()
-            if m.repoOK { m.checkRepoUpdates(silent: true) }   // quiet fetch: fills repoBehind, offline is not an error
+            if m.repoOK, m.repoIsGit { m.checkRepoUpdates(silent: true) }   // quiet fetch: fills repoBehind, offline is not an error
+            m.checkAppUpdate(silent: true)   // a found update shows the button in the header; quiet otherwise
         }
     }
 
@@ -1025,8 +1163,20 @@ struct ContentView: View {
                 Text("NS Port Builder").font(.system(size: 25, weight: .bold))
                 Text(m.t("app.subtitle"))
                     .font(.system(size: 13)).foregroundStyle(.secondary)
+                if !m.appStatus.isEmpty {
+                    Text(m.appStatus).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
+            if let u = m.appUpdate {
+                Button(String(format: m.t("app.updateBtn"), u.tag)) { m.performAppUpdate() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(m.appBusy)
+            }
+            Text("v\(BuildModel.appVersion)")
+                .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(.tertiary)
+                .onTapGesture { m.checkAppUpdate() }
             Button(m.lang.toggleLabel) { m.toggleLang() }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
@@ -1052,12 +1202,15 @@ struct ContentView: View {
                     sectionHeader("shippingbox", m.t("repo.title"), note: m.t("repo.note"))
                     Spacer(minLength: 8)
                     if m.repoOK {
-                        if let n = m.repoBehind, n > 0, m.repoIsGit {
-                            Button(m.t("repo.pull")) { m.pullRepo() }
-                                .disabled(m.repoBusy || m.running)
-                        }
                         if m.repoIsGit {
+                            if let n = m.repoBehind, n > 0 {
+                                Button(m.t("repo.pull")) { m.pullRepo() }
+                                    .disabled(m.repoBusy || m.running)
+                            }
                             Button(m.t("repo.check")) { m.checkRepoUpdates() }
+                                .disabled(m.repoBusy || m.running)
+                        } else {
+                            Button(m.t("repo.adopt")) { m.adoptRepoAsGit() }
                                 .disabled(m.repoBusy || m.running)
                         }
                     } else {
