@@ -352,8 +352,20 @@ def build_nx_extract(repo, work, logs, env):
     """Build nx_extract into <work>/tools/nx_extract/. It is built in a temporary folder and copied over: with an apostrophe in the output path (e.g. "Bowser's Fury") MSBuild's conditions break,
     LibHac.dll and the executable are not copied, and the build still reports success"""
     nx = work / 'tools/nx_extract/nx_extract'
-    with tempfile.TemporaryDirectory(prefix='nx_extract_') as t:
+    def dotnet_build():
         run(['dotnet', 'build', repo / 'dm/tools/nx_extract', '-c', 'Release', '-o', t, '-v', 'quiet', '-nologo'], logs / 'nx_extract_build.log', env=env)
+    with tempfile.TemporaryDirectory(prefix='nx_extract_') as t:
+        try:
+            dotnet_build()
+        except BuildError:
+            # .NET's first-run configure can die on a broken NuGet migration mutex (a 'NuGet-Migrations' IOException
+            # before the project is even read; issue #3). Clearing the NuGet caches fixes it (alkore's finding); do that
+            # and try once more instead of sending the user to a terminal.
+            log = logs / 'nx_extract_build.log'
+            if 'NuGet-Migrations' not in log.read_text(errors='replace'): raise
+            say('dotnet\'s first-run configure failed (NuGet-Migrations); clearing the NuGet caches and retrying once (issue #3)')
+            run(['dotnet', 'nuget', 'locals', 'all', '--clear'], logs / 'nuget_clear.log', env=env)
+            dotnet_build()
         if not (Path(t) / 'nx_extract').exists(): raise BuildError(f'nx_extract built without an executable (see {logs / "nx_extract_build.log"})')
         rmtree(nx.parent); shutil.copytree(t, nx.parent)
     return nx
