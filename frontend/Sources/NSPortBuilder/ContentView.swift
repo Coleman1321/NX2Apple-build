@@ -210,8 +210,9 @@ final class BuildModel: ObservableObject {
     /// Compare the checkout with origin/main. `silent` is the launch-time check: no status text, no
     /// error noise when offline — it only fills repoBehind when it can.
     func checkRepoUpdates(silent: Bool = false) {
-        guard !running, !repoBusy, repoOK, let git = Self.gitBinary() else {
-            if !silent, repoOK, Self.gitBinary() == nil { repoStatus = t("repo.gitMissing") }
+        guard repoOK, repoIsGit else { return }
+        guard !running, !repoBusy, let git = Self.gitBinary() else {
+            if !silent, Self.gitBinary() == nil { repoStatus = t("repo.gitMissing") }
             return
         }
         repoBusy = true
@@ -239,7 +240,7 @@ final class BuildModel: ObservableObject {
     /// Fast-forward the checkout to origin/main. The build keeps everything it needs under
     /// <id>_build/ outside the repository, so a pull never disturbs a previous build's files.
     func pullRepo() {
-        guard !running, !repoBusy, repoOK, let git = Self.gitBinary() else { return }
+        guard !running, !repoBusy, repoOK, repoIsGit, let git = Self.gitBinary() else { return }
         repoBusy = true; repoStatus = t("repo.pulling")
         let dir = repoPath
         DispatchQueue.global().async {
@@ -362,6 +363,9 @@ final class BuildModel: ObservableObject {
     }
 
     var repoOK: Bool { Self.isRepo(repoPath) }
+    /// A clone has .git; a GitHub "Download ZIP" copy does not (everything builds, but there is
+    /// nothing to fetch or pull — the update buttons hide and the note says to re-download instead).
+    var repoIsGit: Bool { FileManager.default.fileExists(atPath: repoPath + "/.git") }
     var canBuild: Bool { repoOK && !basePath.isEmpty && !keysPath.isEmpty && allDepsPresent && !running }
 
     // MARK: Build
@@ -1048,12 +1052,14 @@ struct ContentView: View {
                     sectionHeader("shippingbox", m.t("repo.title"), note: m.t("repo.note"))
                     Spacer(minLength: 8)
                     if m.repoOK {
-                        if let n = m.repoBehind, n > 0 {
+                        if let n = m.repoBehind, n > 0, m.repoIsGit {
                             Button(m.t("repo.pull")) { m.pullRepo() }
                                 .disabled(m.repoBusy || m.running)
                         }
-                        Button(m.t("repo.check")) { m.checkRepoUpdates() }
-                            .disabled(m.repoBusy || m.running)
+                        if m.repoIsGit {
+                            Button(m.t("repo.check")) { m.checkRepoUpdates() }
+                                .disabled(m.repoBusy || m.running)
+                        }
                     } else {
                         Button(m.t("repo.download")) { m.cloneRepo() }
                             .disabled(m.repoBusy || m.running)
@@ -1081,6 +1087,19 @@ struct ContentView: View {
                         .foregroundStyle((m.repoBehind ?? 0) > 0 ? Color.orange : Color.secondary)
                 } else if !m.repoOK {
                     Text(m.t("repo.firstHint")).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
+                if !m.repoOK {
+                    // GitHub does not load everywhere: the manual route (Code → Download ZIP → unzip →
+                    // Choose repository) needs no git at all, and the note says which folder to pick.
+                    HStack(spacing: 4) {
+                        Text(m.t("repo.manualHint")).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        Link("github.com/LNPANDY/NX2Apple", destination: URL(string: BuildModel.repoURL.replacingOccurrences(of: ".git", with: ""))!)
+                            .font(.system(size: 11.5))
+                        Text(m.t("repo.manualHint2")).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    }
+                }
+                if m.repoOK, !m.repoIsGit {
+                    Text(m.t("repo.noGit")).font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
             }.padding(8)
         }
