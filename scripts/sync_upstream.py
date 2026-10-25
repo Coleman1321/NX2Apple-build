@@ -23,7 +23,7 @@ working tree, so CI can open an issue with the log instead.
 
 Usage: sync_upstream.py --old <upstream sha> --new <upstream sha> [--skip-build]
 """
-import argparse, os, subprocess, sys, shutil, tempfile
+import argparse, json, os, subprocess, sys, shutil, tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -593,6 +593,30 @@ def apply_changes(a, changes):
             fail(f'{path}: fork patch marker missing after sync: {MARKERS[path]!r}')
 
 
+def refresh_badges():
+    """Keep docs/badges/*.json in step with the tree, so the README badges need no hand edit.
+
+    The game count is the number of title-ID profile folders (dm/games/0100…), which is what the
+    README means by "N game profiles". The verified count is the rows marked verified in the
+    README's own table, so the source of truth stays the README text rather than a second list."""
+    gdir = REPO / 'dm/games'
+    games = sum(1 for d in gdir.iterdir() if d.is_dir() and d.name.startswith('0100'))
+    readme = (REPO / 'README.md').read_text(encoding='utf-8')
+    verified = sum(1 for ln in readme.splitlines()
+                   if ln.startswith('| ') and ('**Verified here**' in ln or 'Verified —' in ln))
+    for name, label, value, color in [('games', 'games', games, 'blue'),
+                                      ('verified', 'verified on an iPhone', verified, 'success')]:
+        p = REPO / 'docs/badges' / f'{name}.json'
+        old = p.read_text(encoding='utf-8') if p.exists() else ''
+        new = json.dumps({'schemaVersion': 1, 'label': label, 'message': str(value), 'color': color},
+                         indent=2) + '\n'
+        if old != new:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(new, encoding='utf-8')
+            say(f'  badge {name}: {value}')
+    say(f'badges: {games} games, {verified} verified')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--old', required=True, help='upstream ref the fork is currently at')
@@ -606,6 +630,7 @@ def main():
     try:
         apply_changes(a, changes)
         verify(a.skip_build)
+        refresh_badges()
     except SyncProblem: pass
     if problems:
         say(f'\nSYNC FAILED: {len(problems)} problem(s) — nothing committed; the working tree is left as the script wrote it, `git checkout -- .` restores it')
