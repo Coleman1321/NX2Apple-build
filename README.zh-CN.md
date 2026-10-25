@@ -1,8 +1,8 @@
+<div align="center">
+
 # 🎮 NX2Apple
 
 **你的 Switch 游戏，跑在你的 iPhone 上。**
-
-<div align="center">
 
 **不是模拟器。不用命令行。一个 macOS App 点几下就把整个构建做完。**
 
@@ -16,15 +16,15 @@
 [![English](https://img.shields.io/badge/🇺🇸_English-available-green)](README.md)
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-当前-blue)](README.zh-CN.md)
 
-<img src="frontend/screenshots/main-window.png" width="640" alt="NS Port Builder">
-
-</div>
+<img src="frontend/screenshots/hero-features.png" width="100%" alt="NX2Apple — Switch 游戏装进 iPhone">
 
 一个 macOS App 拿你自己导出的游戏文件，点几下就把整件事做完——解包、为 Apple 芯片重写游戏代码、把
 shader 翻译成 Metal、打包出装得进手机的瘦身 IPA 和分片 RomFS 归档（16 GB 的大作也装得上），最后告诉
 你装上设备的三步。
 
-> **原名 `nxnative-romfs-archive`** —— 旧链接会自动跳转到这里。
+**原名 `nxnative-romfs-archive`** —— 旧链接会自动跳转到这里。
+
+</div>
 
 ---
 
@@ -413,64 +413,64 @@ shader 表、每个游戏各自的开关；本 fork 在此基础上加了 RomFS 
 
 | 游戏 | Title ID | 需要的更新包 | 状态 |
 |---|---|---|---|
-| Super Mario Odyssey | `0100000000010000` | 1.4.1 (v393216) | 上游报告 iPhone 可玩 |
-| Ace Attorney Investigations Collection | `010005501E68C000` | 1.0.0.2 (v131072) | 有 profile，未在手机上验证 |
-| Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 (v655360) | 有 profile，未在手机上验证 |
-| Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 (v196608) | 有 profile，未在手机上验证 |
-| Super Mario Bros. Wonder | `010015100B514000` | 1.2.1 (v327680) | 上游报告 iPhone 可玩 |
-| Mario Kart 8 Deluxe | `0100152000022000` | 4.0.0 (v1441792) | 上游报告 iPhone 可玩 |
-| Raging Loop | `010020400E1C2000` | 无（v0） | 有 profile，未在手机上验证 |
+| 超级马力欧 奥德赛 | `0100000000010000` | 1.4.1 (v393216) | 上游报告 iPhone 可玩 |
+| 逆转检察官 1&2 御剑精选集 | `010005501E68C000` | 1.0.0.2 (v131072) | 有 profile，未在手机上验证 |
+| 空洞骑士：丝之歌 | `010013C00E930000` | 1.0.30000 (v655360) | 有 profile，未在手机上验证 |
+| 数码宝贝物语 网络侦探 骇客追忆 | `010014E00DB56000` | 1.0.3 (v196608) | 有 profile，未在手机上验证 |
+| 超级马力欧兄弟 惊奇 | `010015100B514000` | 1.2.1 (v327680) | 上游报告 iPhone 可玩 |
+| 马力欧卡丁车 8 豪华版 | `0100152000022000` | 4.0.0 (v1441792) | 上游报告 iPhone 可玩 |
+| 人狼村之谜 | `010020400E1C2000` | 无（v0） | 有 profile，未在手机上验证 |
 | ANIMAL WELL | `010020D01AD24000` | 1.0.10 (v655360) | 上游报告 iPhone 可玩 |
-| Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 1.2.2 (v262144) | 上游报告 iPhone 可玩 |
-| Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 1.3.0 (v327680) | 上游报告 iPhone 可玩 |
-| Celeste | `01002B30028F6000` | 1.4.1.1 (v589824) | 有 profile，未在手机上验证 |
-| Advance Wars 1+2: Re-Boot Camp | `0100300012F2A000` | 无（v0） | 上游报告 iPhone 可玩 |
-| Taiko Risshiden V DX | `0100346017304000` | 1.1.1 (v131072) | 上游报告 iPhone 触屏可玩 |
-| The Great Ace Attorney Chronicles | `010036E00FB20000` | 无（v0） | 上游报告 iPhone 可玩 |
-| FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | 1.4.0 (v393216) | 有 profile，未在手机上验证 |
-| 13 Sentinels: Aegis Rim | `01003FC01670C000` | 1.10 (v65536) | 上游报告 iPhone 可玩 |
-| Bayonetta 3 | `01004A4010FEA000` | 1.2.0 (v131072) | 上游报告 iPhone 可玩 |
-| DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 (v196608) | 有 profile，未在手机上验证 |
-| Monster Train 2 | `010051701FB46000` | 1.1.1 (v131072) | 上游报告 iPhone 可玩 |
-| OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 (v327680) | 有 profile，未在手机上验证 |
-| Hades | `0100535012974000` | 1.0.38233 (v589824) | 上游报告 iPhone 可玩 |
-| Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 (v327680) | 上游报告 iPhone 可玩 |
-| FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |
-| Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 (v131072) | 有 profile，未在手机上验证 |
-| Unicorn Overlord | `010069401ADB8000` | 1.05 (v262144) | 有 profile，未在手机上验证 |
-| Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 (v2031616) | 上游报告 iPhone 可玩 |
-| The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 (v131072) | 上游报告 iPhone 可玩 |
-| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 (v262144) | 有 profile，未在手机上验证 |
-| Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 (v2228224) | **本 fork 已验证** —— 构建、安装、在 iPhone 上流畅运行；103,645 个文件归档成 72 片 |
-| AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | 1.0.2 (v131072) | 上游报告 iPhone 可玩 |
-| The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 (v1114112) | 上游报告 iPhone 可玩 |
+| 超级马力欧 3D世界 + 狂怒世界 | `010028600EBDA000` | 1.2.2 (v262144) | 上游报告 iPhone 可玩 |
+| 塞尔达无双 灾厄启示录 | `01002B00111A2000` | 1.3.0 (v327680) | 上游报告 iPhone 可玩 |
+| 蔚蓝 | `01002B30028F6000` | 1.4.1.1 (v589824) | 有 profile，未在手机上验证 |
+| 高级战争 1+2 重制版 | `0100300012F2A000` | 无（v0） | 上游报告 iPhone 可玩 |
+| 太阁立志传 V DX | `0100346017304000` | 1.1.1 (v131072) | 上游报告 iPhone 触屏可玩 |
+| 大逆转裁判 1&2 成步堂龙之介的冒险 | `010036E00FB20000` | 无（v0） | 上游报告 iPhone 可玩 |
+| 最终幻想 战略版 伊瓦利斯战记 | `010038B015560000` | 1.4.0 (v393216) | 有 profile，未在手机上验证 |
+| 十三机兵防卫圈 | `01003FC01670C000` | 1.10 (v65536) | 上游报告 iPhone 可玩 |
+| 猎天使魔女 3 | `01004A4010FEA000` | 1.2.0 (v131072) | 上游报告 iPhone 可玩 |
+| 黑暗之魂 重制版 | `01004AB00A260000` | 1.0.3 (v196608) | 有 profile，未在手机上验证 |
+| 怪物火车 2 | `010051701FB46000` | 1.1.1 (v131072) | 上游报告 iPhone 可玩 |
+| 歧路旅人 0 | `01005270232F2000` | 1.0.5 (v327680) | 有 profile，未在手机上验证 |
+| 哈迪斯 | `0100535012974000` | 1.0.38233 (v589824) | 上游报告 iPhone 可玩 |
+| 火焰纹章 风花雪月 | `010055D009F78000` | 1.2.0 (v327680) | 上游报告 iPhone 可玩 |
+| 最终幻想 共鸣 | `0100606026F12000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |
+| 脑锻炼 大人的 Nintendo Switch 训练 | `0100620012D6E000` | 1.2.0 (v131072) | 有 profile，未在手机上验证 |
+| 圣兽之王 | `010069401ADB8000` | 1.05 (v262144) | 有 profile，未在手机上验证 |
+| 任天堂明星大乱斗 特别版 | `01006A800016E000` | 13.0.5 (v2031616) | 上游报告 iPhone 可玩 |
+| 塞尔达传说 织梦岛 | `01006BB00C6F0000` | 1.1.0 (v131072) | 上游报告 iPhone 可玩 |
+| 勇者斗恶龙 XI S 寻觅逝去的时光 决定版 | `01006C300E9F0000` | 1.0.4 (v262144) | 有 profile，未在手机上验证 |
+| 集合啦！动物森友会 | `01006F8002326000` | 3.0.3 (v2228224) | **本 fork 已验证** —— 构建、安装、在 iPhone 上流畅运行；103,645 个文件归档成 72 片 |
+| AI 梦境档案 涅槃肇始 | `0100713016CCC000` | 1.0.2 (v131072) | 上游报告 iPhone 可玩 |
+| 塞尔达传说 旷野之息 | `01007EF00011E000` | 1.9.0 (v1114112) | 上游报告 iPhone 可玩 |
 | BALL x PIT | `010086A022444000` | 1.293 (v393216) | 上游报告 iPhone 可玩 |
-| AI: THE SOMNIUM FILES | `010089B00D09C000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |
-| STEINS;GATE RE:BOOT | `01008BC024FDE000` | 1.0.3 (v131072) | 有 profile，未在手机上验证 |
-| Metroid Dread | `010093801237C000` | 2.1.0 (v327680) | 上游报告 iPhone 可玩 |
-| Super Mario Galaxy | `010099C022B96000` | 1.3.1 (v327680) | 上游报告 iPhone 可玩 |
-| Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 (v393216) | 有 profile，未在手机上验证 |
-| Hades II | `0100A00019DE0000` | 无（v0） | **本 fork 已验证** —— 构建、安装、在 iPhone 上运行；33 个文件的归档 |
-| Cuphead | `0100A5C00D162000` | 1.3.7 (v655360) | 有 profile，未在手机上验证 |
-| Fire Emblem Engage | `0100A6301214E000` | 2.0.0 (v327680) | 上游报告 iPhone 可玩 |
+| AI 梦境档案 | `010089B00D09C000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |
+| 命运石之门 RE:BOOT | `01008BC024FDE000` | 1.0.3 (v131072) | 有 profile，未在手机上验证 |
+| 密特罗德 生存恐惧 | `010093801237C000` | 2.1.0 (v327680) | 上游报告 iPhone 可玩 |
+| 超级马力欧 银河 | `010099C022B96000` | 1.3.1 (v327680) | 上游报告 iPhone 可玩 |
+| 奇诺比奥队长 宝物追踪 | `01009BF0072D4000` | 1.4.2 (v393216) | 有 profile，未在手机上验证 |
+| 哈迪斯 II | `0100A00019DE0000` | 无（v0） | **本 fork 已验证** —— 构建、安装、在 iPhone 上运行；33 个文件的归档 |
+| 茶杯头 | `0100A5C00D162000` | 1.3.7 (v655360) | 有 profile，未在手机上验证 |
+| 火焰纹章 结合 | `0100A6301214E000` | 2.0.0 (v327680) | 上游报告 iPhone 可玩 |
 | Absolum | `0100A83022A22000` | 1.1.1 (v393216) | 有 profile，未在手机上验证 |
-| DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 (v131072) | 有 profile，未在手机上验证 |
-| Pokémon Sword | `0100ABF008968000` | 1.3.2 (v458752) | 上游报告 iPhone 可玩 |
-| Monster Hunter Rise | `0100B04011742000` | 16.0.2 (v2228224) | 有 profile，未在手机上验证 |
-| Pikmin 4 | `0100B7C00933A000` | 1.1.1 (v262144) | 上游报告 iPhone 可玩 |
-| Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |
-| Catherine: Full Body | `0100BF00112C0000` | 1.0.1a (v131072) | 有 profile，未在手机上验证 |
-| ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `0100C2A01A730000` | 1.1.3 (v851968) | 上游报告 iPhone 可玩（需手柄） |
-| Balatro | `0100CD801CE5E000` | 1.1.3 (v851968) | 上游报告 iPhone 可玩 |
-| Rhythm Heaven Groove | `0100D9F01D474000` | 无（v0） | 有 profile，未在手机上验证 |
-| Luigi's Mansion 3 | `0100DCA0064A6000` | 1.4.0 (v327680) | 上游报告 iPhone 可玩 |
+| 勇者斗恶龙 VII 重制版 | `0100A9D01C446000` | 1.2.0 (v131072) | 有 profile，未在手机上验证 |
+| 宝可梦 剑 | `0100ABF008968000` | 1.3.2 (v458752) | 上游报告 iPhone 可玩 |
+| 怪物猎人 崛起 | `0100B04011742000` | 16.0.2 (v2228224) | 有 profile，未在手机上验证 |
+| 皮克敏 4 | `0100B7C00933A000` | 1.1.1 (v262144) | 上游报告 iPhone 可玩 |
+| 马力欧 VS 大金刚 | `0100B99019412000` | 1.0.1 (v65536) | 上游报告 iPhone 可玩 |
+| 凯瑟琳 浓郁口感 | `0100BF00112C0000` | 1.0.1a (v131072) | 有 profile，未在手机上验证 |
+| 三国志 8 REMAKE | `0100C2A01A730000` | 1.1.3 (v851968) | 上游报告 iPhone 可玩（需手柄） |
+| 小丑牌 | `0100CD801CE5E000` | 1.1.3 (v851968) | 上游报告 iPhone 可玩 |
+| 节奏天国 Groove | `0100D9F01D474000` | 无（v0） | 有 profile，未在手机上验证 |
+| 路易吉洋馆 3 | `0100DCA0064A6000` | 1.4.0 (v327680) | 上游报告 iPhone 可玩 |
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 (v65536) | 有 profile，未在手机上验证 |
-| Stardew Valley | `0100E65002BB8000` | 1.6.15.13 (v1310720) | 上游报告 iPhone 可玩 |
-| Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 1.0.1 (v65536) | 有 profile，未在手机上验证 |
-| The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 (v720896) | **本 fork 已验证** —— 构建、安装、在 iPhone 上运行；304,243 个文件归档成 127 片，逐字节校验通过 |
-| Pokémon Legends: Z-A | `0100F43008C44000` | 2.0.2 (v393216) | 有 profile，未在手机上验证 |
-| Brain Memory Training Academy | `0100F5D01DA3A000` | 无（v0） | 有 profile，未在手机上验证 |
-| Super Mario Galaxy 2 | `0100FD8022DAA000` | 1.4.0 (v393216) | 有 profile，未在手机上验证 |
+| 星露谷物语 | `0100E65002BB8000` | 1.6.15.13 (v1310720) | 上游报告 iPhone 可玩 |
+| 纸片马力欧 千年之门 | `0100ECD018EBE000` | 1.0.1 (v65536) | 有 profile，未在手机上验证 |
+| 塞尔达传说 王国之泪 | `0100F2C0115B6000` | 1.4.3 (v720896) | **本 fork 已验证** —— 构建、安装、在 iPhone 上运行；304,243 个文件归档成 127 片，逐字节校验通过 |
+| 宝可梦传说 Z-A | `0100F43008C44000` | 2.0.2 (v393216) | 有 profile，未在手机上验证 |
+| 脑力记忆训练学院 | `0100F5D01DA3A000` | 无（v0） | 有 profile，未在手机上验证 |
+| 超级马力欧 银河 2 | `0100FD8022DAA000` | 1.4.0 (v393216) | 有 profile，未在手机上验证 |
 
 「本 fork 已验证」表示完整走通了整条链路：构建、装到 iPhone、运行，归档还逐字节比对过源文件。
 「上游报告 iPhone 可玩」是上游项目的结果，本 fork 未重新测试。只有 profile 不保证游戏能启动——

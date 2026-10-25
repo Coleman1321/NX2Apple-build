@@ -1,8 +1,8 @@
+<div align="center">
+
 # 🎮 NX2Apple
 
 **Your Switch games, running on your iPhone.**
-
-<div align="center">
 
 **Not an emulator. No terminal. A macOS app does the whole build in a few clicks.**
 
@@ -16,16 +16,16 @@
 [![English](https://img.shields.io/badge/🇺🇸_English-current-blue)](README.md)
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-available-green)](README.zh-CN.md)
 
-<img src="frontend/screenshots/main-window-en.png" width="640" alt="NS Port Builder">
-
-</div>
+<img src="frontend/screenshots/hero-features.png" width="100%" alt="NX2Apple — Switch games on your iPhone">
 
 A macOS app takes your own game dumps and does the whole thing with a few clicks — unpack, rewrite
 the game's code for Apple silicon, translate its shaders to Metal, pack a slim IPA plus a sharded
 RomFS archive that a phone can actually install (even a 16 GB game), and then tells you the three
 steps to get it onto the device.
 
-> **Formerly `nxnative-romfs-archive`** — old links redirect here.
+**Formerly `nxnative-romfs-archive`** — old links redirect here.
+
+</div>
 
 ---
 
