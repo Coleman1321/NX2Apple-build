@@ -788,6 +788,13 @@ def check_prereqs(env, xlate, mac=False):   # mac: a Mac-only build (PLATFORM 'm
     if mac: del tools['xcodegen']
     gone = [f'{t} ({how})' for t, how in tools.items() if not shutil.which(t, path=env['PATH'])]
     if gone: raise BuildError('tools not found: ' + ', '.join(gone))
+    if not mac:
+        # Xcode 15 and later ship the iOS platform as a separate download: xcodebuild and the Metal
+        # compiler can both be there while the iOS SDK is not, and the failure then surfaces deep in
+        # xcodebuild. Check the SDK itself so the message names the right command.
+        sdk = subprocess.run(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], capture_output=True, text=True, env=env)
+        if sdk.returncode:
+            raise BuildError('the iOS SDK is not installed (Xcode 15 and later download the platform separately): run xcodebuild -downloadPlatform iOS, or pick it in Xcode → Settings → Components')
     mtl = subprocess.run(['xcrun', '-sdk', 'macosx' if mac else 'iphoneos', 'metal', '--version'], capture_output=True, text=True, env=env)   # Xcode 26 and later install the Metal toolchain separately
     if mtl.returncode: raise BuildError(f'the Metal compiler does not run ({(mtl.stderr.strip().splitlines() or ["no output"])[-1]}): install it with xcodebuild -downloadComponent MetalToolchain')
     if not xlate.exists(): raise BuildError(f'the shader translator is missing from the repository: {xlate}')

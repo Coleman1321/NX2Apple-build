@@ -385,6 +385,23 @@ def patch_nsp(t):
         '''        if pkg_ver not in builds:
             _reg = ", ".join("{} {}".format(v, b["display"]) for v, b in builds.items())
             derived = f'{pkg_ver} is not a version game profile {g.id} registers ({_reg})\'''')]))
+    # Xcode 15 and later download the iOS platform separately: xcodebuild and the Metal compiler can
+    # both be present with no iOS SDK, and the failure then surfaced deep inside xcodebuild. Naming
+    # the SDK makes the error actionable (found while auditing environment assumptions, 2026-10-26).
+    P.append(('iOS SDK check', "the iOS SDK is not installed", [(
+        """    gone = [f'{t} ({how})' for t, how in tools.items() if not shutil.which(t, path=env['PATH'])]
+    if gone: raise BuildError('tools not found: ' + ', '.join(gone))
+""",
+        """    gone = [f'{t} ({how})' for t, how in tools.items() if not shutil.which(t, path=env['PATH'])]
+    if gone: raise BuildError('tools not found: ' + ', '.join(gone))
+    if not mac:
+        # Xcode 15 and later ship the iOS platform as a separate download: xcodebuild and the Metal
+        # compiler can both be there while the iOS SDK is not, and the failure then surfaces deep in
+        # xcodebuild. Check the SDK itself so the message names the right command.
+        sdk = subprocess.run(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], capture_output=True, text=True, env=env)
+        if sdk.returncode:
+            raise BuildError('the iOS SDK is not installed (Xcode 15 and later download the platform separately): run xcodebuild -downloadPlatform iOS, or pick it in Xcode → Settings → Components')
+""")]))
     for name, marker, pairs in P:
         if marker in t:
             skip(f'NSP script {name} (already patched)'); continue

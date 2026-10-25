@@ -121,6 +121,8 @@ enum L10n {
 
         "dep.xcode": ("Xcode + iOS SDK", "Xcode + iOS SDK"),
         "dep.xcode.hint": ("App Store 安装，约 12 GB", "from the App Store, about 12 GB"),
+        "dep.xcode.noSDK": ("Xcode 已装，但 iOS SDK 未下载（Xcode 15 起 iOS 平台是单独下载的）",
+                            "Xcode is installed but the iOS SDK is not downloaded (a separate download since Xcode 15)"),
         "dep.metal": ("Metal Toolchain", "Metal Toolchain"),
         "dep.metal.hint": ("xcodebuild -downloadComponent MetalToolchain（约 840 MB）",
                            "xcodebuild -downloadComponent MetalToolchain (about 840 MB)"),
@@ -172,6 +174,10 @@ enum L10n {
 
         // ---- build messages ----
         "msg.running": ("运行：%@", "Running: %@"),
+        "msg.installingNsz": ("选中的是 NSZ / XCZ 压缩格式，正在给构建用的 Python 安装 nsz…",
+                              "The selected dump is NSZ / XCZ — installing nsz into the build's Python…"),
+        "msg.nszFailed": ("nsz 安装失败（构建用的 Python：%@）——网络不通？或手动执行 pip install nsz",
+                          "Could not install nsz (build Python: %@) — network trouble? Or run pip install nsz by hand"),
         "msg.stopped": ("已停止", "Stopped"),
         "msg.buildFailed": ("构建失败（退出码 %d），见下方日志",
                             "Build failed (exit code %d) — see the log below"),

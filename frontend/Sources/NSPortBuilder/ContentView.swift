@@ -534,6 +534,25 @@ final class BuildModel: ObservableObject {
 
         let tidHex = Self.titleID(basePath).map { String(format: "%016llX", $0) } ?? "game"
         let workDir = (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + "_build"
+        // A compressed dump (NSZ / XCZ) needs nsz in the interpreter the build runs under; it is not
+        // part of the dependency probe (most builds never see one), so install it here, once, only
+        // when such a file is actually selected — otherwise the build stops with "pip install nsz".
+        let compressed = ([basePath, updatePath] + dlcPaths).contains {
+            let e = ($0 as NSString).pathExtension.lowercased()
+            return e == "nsz" || e == "xcz"
+        }
+        if compressed, !Self.runOK(py, ["-c", "import nsz"]) {
+            say(t("msg.installingNsz"))
+            let r = Self.runCaptured([py, "-m", "pip", "install", "nsz"],
+                                     env: ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                                           "HOME": NSHomeDirectory()]) { line in
+                DispatchQueue.main.async { self.append(line + "\n") }
+            }
+            if !r {
+                fail(String(format: t("msg.nszFailed"), py))
+                return
+            }
+        }
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
                     "--work-dir", workDir, "--progress", "lines"]
         if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
@@ -825,6 +844,9 @@ final class BuildModel: ObservableObject {
     /// `compression.zstd` is built in from Python 3.14 and `backports.zstd` (which declares
     /// Python < 3.14) is the only option before that. Requiring the backport unconditionally
     /// rejected an otherwise working Homebrew Python 3.15 (issue #1).
+    /// nsz is deliberately not required here: it is only needed for NSZ / XCZ dumps, and the
+    /// pipeline says so by name when one shows up. The venv installs it anyway so that a player
+    /// who downloads a compressed dump never meets that error.
     nonisolated static let importProbe = """
         import lz4, capstone, fontTools
         try:
@@ -844,8 +866,11 @@ final class BuildModel: ObservableObject {
     nonisolated static func importsOK(_ py: String) -> Bool { runOK(py, ["-c", importProbe]) }
 
     /// backports.zstd declares Python < 3.14, so it is only installed where it is needed.
+    /// nsz is always installed: NSZ / XCZ dumps are accepted by the pipeline now, and a player who
+    /// downloads one should not have to run pip by hand (it is a few hundred KB).
     nonisolated static func pipPackages(_ version: (Int, Int)) -> [String] {
-        version < (3, 14) ? ["lz4", "capstone", "fonttools", "backports.zstd"] : ["lz4", "capstone", "fonttools"]
+        version < (3, 14) ? ["lz4", "capstone", "fonttools", "backports.zstd", "nsz"]
+                          : ["lz4", "capstone", "fonttools", "nsz"]
     }
 
     /// Create the venv (reusing an existing one) and install the packages into it. Returns the
@@ -986,10 +1011,18 @@ final class BuildModel: ObservableObject {
     nonisolated static func detectDepsSync() -> [Dep] {
         var out: [Dep] = []
 
-        let xcode = FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
+        // Xcode.app alone is not enough: since Xcode 15 the iOS platform ships as a separate
+        // download, so a fresh install has xcodebuild but no iOS SDK and the build dies deep in
+        // xcodebuild. Ask for the SDK version itself — that is the check that matches the name.
+        let xcodePresent = FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
             && FileManager.default.isExecutableFile(atPath: "/usr/bin/xcodebuild")
+        let iosSDK = xcodePresent && runOK("/usr/bin/xcrun", ["--sdk", "iphoneos", "--show-sdk-version"])
         out.append(Dep(id: "xcode", name: "dep.xcode", hint: "dep.xcode.hint",
-                       present: xcode, installCmd: []))
+                       present: iosSDK,
+                       detail: iosSDK ? "" : (xcodePresent ? "dep.xcode.noSDK" : ""),
+                       installCmd: iosSDK ? [] : (xcodePresent
+                            ? ["/usr/bin/xcodebuild", "-downloadPlatform", "iOS"]
+                            : [])))
 
         let mt = runOK("/usr/bin/xcrun", ["-sdk", "macosx", "metal", "--version"])
         out.append(Dep(id: "metal", name: "dep.metal", hint: "dep.metal.hint",
