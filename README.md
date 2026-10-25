@@ -16,7 +16,7 @@
 [![English](https://img.shields.io/badge/🇺🇸_English-current-blue)](README.md)
 [![简体中文](https://img.shields.io/badge/🇨🇳_简体中文-available-green)](README.zh-CN.md)
 
-<img src="frontend/screenshots/hero-features.png" width="100%" alt="NX2Apple — Switch games on your iPhone">
+<img src="frontend/screenshots/hero-features-en.png" width="100%" alt="NX2Apple — Switch games on your iPhone">
 
 A macOS app takes your own game dumps and does the whole thing with a few clicks — unpack, rewrite
 the game's code for Apple silicon, translate its shaders to Metal, pack a slim IPA plus a sharded
