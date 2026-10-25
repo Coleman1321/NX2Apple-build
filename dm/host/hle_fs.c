@@ -264,7 +264,7 @@ static int host_path_ex(const char *p, char *out, size_t n, int *ro, int create)
         if (strlen(g_mnt[i].name) != ln || strncmp(g_mnt[i].name, p, ln)) continue;
         if (ro) *ro = g_mnt[i].ro;
         char normed[1024]; const char *rest = c + 1;
-        if (strstr(rest, "/.")) { if (!norm_rest(rest, normed, sizeof normed)) return 0; rest = normed; }   // only paths with "." components are normalized; the rest walk component by component as before
+        if (strstr(rest, "/.") || strstr(rest, "//")) { if (!norm_rest(rest, normed, sizeof normed)) return 0; rest = normed; }   // paths with "." components or a doubled "/" are normalized: the archive mount below copies the rest verbatim and looks it up exactly, so "icon_sick//bin/dummy_spa.arc" (Pokemon Sword, opening the Bag) would miss although Horizon folds it; other paths walk component by component as before
         if (g_mnt[i].overlay[0] && !create) return rom_overlay_path(&g_mnt[i], rest, out, n);
         // Archive mount: the RomFS tree lives inside a ROMFSARC archive, so the host path is a
         // synthetic "@romfsarc:<guest path>" that the file calls below route to romfs_arc.c. Matched
