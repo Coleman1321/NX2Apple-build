@@ -329,7 +329,38 @@ def patch_nsp(t):
                 elif p: root = p
                 break
         except Exception: pass
-        env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT'] = root or str(Path(dn).resolve().parent)""")]))
+        env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT'] = root or str(Path(dn).resolve().parent)
+    # The shader translator (dmsh_xlate_bin/dmsh_xlate) is a framework-dependent apphost like
+    # nx_extract, and a set-but-wrong DOTNET_ROOT is worse than none: the apphost stops searching
+    # once the variable is there, so a stale root from the environment (or the fallback above, wrong
+    # for Homebrew's symlink layout) kills the shader step while `dotnet` on PATH keeps working —
+    # nx_extract builds fine, then dmsh_build refuses with \"'xlate_source: lock … / actual' empty\".
+    # Verify by actually running the translator; when it answers nothing, try candidate roots and
+    # keep the first that works. With none verified the variable is dropped, so the apphost at least
+    # searches its default locations.
+    xlate_bin = repo / 'dm/gfx/tools/dmsh_xlate_bin/dmsh_xlate'
+    def xlate_answers(root):
+        e = dict(env)
+        if root: e['DOTNET_ROOT'] = str(root)
+        else: e.pop('DOTNET_ROOT', None)
+        try:
+            r = subprocess.run([str(xlate_bin), '--source-sha'], capture_output=True, text=True, env=e, timeout=120)
+            return r.returncode == 0 and bool(r.stdout.strip())
+        except Exception:
+            return False
+    if not xlate_answers(env.get('DOTNET_ROOT')):
+        cands = []
+        if dn := shutil.which('dotnet', path=env['PATH']):
+            real = Path(dn).resolve()
+            for base in (real.parent.parent, real.parent.parent.parent):
+                cands += [base / 'libexec', base]   # Homebrew's bin/../libexec; share/dotnet and aliases
+        cands += [Path.home() / '.dotnet', Path('/usr/local/share/dotnet'), Path('/opt/homebrew/opt/dotnet/libexec')]
+        if hit := next((c for c in cands if c.is_dir() and xlate_answers(c)), None):
+            env['DOTNET_ROOT'] = os.environ['DOTNET_ROOT'] = str(hit)
+            say(f'DOTNET_ROOT: {hit} (verified — the shader translator runs)')
+        elif env.get('DOTNET_ROOT'):
+            del env['DOTNET_ROOT']; os.environ.pop('DOTNET_ROOT', None)
+            say('DOTNET_ROOT: removed (none verified — the apphost searches its default locations)')""")]))
     P.append(('3.9 survey note', "listed = ', '.join('{} ({})'.format(n, mods[n]['kind'])", [(
         '''    if extra: notes.append(f'modules besides main / sdk: {", ".join(f"{n} ({mods[n]["kind"]})" for n in extra)}; the provisional profile loads {G["modules"][0]} (load order main, subsdk*, sdk)')''',
         '''    if extra:

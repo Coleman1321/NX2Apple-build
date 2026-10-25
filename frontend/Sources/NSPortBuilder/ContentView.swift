@@ -544,13 +544,16 @@ final class BuildModel: ObservableObject {
         p.arguments = args
         p.currentDirectoryURL = URL(fileURLWithPath: repoPath)
         // The root of the runtime the apphost looks for: derived from the detected installation,
-        // not assumed to be ~/.dotnet (Homebrew keeps it in …/opt/dotnet/libexec). Both variables
-        // carry the same root, as the apphost checks the arch-specific one first.
-        let droot = Self.dotnetRoot(for: dotnetPath.isEmpty ? "dotnet" : dotnetPath)
-                     ?? (dotnetPath as NSString).deletingLastPathComponent
-        p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-                         "DOTNET_ROOT": droot, "DOTNET_ROOT_ARM64": droot,
-                         "USER": NSUserName(), "HOME": NSHomeDirectory(), "LANG": "en_US.UTF-8"]
+        // not assumed to be ~/.dotnet (Homebrew keeps it in …/opt/dotnet/libexec). Only set when the
+        // derivation actually answered — a wrong root is worse than none, and the pipeline derives
+        // and verifies its own (DOTNET_ROOT, build_ipa_from_nsp.py) when this is absent.
+        var denv: [String: String] = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                                      "USER": NSUserName(), "HOME": NSHomeDirectory(), "LANG": "en_US.UTF-8"]
+        if let droot = Self.dotnetRoot(for: dotnetPath.isEmpty ? "dotnet" : dotnetPath) {
+            denv["DOTNET_ROOT"] = droot   // both variables carry the same root, as the apphost checks the arch-specific one first
+            denv["DOTNET_ROOT_ARM64"] = droot
+        }
+        p.environment = denv
         let pipe = Pipe()
         p.standardOutput = pipe; p.standardError = pipe
         p.terminationHandler = { [weak self] status in
@@ -960,7 +963,10 @@ final class BuildModel: ObservableObject {
         p.waitUntilExit()
         guard p.terminationStatus == 0 else { return nil }
         let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return parseDotnetRoot(out) ?? ((dotnet as NSString).deletingLastPathComponent)
+        // No directory fallback: for Homebrew's symlink layout the binary's directory is not the root,
+        // and a wrong DOTNET_ROOT is worse than none (the apphost stops searching once it is set).
+        // When this returns nil the pipeline derives and verifies a root itself.
+        return parseDotnetRoot(out)
     }
 
     nonisolated static func findDotnet() -> (path: String, ok: Bool) {
