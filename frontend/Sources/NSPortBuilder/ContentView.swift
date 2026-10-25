@@ -144,6 +144,119 @@ final class BuildModel: ObservableObject {
         return ""
     }
 
+    // ---- Repository download and updates (a clone is the scripts' home; not everyone has git habits) ----
+
+    static let repoURL = "https://github.com/LNPANDY/NX2Apple.git"
+    /// Clone/pull/check in flight; the buttons disable and the status line says what is happening.
+    @Published var repoBusy = false
+    @Published var repoStatus = ""
+    /// nil = not checked yet, 0 = up to date, n = n commits behind origin/main.
+    @Published var repoBehind: Int?
+
+    nonisolated static func gitBinary() -> String? {
+        for c in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]
+            where FileManager.default.isExecutableFile(atPath: c) { return c }
+        return nil
+    }
+    nonisolated static func gitEnv() -> [String: String] {
+        ["PATH": "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin", "HOME": NSHomeDirectory()]
+    }
+
+    /// Run a command with all output captured (no streaming; fetch / rev-list / pull print little).
+    nonisolated static func runQuiet(_ args: [String], env: [String: String]) -> (ok: Bool, out: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: args[0])
+        p.arguments = Array(args.dropFirst())
+        p.environment = env
+        p.standardInput = FileHandle.nullDevice
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        do { try p.run() } catch { return (false, error.localizedDescription) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus == 0, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    /// First-time flow: clone the project to ~/NX2Apple (the discovery seeds cover it) and select it.
+    func cloneRepo() {
+        guard !running, !repoBusy else { return }
+        guard let git = Self.gitBinary() else { repoStatus = t("repo.gitMissing"); return }
+        let dest = NSHomeDirectory() + "/NX2Apple"
+        if FileManager.default.fileExists(atPath: dest) {
+            if Self.isRepo(dest) { repoPath = dest; repoStatus = ""; checkRepoUpdates() }
+            else { repoStatus = String(format: t("repo.destBusy"), shortPath(dest)) }
+            return
+        }
+        repoBusy = true; repoStatus = t("repo.downloading")
+        append("git clone --depth 1 \(Self.repoURL) \(dest)\n")
+        DispatchQueue.global().async {
+            // Shallow: a quarter of the bytes and a third of the time of a full clone, and fetch /
+            // pull keep working on it (verified); the history is of no use to someone who wants to build.
+            let ok = Self.runCaptured([git, "clone", "--depth", "1", "--single-branch", "--progress", Self.repoURL, dest], env: Self.gitEnv()) {
+                line in DispatchQueue.main.async { self.append(line + "\n") }
+            }
+            DispatchQueue.main.async {
+                self.repoBusy = false
+                if ok && Self.isRepo(dest) {
+                    self.repoPath = dest
+                    self.repoStatus = String(format: self.t("repo.downloadDone"), self.shortPath(dest))
+                } else {
+                    self.repoStatus = self.t("repo.downloadFail")
+                    try? FileManager.default.removeItem(atPath: dest)   // a failed clone leaves an empty folder
+                }
+            }
+        }
+    }
+
+    /// Compare the checkout with origin/main. `silent` is the launch-time check: no status text, no
+    /// error noise when offline — it only fills repoBehind when it can.
+    func checkRepoUpdates(silent: Bool = false) {
+        guard !running, !repoBusy, repoOK, let git = Self.gitBinary() else {
+            if !silent, repoOK, Self.gitBinary() == nil { repoStatus = t("repo.gitMissing") }
+            return
+        }
+        repoBusy = true
+        if !silent { repoStatus = t("repo.checking") }
+        let dir = repoPath
+        DispatchQueue.global().async {
+            let fetched = Self.runQuiet([git, "-C", dir, "fetch", "origin", "main"], env: Self.gitEnv())
+            var behind = -1
+            if fetched.ok {
+                let count = Self.runQuiet([git, "-C", dir, "rev-list", "--count", "HEAD..origin/main"], env: Self.gitEnv())
+                if count.ok { behind = Int(count.out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? -1 }
+            }
+            DispatchQueue.main.async {
+                self.repoBusy = false
+                if behind >= 0 {
+                    self.repoBehind = behind
+                    if !silent { self.repoStatus = behind == 0 ? self.t("repo.upToDate") : String(format: self.t("repo.behind"), behind) }
+                } else if !silent {
+                    self.repoStatus = self.t("repo.netFail")
+                }
+            }
+        }
+    }
+
+    /// Fast-forward the checkout to origin/main. The build keeps everything it needs under
+    /// <id>_build/ outside the repository, so a pull never disturbs a previous build's files.
+    func pullRepo() {
+        guard !running, !repoBusy, repoOK, let git = Self.gitBinary() else { return }
+        repoBusy = true; repoStatus = t("repo.pulling")
+        let dir = repoPath
+        DispatchQueue.global().async {
+            let r = Self.runQuiet([git, "-C", dir, "pull", "--ff-only", "origin", "main"], env: Self.gitEnv())
+            DispatchQueue.main.async {
+                self.repoBusy = false
+                if r.ok {
+                    self.repoBehind = 0; self.repoStatus = self.t("repo.pulled")
+                    if !r.out.isEmpty { self.append(r.out + "\n") }
+                } else {
+                    self.repoStatus = self.t("repo.pullFail")
+                    self.append(r.out + "\n")
+                }
+            }
+        }
+    }
+
     var basePath: String { slot("base").paths.first ?? "" }
     var keysPath: String { slot("keys").paths.first ?? "" }
     var updatePath: String { slot("update").paths.first ?? "" }
@@ -873,7 +986,10 @@ struct ContentView: View {
             footer
         }
         .frame(minWidth: 720, idealWidth: 880, minHeight: 560, idealHeight: 820)
-        .onAppear { m.checkDeps() }
+        .onAppear {
+            m.checkDeps()
+            if m.repoOK { m.checkRepoUpdates(silent: true) }   // quiet fetch: fills repoBehind, offline is not an error
+        }
     }
 
     // The scrollable part, split out so it can be rendered on its own for layout checks.
@@ -930,7 +1046,19 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     sectionHeader("shippingbox", m.t("repo.title"), note: m.t("repo.note"))
-                    Button(m.t("repo.choose")) { pickRepo() }
+                    Spacer(minLength: 8)
+                    if m.repoOK {
+                        if let n = m.repoBehind, n > 0 {
+                            Button(m.t("repo.pull")) { m.pullRepo() }
+                                .disabled(m.repoBusy || m.running)
+                        }
+                        Button(m.t("repo.check")) { m.checkRepoUpdates() }
+                            .disabled(m.repoBusy || m.running)
+                    } else {
+                        Button(m.t("repo.download")) { m.cloneRepo() }
+                            .disabled(m.repoBusy || m.running)
+                        Button(m.t("repo.choose")) { pickRepo() }
+                    }
                 }
                 HStack(spacing: 10) {
                     Image(systemName: m.repoOK ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -945,6 +1073,14 @@ struct ContentView: View {
                         .lineLimit(1).truncationMode(.head)
                         .help(m.repoPath)
                     Spacer(minLength: 8)
+                    if m.repoBusy { ProgressView().controlSize(.small) }
+                }
+                if !m.repoStatus.isEmpty {
+                    Text(m.repoStatus)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle((m.repoBehind ?? 0) > 0 ? Color.orange : Color.secondary)
+                } else if !m.repoOK {
+                    Text(m.t("repo.firstHint")).font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
             }.padding(8)
         }
