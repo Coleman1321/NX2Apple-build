@@ -5,7 +5,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
-#include "game_profile.h"   // game profile constants (the RomFS marker path)
+#include "hle_profile.h"   // the runtime game profile (DM_PROFILE): the RomFS marker path comes from it
 #include "front.h"
 
 int dm_main(int argc, char **argv);   // dm/host/main.c compiled in with -Dmain=dm_main
@@ -22,8 +22,9 @@ static BOOL romfs_dir_ok(NSString *d) {
     // points at the base; the marker check does not apply (there are no directories to walk).
     if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@"romfs.idx"]]) return YES;
     // A plain directory tree: only one containing the game profile's romfs_marker path counts
-    // (Mario: System/Resource, the resource size table)
-    return [fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]];
+    // (Mario: System/Resource, the resource size table). Runtime profile: the marker is a profile
+    // value now; the compiled macro is only what dm_profile() falls back to without DM_PROFILE.
+    return [fm fileExistsAtPath:[d stringByAppendingPathComponent:@(dm_profile()->romfs_marker)]];
 }
 
 // Where one game's data lives under the per-game layout: Documents/games/<title ID>/, holding
