@@ -779,6 +779,17 @@ def refresh_badges():
             p.write_text(new, encoding='utf-8')
             say(f'  badge {name}: {value}')
     say(f'badges: {games} games, {verified} verified')
+    # The README banners carry the same two numbers, so they are redrawn here: both scripts read
+    # them from the tree (repo_numbers()), so this only runs when the tree changed.
+    for script in ('frontend/screenshots/gen_hero.py', 'frontend/screenshots/gen_hero_en.py'):
+        sp = REPO / script
+        if not sp.exists():
+            continue
+        r = subprocess.run([sys.executable, str(sp)], capture_output=True, text=True, timeout=180)
+        if r.returncode == 0:
+            say(f'  banner: {Path(script).name} redrawn')
+        else:
+            say(f'  ! banner {Path(script).name} failed: {(r.stderr or "").strip()[:160]}')
 
 
 def main():

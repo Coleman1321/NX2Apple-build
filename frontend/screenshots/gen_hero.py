@@ -1,9 +1,27 @@
 # -*- coding: utf-8 -*-
 """README hero: a 3:1 wide feature banner."""
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 2100, 700
 OUT = "/Users/hejie/ZCodeProject/nxnative-romfs-archive/frontend/screenshots/hero-features.png"
+
+# ---- live numbers, so the banner cannot go stale again ----
+REPO = Path(__file__).resolve().parents[2]
+
+def repo_numbers() -> tuple[int, int]:
+    """(game profiles, verified on an iPhone) straight from the tree.
+
+    The profile count is the number of dm/games/0100… folders; the verified count is the rows
+    of README.md's games table that say so. Both are what the README's own text claims, so the
+    banner and the text can never disagree.
+    """
+    games = sum(1 for d in (REPO / 'dm/games').iterdir() if d.is_dir() and d.name.startswith('0100'))
+    readme = (REPO / 'README.md').read_text(encoding='utf-8')
+    verified = sum(1 for ln in readme.splitlines()
+                   if ln.startswith('| ') and ln.count('`') >= 2
+                   and ('**Verified here**' in ln or 'Verified —' in ln))
+    return games, verified
 
 F_HEI = "/Library/Fonts/4080_方正超粗黑_GBK.ttf"
 F_MED = "/Library/Fonts/SourceHanSansCN-Medium.ttf"
@@ -43,7 +61,8 @@ d.text((LX, 196), "装进 iPhone", font=hei(84), fill=YELLOW)
 d.text((LX + 4, 308), "不是模拟器 · 不用命令行", font=med(38), fill=(206, 214, 222))
 d.text((LX + 4, 358), "一个 macOS App 点几下就完成构建", font=med(34), fill=GREY)
 
-stats = [("58", "款游戏 profile", GREEN), ("3", "款 iPhone 实测", YELLOW), ("300k", "文件 → 127 分片", GREEN)]
+_games, _verified = repo_numbers()
+stats = [(str(_games), "款游戏 profile", GREEN), (str(_verified), "款 iPhone 实测", YELLOW), ("300k", "文件 → 127 分片", GREEN)]
 y0 = 470
 for i, (num, label, color) in enumerate(stats):
     x = LX + i * 268
