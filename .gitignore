@@ -12,6 +12,7 @@ romfs.[0-9][0-9]
 # Swift Package build products and the packaged app (rebuild with `swift build -c release`)
 frontend/.build/
 frontend/NS Port Builder.app/
+frontend/nxnative.app/
 
 # Made from each shader build's Mac outputs (c1_guard.py, cb_extent.py; the NSP script makes them), not committed
 dm/games/*/c1_full.tsv
