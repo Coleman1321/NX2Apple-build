@@ -194,13 +194,15 @@ final class LibraryTests: XCTestCase {
         var tries = 0
         while members() < 3 && tries < 50 { usleep(100_000); tries += 1 }
         XCTAssertEqual(members(), 3)   // the shell and its two children, in the leader's group
+        let stopped = Date()
         BuildModel.endGroup(p.processIdentifier)
         p.waitUntilExit()
         tries = 0
         while members() > 0 && tries < 30 { usleep(100_000); tries += 1 }
-        XCTAssertEqual(members(), 0)   // ended by SIGTERM, well before the SIGKILL 5 s later
-        XCTAssertEqual(p.terminationReason, .uncaughtSignal)
-        XCTAssertEqual(p.terminationStatus, SIGTERM)
+        XCTAssertEqual(members(), 0)
+        // Ended by the SIGTERM, well before the SIGKILL 5 s later. The shell may die of it or, when its children went
+        // first, return from its wait and exit 0: either way the whole group is gone.
+        XCTAssertLessThan(Date().timeIntervalSince(stopped), 3)
     }
 
     func testProgressDetailReadsTheScriptsCounts() {
