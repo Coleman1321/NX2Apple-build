@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -263,7 +264,17 @@ class Model(QObject):
 
     @property
     def all_deps_ok(self) -> bool:
-        return self.deps_checked and all(d.ok for d in self.deps)
+        """Every required row passed — and an empty list is not "all good".
+
+        `all([])` is True, so when the dependency check threw and left `self.deps = []` (the
+        handler below), the panel reported "All ready" while nothing had been checked at all.
+        The handheld report was exactly that: ".NET and LLVM installed, then it says every
+        dependency is fine — I have not even installed Metal." A check that produced no rows has
+        proved nothing, so it is not a pass.
+        """
+        if not self.deps_checked or not self.deps:
+            return False
+        return all(d.ok for d in self.deps)
 
     # ---- Windows toolchain rows
 
@@ -450,42 +461,21 @@ class Model(QObject):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def pull_repo(self) -> None:
-        """Fast-forward the checkout to origin/main. The build's own files live outside the
-        repository, so this never disturbs a previous build."""
-        git = self.git_binary()
-        if not git or not self.repo_ok or not self.repo_is_git:
-            return
-        self.repo_busy = True
-        self.repo_status = self.t('repo.pulling')
-        self.repoChanged.emit()
-        self.log(self.t('repo.pulling') + '\n')
+    def update_repo(self) -> None:
+        """Fetch, and fast-forward when there is anything to fast-forward.
 
-        def work() -> None:
-            out = ''
-            try:
-                r = subprocess.run([git, '-C', self.repo_path, 'pull', '--ff-only', 'origin', 'main'],
-                                   capture_output=True, text=True, env=pu.child_env(),
-                                   **pu.no_window_kwargs())
-                out = (r.stdout or '') + (r.stderr or '')
-                self.repo_status = self.t('repo.pulled') if r.returncode == 0 else self.t('repo.pullFail')
-            except OSError as e:
-                out, self.repo_status = str(e), self.t('repo.pullFail')
-            self.repo_busy = False
-            if out:
-                self.log(out + '\n')
-            self.repoChanged.emit()
+        One button, because "check" and "pull" were never two decisions: the only reason to press
+        the first was to find out whether to press the second, and a user who has just been told
+        "12 new commits" is going to press it. Reported as "why does Check for updates not just
+        pull — the extra Pull button is pointless", and it is right.
 
-        threading.Thread(target=work, daemon=True).start()
+        The order still matters and is unchanged: `fetch` first (that is what learns about
+        origin/main), then `rev-list` to see the gap, then `pull --ff-only` only when the gap is
+        non-zero. `--ff-only` never merges and never touches local commits, so a checkout with
+        changes of its own is refused rather than rewritten.
 
-    def check_repo_updates(self) -> None:
-        """How far behind origin/main the checkout is (0 = current).
-
-        `git fetch` over a slow link takes tens of seconds, and the button used to go grey with
-        nothing in the log until it finished — reported as "I click Check for updates, it greys
-        out, and nothing happens". So: say what is starting, stream git's own progress lines, and
-        end with a line either way. git writes progress to stderr with `--progress`, which is why
-        the fetch below asks for it explicitly (it is off by default when stderr is a pipe).
+        git's own progress is streamed: over a slow link the fetch alone takes tens of seconds and
+        the button used to go grey in silence.
         """
         git = self.git_binary()
         if not git or not self.repo_ok or not self.repo_is_git:
@@ -494,46 +484,73 @@ class Model(QObject):
         self.repo_status = self.t('repo.checking')
         self.repoChanged.emit()
         self.log(self.t('repo.checking') + '\n')
-        self.log(f'$ git -C {self.repo_path} fetch --progress origin main\n')
 
-        def work() -> None:
-            ok = False
+        def stream(args: list[str], what: str) -> bool:
+            """Run git, logging its output as it arrives (progress uses \\r)."""
+            self.log(f'$ git -C {self.repo_path} {" ".join(args)}\n')
             try:
-                p = subprocess.Popen([git, '-C', self.repo_path, 'fetch', '--progress',
-                                      'origin', 'main'],
+                p = subprocess.Popen([git, '-C', self.repo_path] + args,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     text=True, errors='replace', env=pu.child_env(),
-                                     **pu.no_window_kwargs())
+                                     text=True, errors='replace', encoding='utf-8',
+                                     env=pu.child_env(), **pu.no_window_kwargs())
                 assert p.stdout is not None
+                # git rewrites one progress line per percent per phase ("Counting objects: 7%",
+                # "Receiving objects: 62%", …). Logging each of those turned one fetch into
+                # hundreds of lines (reported). Keep the phase changes, the final 100%, and every
+                # fifth percent; drop the rest.
+                seen: dict[str, int] = {}
                 for line in p.stdout:
-                    # git rewrites a progress line with \r; the log is line-based
-                    if s := line.replace('\r', '\n').strip():
+                    for s in line.replace('\r', '\n').split('\n'):
+                        s = s.strip()
+                        if not s:
+                            continue
+                        m = re.match(r'^(remote: )?([A-Za-z][\w ]*?):\s+(\d+)%', s)
+                        if m:
+                            phase, pct = m.group(2), int(m.group(3))
+                            last = seen.get(phase)
+                            if pct != 100 and last is not None and pct < last + 5:
+                                continue
+                            seen[phase] = pct
                         self.log(s + '\n')
                 p.wait()
-                ok = p.returncode == 0
+                return p.returncode == 0
             except OSError as e:
                 self.log(f'{e}\n')
-            if not ok:
-                self.repo_status = self.t('repo.netFail')
+                return False
+
+        def work() -> None:
+            try:
+                if not stream(['fetch', '--progress', 'origin', 'main'], 'fetch'):
+                    self.repo_status = self.t('repo.netFail')
+                    return
+                try:
+                    r = subprocess.run([git, '-C', self.repo_path, 'rev-list', '--count',
+                                        'HEAD..origin/main'],
+                                       capture_output=True, text=True, env=pu.child_env(),
+                                       **pu.no_window_kwargs())
+                    behind = int(r.stdout.strip() or 0) if r.returncode == 0 else -1
+                except (OSError, ValueError):
+                    behind = -1
+                if behind < 0:
+                    self.repo_status = self.t('repo.netFail')
+                    return
+                self.repo_behind = behind
+                if behind == 0:
+                    self.repo_status = self.t('repo.upToDate')
+                    self.log(self.repo_status + '\n')
+                    return
+                self.repo_status = self.t('repo.pulling')
+                self.repoChanged.emit()
+                self.log(self.t('repo.pulling') + '\n')
+                if stream(['pull', '--ff-only', 'origin', 'main'], 'pull'):
+                    self.repo_behind = 0
+                    self.repo_status = self.t('repo.pulled')
+                else:
+                    self.repo_status = self.t('repo.pullFail')
+                self.log(self.repo_status + '\n')
+            finally:
                 self.repo_busy = False
                 self.repoChanged.emit()
-                return
-            try:
-                r = subprocess.run([git, '-C', self.repo_path, 'rev-list', '--count',
-                                    'HEAD..origin/main'],
-                                   capture_output=True, text=True, env=pu.child_env(),
-                                   **pu.no_window_kwargs())
-                if r.returncode == 0:
-                    self.repo_behind = int(r.stdout.strip() or 0)
-                    self.repo_status = (self.t('repo.upToDate') if self.repo_behind == 0
-                                        else self.t('repo.behind', self.repo_behind))
-                else:
-                    self.repo_status = self.t('repo.netFail')
-            except (OSError, ValueError):
-                self.repo_status = self.t('repo.netFail')
-            self.log(self.repo_status + '\n')
-            self.repo_busy = False
-            self.repoChanged.emit()
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -601,6 +618,9 @@ class Model(QObject):
         dep.installing = True
         self.depsChanged.emit()
 
+        def progress_logger(label: str):
+            return self._progress_logger(label)
+
         def work() -> None:
             ok = False
             try:
@@ -610,18 +630,16 @@ class Model(QObject):
                     self.log(self.t('dep.dotnet.downloading') + '\n')
                     path = wf.install_dotnet(
                         log=lambda s: self.log(str(s) + '\n'),
-                        progress=lambda d, t_: self.log(
-                            f'  {d // 1048576} MB' +
-                            (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
+                        progress=progress_logger(self.t('dep.phase.download')),
+                        unpack_progress=progress_logger(self.t('dep.phase.unpack')))
                     self.log(self.t('dep.dotnet.done', str(path)) + '\n')
                     ok = True
                 elif what == 'llvm':
                     self.log(self.t('dep.llvm.downloading') + '\n')
                     path = wf.install_llvm(
                         log=lambda s: self.log(str(s) + '\n'),
-                        progress=lambda d, t_: self.log(
-                            f'  {d // 1048576} MB' +
-                            (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
+                        progress=progress_logger(self.t('dep.phase.download')),
+                        unpack_progress=progress_logger(self.t('dep.phase.unpack')))
                     self.log(self.t('dep.llvm.done', str(path)) + '\n')
                     ok = True
                 elif what == 'ios_sdk':
@@ -643,6 +661,26 @@ class Model(QObject):
             self.check_deps()
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _progress_logger(self, label: str):
+        """A progress callback that logs at 5% steps, not on every chunk.
+
+        The download calls back once per MiB, so a 287 MB SDK produced ~280 lines at 1% each and
+        buried everything else in the log (reported). Each call gets its own counter, so the
+        download and the unpack that follows both start at 0% and each produce about ten lines.
+        """
+        seen = {'pct': -5}
+
+        def report(done: int, total: int) -> None:
+            if not total:
+                return
+            pct = done * 100 // total
+            if pct < seen['pct'] + 5 and pct != 100:
+                return
+            seen['pct'] = pct
+            self.log(f'  {label} {pct}%  ({done // 1048576} / {total // 1048576} MB)\n')
+
+        return report
 
     def _make_venv(self, base: str) -> bool:
         """Create or reuse the app's venv and install the build packages into it."""

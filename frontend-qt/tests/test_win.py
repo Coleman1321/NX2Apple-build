@@ -931,6 +931,153 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(msg.count('github.com/a/b'), 1 + len(tc.GITHUB_MIRRORS))
 
 
+class ToolchainProbeRobustnessTest(unittest.TestCase):
+    """Probes must survive a tool that prints nothing on stdout.
+
+    The second handheld report's log ended with eight repetitions of
+    `dependency check failed: TypeError: expected string or bytes-like object, got 'NoneType'`
+    from `llvm_version` — `subprocess.run(text=True)` leaves `stdout` as None when the child
+    writes nothing there, and `re.search` on None raises. The check died, `deps` became empty,
+    and `all([])` is True, so the panel said every dependency was ready while nothing at all had
+    been verified (the report: "I have not even installed Metal").
+    """
+
+    def test_llvm_version_survives_empty_stdout(self) -> None:
+        fake = subprocess.CompletedProcess(['clang'], 0, None, '')
+        with mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(tc.llvm_version(Path('clang.exe')), '')
+
+    def test_llvm_version_reads_stderr_too(self) -> None:
+        """A clang that prints its banner on stderr still tells us its version."""
+        fake = subprocess.CompletedProcess(['clang'], 0, None,
+                                           'clang version 23.1.4\nTarget: x86_64-pc-windows')
+        with mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(tc.llvm_version(Path('clang.exe')), '23.1.4')
+
+    def test_llvm_version_still_reads_stdout(self) -> None:
+        fake = subprocess.CompletedProcess(['clang'], 0,
+                                           'clang version 23.1.4 (https://llvm.org)', '')
+        with mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(tc.llvm_version(Path('clang.exe')), '23.1.4')
+
+    def test_metal_version_survives_empty_output(self) -> None:
+        fake = subprocess.CompletedProcess(['metal'], 0, None, None)
+        with mock.patch.object(tc, 'metal_tool', return_value=Path('metal.exe')), \
+                mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(tc.metal_version(), '')
+
+    def _all_deps_ok(self, deps, checked):
+        """Evaluate Model.all_deps_ok without needing PySide6 installed."""
+        try:
+            from nspb_qt.model import Dep, DepState, Model
+        except ModuleNotFoundError as e:          # pragma: no cover - a bare interpreter
+            if 'PySide6' in str(e):
+                self.skipTest('PySide6 is not installed')
+            raise
+
+        class Fake(Model):
+            def __init__(self):
+                self.deps = deps
+                self.deps_checked = checked
+
+        return Fake().all_deps_ok
+
+    def test_empty_dep_list_is_not_all_ready(self) -> None:
+        """`all([])` is True — a check that produced no rows has proved nothing."""
+        self.assertFalse(self._all_deps_ok([], True))
+
+    def test_unchecked_is_not_all_ready(self) -> None:
+        try:
+            from nspb_qt.model import Dep, DepState
+        except ModuleNotFoundError as e:
+            if 'PySide6' in str(e):
+                self.skipTest('PySide6 is not installed')
+            raise
+        good = [Dep('a', 'k', 'h', DepState.OK, '')]
+        self.assertFalse(self._all_deps_ok(good, False))
+        self.assertTrue(self._all_deps_ok(good, True))
+        self.assertFalse(self._all_deps_ok([Dep('a', 'k', 'h', DepState.MISSING, '')], True))
+
+
+class SdkCleanupTest(unittest.TestCase):
+    """A retry must start from an empty directory, even with git's read-only pack files.
+
+    The report's log showed the same clone failing three times — direct, then two mirrors — all
+    with "destination path already exists and is not an empty directory". `shutil.rmtree(...,
+    ignore_errors=True)` cannot delete the read-only files git writes on Windows and silently
+    left them behind, so every retry hit the previous attempt's leftovers.
+    """
+
+    def test_rmtree_clears_readonly_files(self) -> None:
+        from nspb_qt.win.sdk_fetch import rmtree
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / 'clone'
+            (root / 'objects' / 'pack').mkdir(parents=True)
+            pack = root / 'objects' / 'pack' / 'x.pack'
+            pack.write_bytes(b'read only')
+            pack.chmod(0o444)                       # what git does on Windows
+            rmtree(root)
+            self.assertFalse(root.exists())
+
+    def test_rmtree_is_quiet_when_absent(self) -> None:
+        from nspb_qt.win.sdk_fetch import rmtree
+        with tempfile.TemporaryDirectory() as td:
+            rmtree(Path(td) / 'never-existed')      # must not raise
+
+
+class ProgressStepTest(unittest.TestCase):
+    """Downloads and unpacks log at 5% steps, not on every chunk.
+
+    The report: a 287 MB SDK download printed a line per MiB (about 280 lines), burying the rest
+    of the log. Unpacking had no progress at all ("can unpacking also have progress").
+    """
+
+    def test_the_model_filters_progress_to_five_percent_steps(self) -> None:
+        """The 5%-step filter lives in Model._install_win's progress logger.
+
+        `fetch.download` must keep calling back on every chunk (it has no idea what a useful
+        logging granularity is, and the callback also drives any future progress bar), so the
+        filtering is tested where it belongs. The report: a 287 MB SDK printed ~280 lines.
+        """
+        try:
+            from nspb_qt.model import Model
+        except ModuleNotFoundError as e:
+            if 'PySide6' in str(e):
+                self.skipTest('PySide6 is not installed')
+            raise
+
+        logged: list[str] = []
+        m = Model.__new__(Model)                 # no QObject init: only log() is used
+        m.log = logged.append
+        report = Model._progress_logger(m, 'Download')
+
+        for mb in range(0, 288):                 # one callback per MiB, like the real download
+            report(mb * 1048576, 287 * 1048576)
+        # 0,5,…,95,100 — at most 21 lines for 288 callbacks
+        self.assertLessEqual(len(logged), 21)
+        self.assertGreaterEqual(len(logged), 10)
+        self.assertTrue(any('100%' in s for s in logged))
+        self.assertTrue(all('Download' in s for s in logged))
+
+    def test_unpack_progress_reaches_100(self) -> None:
+        from nspb_qt.win import fetch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            z = root / 'downloads' / tc.DOTNET_ASSET['name']
+            z.parent.mkdir(parents=True)
+            with zipfile.ZipFile(z, 'w') as zf:
+                zf.writestr('dotnet.exe', b'MZ' * 1000)
+                zf.writestr('sdk/a.dll', b'x' * 5000)
+            seen: list[tuple[int, int]] = []
+            with mock.patch.object(fetch, 'download', return_value=z):
+                fetch.install_dotnet(dest=root, log=lambda s: None,
+                                     unpack_progress=lambda d, t: seen.append((d, t)))
+            self.assertTrue(seen)
+            done, total = seen[-1]
+            self.assertEqual(done, total)       # the last report is the whole archive
+            self.assertGreaterEqual(total, 6000)
+
+
 class DotnetTest(unittest.TestCase):
     """The .NET row and its in-app installer.
 

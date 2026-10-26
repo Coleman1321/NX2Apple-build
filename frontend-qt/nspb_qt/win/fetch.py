@@ -196,7 +196,8 @@ def _strip_root(member: str) -> str:
 
 def install_llvm(arch: str | None = None, dest: Path | None = None,
                  log: Callable[[str], None] | None = None,
-                 progress: Callable[[int, int], None] | None = None) -> Path:
+                 progress: Callable[[int, int], None] | None = None,
+                 unpack_progress: Callable[[int, int], None] | None = None) -> Path:
     """Download and unpack LLVM-MinGW, then make the Mach-O linker available.
 
     After unpacking, `ld64.lld.exe` is created from `ld.lld.exe`: llvm-mingw's release script
@@ -223,9 +224,13 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
                 bad = z.testzip()
                 if bad:
                     raise DownloadError(f'{zpath.name} is corrupt (first bad member: {bad})')
-                for info in z.infolist():
-                    if info.is_dir():
-                        continue
+                # Unpacking 1 GiB takes long enough to look stuck (reported: "can unpacking also
+                # have progress"). Count uncompressed bytes against the archive's own total, which
+                # is the only measure that advances evenly — a file count stalls on the big files.
+                members = [i for i in z.infolist() if not i.is_dir()]
+                grand = sum(i.file_size for i in members) or 1
+                done = 0
+                for info in members:
                     rel = _strip_root(info.filename)
                     if not rel:
                         continue
@@ -233,6 +238,9 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
                     out.parent.mkdir(parents=True, exist_ok=True)
                     with z.open(info) as src, open(out, 'wb') as dst:
                         shutil.copyfileobj(src, dst, 1 << 20)
+                    done += info.file_size
+                    if unpack_progress:
+                        unpack_progress(done, grand)
                     # the zip stores no Unix modes: mark everything in bin/ executable
                     if out.parent.name == 'bin':
                         try:
@@ -269,7 +277,8 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
 
 def install_dotnet(dest: Path | None = None,
                    log: Callable[[str], None] | None = None,
-                   progress: Callable[[int, int], None] | None = None) -> Path:
+                   progress: Callable[[int, int], None] | None = None,
+                   unpack_progress: Callable[[int, int], None] | None = None) -> Path:
     """Download the .NET SDK zip and unpack it into the app's own tools folder.
 
     A zip, not the .exe installer: the installer wants to write Program Files and therefore wants
@@ -301,9 +310,10 @@ def install_dotnet(dest: Path | None = None,
                 raise DownloadError(f'{zpath.name} is corrupt (first bad member: {bad})')
             # No top-level folder in this zip: members are host/, sdk/, shared/ directly. Every
             # path is taken as-is, which is what makes dotnet.exe land at the root.
-            for info in z.infolist():
-                if info.is_dir():
-                    continue
+            members = [i for i in z.infolist() if not i.is_dir()]
+            grand = sum(i.file_size for i in members) or 1
+            done = 0
+            for info in members:
                 out = staging / info.filename
                 # a zip member may try to escape the target (../ in the name)
                 if not str(out.resolve()).startswith(str(staging.resolve())):
@@ -311,6 +321,9 @@ def install_dotnet(dest: Path | None = None,
                 out.parent.mkdir(parents=True, exist_ok=True)
                 with z.open(info) as src, open(out, 'wb') as dst:
                     shutil.copyfileobj(src, dst, 1 << 20)
+                done += info.file_size
+                if unpack_progress:
+                    unpack_progress(done, grand)
     except zipfile.BadZipFile as e:
         shutil.rmtree(staging, ignore_errors=True)
         raise DownloadError(f'{zpath.name} is not a valid zip: {e}') from e

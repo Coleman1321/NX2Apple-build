@@ -387,8 +387,14 @@ def llvm_version(clang: Path) -> str:
         return ''
     if r.returncode != 0:
         return ''
-    m = re.search(r'clang version (\d+\.\d+\.\d+)', r.stdout)
-    return m.group(1) if m else (r.stdout.splitlines() or [''])[0].strip()
+    # `r.stdout` is None when capture came back empty — `text=True` with no output, or a
+    # redirected stdout on Windows. `re.search` then raises TypeError, which used to take the
+    # whole dependency check down (the report: "dependency check failed: TypeError: expected
+    # string or bytes-like object, got 'NoneType'"). stderr is worth reading too: a clang that
+    # writes its banner there still tells us its version.
+    text = (r.stdout or '') + (r.stderr or '')
+    m = re.search(r'clang version (\d+\.\d+\.\d+)', text)
+    return m.group(1) if m else (text.splitlines() or [''])[0].strip()
 
 
 # ---------------------------------------------------------------- .NET SDK

@@ -141,16 +141,15 @@ class MainWindow(QMainWindow):
         self.choose_btn.clicked.connect(self._choose_repo)
         row.addWidget(self.choose_btn)
         lay.addLayout(row)
-        # A machine without a clone gets Download; a clone gets Check/Pull. Same as the macOS app.
+        # A machine without a clone gets Download; a clone gets one update button (fetch, then
+        # fast-forward if there is anything to take — see Model.update_repo).
         actions = QHBoxLayout()
         actions.setSpacing(8)
         self.download_btn = QPushButton(self.m.t('repo.download'))
         self.download_btn.clicked.connect(lambda: self.m.clone_repo())
-        self.check_btn = QPushButton(self.m.t('repo.check'))
-        self.check_btn.clicked.connect(self.m.check_repo_updates)
-        self.pull_btn = QPushButton(self.m.t('repo.pull'))
-        self.pull_btn.clicked.connect(self.m.pull_repo)
-        for b in (self.download_btn, self.check_btn, self.pull_btn):
+        self.update_btn = QPushButton(self.m.t('repo.update'))
+        self.update_btn.clicked.connect(self.m.update_repo)
+        for b in (self.download_btn, self.update_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         lay.addLayout(actions)
@@ -293,12 +292,11 @@ class MainWindow(QMainWindow):
         else:
             self.repo_dot.setStyleSheet(f'color: {RED};')
             self.repo_status.setText(self.m.repo_status or self.m.t('repo.firstHint'))
-        # Download when there is no usable checkout; Check/Pull when there is a git one.
+        # Download when there is no usable checkout; one update button when there is a git one.
         self.download_btn.setVisible(not self.m.repo_ok)
-        self.check_btn.setVisible(self.m.repo_ok and self.m.repo_is_git)
-        self.pull_btn.setVisible(self.m.repo_ok and self.m.repo_is_git)
+        self.update_btn.setVisible(self.m.repo_ok and self.m.repo_is_git)
         busy = self.m.repo_busy or self.m.running
-        for b in (self.download_btn, self.check_btn, self.pull_btn, self.choose_btn):
+        for b in (self.download_btn, self.update_btn, self.choose_btn):
             b.setEnabled(not busy)
         if getattr(self.m, 'log_path', None):
             self.log_path_label.setText(self.m.t('log.at', str(self.m.log_path)))
@@ -373,7 +371,12 @@ class MainWindow(QMainWindow):
                     h.addWidget(hint)
             self.deps_container.addWidget(row)
         if self.m.deps_checked:
-            if self.m.all_deps_ok:
+            if not self.m.deps:
+                # The check produced no rows at all, which means it failed — never report that as
+                # "all ready" (see Model.all_deps_ok) or as "0 missing".
+                self.deps_summary.setText('⚠  ' + self.m.t('dep.checkFailed'))
+                self.deps_summary.setStyleSheet(f'color: {RED}; font-weight: 600;')
+            elif self.m.all_deps_ok:
                 self.deps_summary.setText('●  ' + self.m.t('dep.allReady'))
                 self.deps_summary.setStyleSheet(f'color: {GREEN}; font-weight: 600;')
             else:

@@ -36,6 +36,30 @@ class SdkError(Exception):
     """A user-facing failure: the message says what to do next, not just what broke."""
 
 
+def rmtree(path: Path) -> None:
+    """Remove a tree, clearing the read-only bits git leaves on Windows.
+
+    `shutil.rmtree` fails on a read-only file and `ignore_errors=True` then leaves the directory
+    half-removed. Git marks its pack files read-only, so the stale clone survived every cleanup
+    and the next `git clone` refused the non-empty destination. Retried once after chmodding the
+    survivors, and only then given up on.
+    """
+    import stat
+    if not path.exists():
+        return
+
+    def clear(func, p, _exc):                  # onerror: drop the read-only bit and retry
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD)
+            func(p)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onerror=clear)
+    if path.exists():                          # a file locked by another process (an indexer)
+        shutil.rmtree(path, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- git route
 
 def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
@@ -59,17 +83,20 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
     dest.mkdir(parents=True, exist_ok=True)
     target = dest / version
     if tc.is_sdk_dir(target):
-        log(f'SKD already present: {target}')
+        log(f'SDK already present: {target}')
         return target
     work = dest / f'.clone-{version}'
-    shutil.rmtree(work, ignore_errors=True)
+    rmtree(work)
 
     def run(args: list[str], what: str, repo: str = tc.SDK_REPO) -> None:
         log(f'$ git {" ".join(args)}')
         try:
+            # encoding='utf-8': git always writes UTF-8, while a Chinese Windows console decodes
+            # with GBK, which turned `C:\Users\QC-北\…` into `C:\Users\QC-鍖梊…` in the log — and
+            # a bug report full of mojibake is a bug report nobody can act on.
             p = subprocess.Popen([git] + args, cwd=str(dest), stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, errors='replace',
-                                 bufsize=1, **tc.no_window())
+                                 encoding='utf-8', bufsize=1, **tc.no_window())
         except OSError as e:
             raise SdkError(f'cannot start git: {e}') from e
         assert p.stdout is not None
@@ -90,7 +117,12 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
     for i, repo in enumerate(tc.mirror_urls(tc.SDK_REPO)):
         if i:
             log(f'retrying through a mirror: {repo}')
-            shutil.rmtree(work, ignore_errors=True)
+        # Every attempt starts from nothing. This has to be a real removal: git marks its pack
+        # files read-only, and `shutil.rmtree(ignore_errors=True)` silently leaves those behind on
+        # Windows. The next clone then dies with "destination path already exists and is not an
+        # empty directory" on all three sources, which is what the report showed — the retries
+        # were never given a chance.
+        rmtree(work)
         try:
             run(clone_args + [repo, str(work)], 'clone', repo)
             last = None
@@ -98,6 +130,7 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
         except SdkError as e:
             last = e
     if last is not None:
+        rmtree(work)
         raise last
     # narrow the working tree to the one SDK before checking anything out
     try:
