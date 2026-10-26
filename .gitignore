@@ -25,3 +25,4 @@ sync.log
 frontend-qt/build/
 frontend-qt/dist/
 frontend-qt/*.spec
+layout_*.tsv
