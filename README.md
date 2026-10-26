@@ -52,8 +52,8 @@ follows upstream automatically. What it adds:
 - **🔄 Follows upstream automatically.** A daily GitHub Actions job re-applies the fork's features
   onto upstream's tree, verifies the result (script parse, archive reader test, a macOS host build)
   and pushes — or opens an issue with the log when a patch no longer fits.
-- **🎯 69 game profiles** with the required update version listed per game. Three are verified end
-  to end on this fork; 42 are reported playable on an iPhone upstream.
+- **🎯 72 game profiles** with the required update version listed per game. Three are verified end
+  to end on this fork; 45 are reported playable on an iPhone upstream.
 
 ---
 
@@ -78,7 +78,7 @@ follows upstream automatically. What it adds:
 | 🖱️ | **One-click build** | Pick your files, press build. No command line, ever |
 | 📦 | **RomFS archiving** | 300,000 files → ~100 shards, so a 16 GB game installs |
 | 🔁 | **Resumable builds** | A stopped build continues; unchanged work is reused |
-| 🧩 | **69 game profiles** | Each with the exact update version it needs |
+| 🧩 | **72 game profiles** | Each with the exact update version it needs |
 | 📲 | **Install guide** | The three steps to the phone, with Reveal-in-Finder |
 | 🌏 | **Bilingual** | English / 简体中文, picked from the device language |
 | ⬇️ | **Self-installing** | Downloads the repository and updates itself |
@@ -422,7 +422,7 @@ The mount is recognised by its **directory**, not its name: titles differ (`rom`
 
 ## 🗂️ Games
 
-69 game profiles ship with this repository. A profile is what makes a build possible —
+72 game profiles ship with this repository. A profile is what makes a build possible —
 the game's build IDs, memory layout, shader tables and per-game switches — and this fork adds the
 RomFS archive layer on top, so a large game can be installed at all.
 
@@ -433,6 +433,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | Game | Title ID | Update required | Status |
 |---|---|---|---|
 | Super Mario Odyssey | `0100000000010000` | 1.4.1 (v393216) | Playable on an iPhone (upstream) |
+| Pokémon Brilliant Diamond | `0100000011D90000` | 1.3.0 (v393216) | Playable on an iPhone (upstream) |
 | Ace Attorney Investigations Collection | `010005501E68C000` | 1.0.0.2 (v131072) | Profile present; not verified on a phone |
 | Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 (v655360) | Profile present; not verified on a phone |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 (v196608) | Profile present; not verified on a phone |
@@ -460,6 +461,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 (v131072) | Profile present; not verified on a phone |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 (v262144) | Profile present; not verified on a phone |
+| SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 (v196608) | Playable on an iPhone (upstream) |
 | Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 (v2031616) | Playable on an iPhone (upstream) |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 (v131072) | Playable on an iPhone (upstream) |
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 (v262144) | Profile present; not verified on a phone |
@@ -473,6 +475,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | BALL x PIT | `010086A022444000` | 1.293 (v393216) | Playable on an iPhone (upstream) |
 | AI: THE SOMNIUM FILES | `010089B00D09C000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
 | STEINS;GATE RE:BOOT | `01008BC024FDE000` | 1.0.3 (v131072) | Profile present; not verified on a phone |
+| Sea of Stars | `01008C0016544000` | 2.0.59001 (v786432) | Playable on an iPhone (upstream) |
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 (v196608) | Playable on an iPhone (upstream) |
 | 13 Sentinels: Aegis Rim (Asia) | `01008D7016438000` | 无（v0） | Playable on an iPhone (upstream) |
 | Pokémon Shield | `01008DB008C2C000` | 1.3.2 (v458752) | Playable on an iPhone (upstream) |
