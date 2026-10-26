@@ -18,14 +18,10 @@
 
 <img src="frontend/screenshots/hero-features-en.png" width="100%" alt="NX2Apple — Switch games on your iPhone">
 
-> **New in v0.4.4** — two changes worth knowing before you start:
+> **New in v0.4.5**
 >
-> - 🖥️ **A Mac app as an output.** The same build can produce a double-clickable `.app` for this
->   Mac instead of an iPhone IPA — pick it in the footer. Same extraction, rewrite and shaders;
->   the RomFS goes inside the app.
-> - 📱 **Older iPhones and iPads.** A build can now decode BC textures on the CPU, which brings
->   **A15 / A16 and earlier** devices into range (iPhone 13 and older, A16 iPads). It is a switch
->   in the app, off by default — newer devices keep the faster GPU path.
+> - 🖥️ **Mac app output** — build a double-clickable `.app` instead of an IPA
+> - 📱 **Older iPhones and iPads** — turn on BC texture decoding when building
 
 
 A macOS app takes your own game dumps and does the whole thing with a few clicks — unpack, rewrite
@@ -208,7 +204,7 @@ Newest first. The fork follows upstream daily, so its game list and host fixes a
 
 | Date | Version | What changed |
 |---|---|---|
-| 2026-10-26 | unreleased | **Mac app output** (a double-clickable .app from the same build); **A15/A16 and earlier devices** via CPU BC decode, as an app switch; per-game data folders (`Documents/games/<id>/`) so an external drive works; NRO header no longer scanned as code; the nightly sync can no longer fail silently |
+| 2026-10-26 | v0.4.5 | **Mac app output** (a double-clickable .app from the same build); **A15/A16 and earlier devices** via CPU BC decode, as an app switch; per-game data folders (`Documents/games/<id>/`) so an external drive works; NRO header no longer scanned as code; the nightly sync can no longer fail silently |
 | 2026-10-26 | v0.4.4 | **Fixes a build failure that hit every app build in v0.4.3** (`work` read before it was assigned); 72 games (+3) |
 | 2026-10-26 | v0.4.3 | NSZ/XCZ dumps work out of the box; a fresh Xcode now reports its missing iOS SDK; three environment traps closed |
 | 2026-10-25 | v0.4.2 | The app downloads and updates the repository itself, and updates itself; 58 games (+10); save-loading deadlock fixed; NuGet failures self-heal |
