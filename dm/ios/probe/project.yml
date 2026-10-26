@@ -27,15 +27,26 @@ targets:
         CFBundleDisplayName: DmProbe
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
-        UILaunchStoryboardName: ""
+        UILaunchScreen: {}                # an empty launch screen: silences the storyboard warning
         UIFileSharingEnabled: true        # Documents/probe-log.txt visible in the Files app
         LSSupportsOpeningDocumentsInPlace: true
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # all four orientations: iOS 26 deprecated UIRequiresFullScreen, and a probe that writes
+        # its verdict to a file does not care how it is held
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortraitUpsideDown
   Probe:
     type: framework
     platform: iOS
     sources:
       - path: src/probe.c
+    settings:
+      base:
+        # a pure-C payload dlsym'd by name needs no module map; without an umbrella header the
+        # DEFINES_MODULE default only produces a warning
+        DEFINES_MODULE: NO
     info:
       path: probe-framework-Info.plist
       properties:
