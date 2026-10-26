@@ -110,6 +110,19 @@ enum L10n {
         "data.noNsp": ("这个文件夹里没有 NSP/XCI", "No NSP/XCI in this folder"),
 
         // ---- dependencies ----
+        // ---- Qt front end (frontend-qt): keys the SwiftUI app does not use yet ----
+        "build.start": ("开始构建", "Start build"),
+        "build.cancel": ("取消构建", "Cancel build"),
+        "build.outDir": ("输出目录…", "Output folder…"),
+        "msg.ipaAt": ("IPA：%@", "IPA: %@"),
+        "msg.archiveAt": ("归档：%@", "Archive: %@"),
+        "repo.ok": ("仓库可用", "repository ready"),
+        "dep.iossdk": ("iPhoneOS SDK", "iPhoneOS SDK"),
+        "dep.iossdk.hint": ("Windows 上需要 iPhoneOS SDK（用于交叉编译）",
+                            "Windows needs an iPhoneOS SDK for the cross build"),
+        "dep.metal.missing": ("未找到 metal.exe（Apple Metal Developer Tools for Windows）",
+                              "metal.exe not found (Apple Metal Developer Tools for Windows)"),
+
         "dep.title": ("设备依赖", "Device dependencies"),
         "dep.checking": ("检测中…", "Checking…"),
         "dep.allReady": ("全部就绪", "All ready"),
