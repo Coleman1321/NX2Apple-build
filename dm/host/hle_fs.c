@@ -271,7 +271,21 @@ static int host_path_ex(const char *p, char *out, size_t n, int *ro, int create)
         // by the mount directory (romfsarc_open recorded the base it actually opened), because the
         // mount name differs between games (rom, content).
         if (romfsarc_active() && g_mnt[i].ro && !create && g_mnt[i].dir[0] && !strcmp(g_mnt[i].dir, g_arc_base)) {
-            if (snprintf(out, n, ROMFSARC_SYNTH_PREFIX "%s", rest) >= (int)n) { errno = ENAMETOOLONG; return 0; }
+            // Fold runs of '/' the way the directory walk below does: the archive index stores one
+            // separator per level, and a game may ask for "data:/bin/appli/icon_sick//bin/x.arc"
+            // (Pokemon Sword's Bag: the doubled slash missed the lookup and the game then
+            // dereferenced the null it got back — PR #9).
+            char folded[1024]; const char *r = rest;
+            if (strstr(rest, "//")) {
+                size_t o = 0; int slash = 0;
+                for (const char *q = rest; *q; q++) {
+                    if (*q == '/') { if (slash) continue; slash = 1; } else slash = 0;
+                    if (o + 1 >= sizeof folded) { errno = ENAMETOOLONG; return 0; }
+                    folded[o++] = *q;
+                }
+                folded[o] = 0; r = folded;
+            }
+            if (snprintf(out, n, ROMFSARC_SYNTH_PREFIX "%s", r) >= (int)n) { errno = ENAMETOOLONG; return 0; }
             return 1;
         }
         strlcpy(out, g_mnt[i].dir, n);

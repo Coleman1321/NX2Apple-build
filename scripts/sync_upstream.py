@@ -33,7 +33,7 @@ OURS = {'dm/host/romfs_arc.c', 'dm/host/romfs_arc.h', 'dm/tools/romfs_arc.py',
         'dm/host/tests/t_romfs_arc.c', 'docs/ROMFS_ARCHIVE.md',
         'dm/games/0100A00019DE0000/game.fork.tsv'}
 # Vendored files that carry fork patches: taken fresh from upstream, then patched below.
-PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/ios/tools/build_ipa.sh',
+PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/host/tests/Makefile', 'dm/ios/tools/build_ipa.sh',
            'scripts/build_ipa_from_nsp.py', 'dm/gfx/tools/shader_split.py',
            'dm/ios/Sources/main.m', 'dm/gfx/nvn/nvn_mtl.m')
 
@@ -73,7 +73,21 @@ def patch_hle_fs(t):
         // by the mount directory (romfsarc_open recorded the base it actually opened), because the
         // mount name differs between games (rom, content).
         if (romfsarc_active() && g_mnt[i].ro && !create && g_mnt[i].dir[0] && !strcmp(g_mnt[i].dir, g_arc_base)) {
-            if (snprintf(out, n, ROMFSARC_SYNTH_PREFIX "%s", rest) >= (int)n) { errno = ENAMETOOLONG; return 0; }
+            // Fold runs of '/' the way the directory walk below does: the archive index stores one
+            // separator per level, and a game may ask for "data:/bin/appli/icon_sick//bin/x.arc"
+            // (Pokemon Sword's Bag: the doubled slash missed the lookup and the game then
+            // dereferenced the null it got back — PR #9).
+            char folded[1024]; const char *r = rest;
+            if (strstr(rest, "//")) {
+                size_t o = 0; int slash = 0;
+                for (const char *q = rest; *q; q++) {
+                    if (*q == '/') { if (slash) continue; slash = 1; } else slash = 0;
+                    if (o + 1 >= sizeof folded) { errno = ENAMETOOLONG; return 0; }
+                    folded[o++] = *q;
+                }
+                folded[o] = 0; r = folded;
+            }
+            if (snprintf(out, n, ROMFSARC_SYNTH_PREFIX "%s", r) >= (int)n) { errno = ENAMETOOLONG; return 0; }
             return 1;
         }''')]))
     P.append(('MountRom', 'romfsarc_open(dir, &h)', [(
@@ -189,7 +203,7 @@ HLE_FORCE("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci", "fsp-srv → open(2)", Re
         '''HLE_FORCE("_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc", "fsp-srv → stat(2)", Result, h_fs_GetEntryType, int32_t *out, const char *path) {
     HP(path); struct stat st;
     if (ROMFSARC_IS_SYNTH(hp)) {   // archive entry or directory, from the index
-        const char *rel = ROMFSARC_SYNTH_REL(hp);
+        const char *rel = arc_rel(hp);   // the index stores paths without a leading slash (abe35a3)
         uint32_t sh; uint64_t of, szf;
         if (romfsarc_stat_file(rel, &sh, &of, &szf)) { *out = ENT_FILE; return RES_OK; }
         if (romfsarc_is_dir(rel)) { *out = ENT_DIR; return RES_OK; }
@@ -261,6 +275,32 @@ def patch_makefile(t):
     old = 'SRC=main.c loader.c hle.c '
     if old not in t: fail('dm/host/Makefile: SRC anchor missing (upstream changed the source list)')
     return done('Makefile SRC', t.replace(old, 'SRC=main.c loader.c hle.c romfs_arc.c ', 1))
+
+TESTS_MK = 'dm/host/tests/Makefile'
+def patch_tests_makefile(t):
+    """The three fs tests #include ../hle_fs.c, which now calls the archive reader: without
+    romfs_arc.c on their command lines they stop with undefined _romfsarc_* symbols (PR #12)."""
+    if 'romfs_arc.c' in t: return skip('tests/Makefile (already patched)')
+    P = [
+        ('t_fs', 'clang -O1 -Wno-unused-function -I.. $(GINC) -o $@ t_fs.c t_fs_stub.c ../hle_bigstack.c\n',
+         'clang -O1 -Wno-unused-function -I.. $(GINC) -o $@ t_fs.c t_fs_stub.c ../hle_bigstack.c ../romfs_arc.c\n'),
+        ('t_fs_commit_list', 'clang -O1 -Wall -Wno-unused-function -I.. $(GINC) -o $@ t_fs_commit_list.c t_fs_stub.c ../hle_bigstack.c\n',
+         'clang -O1 -Wall -Wno-unused-function -I.. $(GINC) -o $@ t_fs_commit_list.c t_fs_stub.c ../hle_bigstack.c ../romfs_arc.c\n'),
+        ('t_fs_case', 'clang -O1 -Wno-unused-function -I.. $(GINC) -o $@ t_fs_case.c ../hle_bigstack.c\n',
+         'clang -O1 -Wno-unused-function -I.. $(GINC) -o $@ t_fs_case.c ../hle_bigstack.c ../romfs_arc.c\n'),
+    ]
+    for name, old, new in P:
+        if old not in t: fail(f'{TESTS_MK}: {name} link line missing (upstream changed the test rules)')
+        t = t.replace(old, new, 1)
+    # the prerequisites too, so a change to the reader rebuilds them
+    for name in ('t_fs', 't_fs_commit_list', 't_fs_case'):
+        dep_old = f'$(B)/{name}:'
+        i = t.index(dep_old)
+        j = t.index('\n', i)
+        line = t[i:j]
+        if '../romfs_arc.c' not in line:
+            t = t[:i] + line.replace(' ../hle.h', ' ../romfs_arc.c ../hle.h', 1) + t[j:]
+    return done('tests/Makefile romfs_arc.c', t)
 
 ENT = '''# The unsigned IPA: an unsigned binary has no signature for a sideloader to read entitlements from,
 # so the request would be lost (AltStore reads the signature it replaces). Sign ad-hoc with the
@@ -490,6 +530,7 @@ def patch_hades2(t):
 MARKERS = {
     'dm/host/hle_fs.c': 'romfsarc',
     'dm/host/Makefile': 'romfs_arc.c',
+    'dm/host/tests/Makefile': 'romfs_arc.c',
     'dm/ios/tools/build_ipa.sh': 'DM_FULL_ROMFS',
     'scripts/build_ipa_from_nsp.py': '--work-dir',
     'dm/gfx/tools/shader_split.py': "ue_inline_shaders(d, f'/{rel}#{label}', out)",
@@ -500,6 +541,7 @@ MARKERS = {
 PATCHERS = {
     'dm/host/hle_fs.c': patch_hle_fs,
     'dm/host/Makefile': patch_makefile,
+    'dm/host/tests/Makefile': patch_tests_makefile,
     'dm/ios/tools/build_ipa.sh': patch_build_ipa,
     'scripts/build_ipa_from_nsp.py': patch_nsp,
     'dm/gfx/tools/shader_split.py': patch_shader_split,
