@@ -942,23 +942,78 @@ class ToolchainProbeRobustnessTest(unittest.TestCase):
     been verified (the report: "I have not even installed Metal").
     """
 
-    def test_llvm_version_survives_empty_stdout(self) -> None:
+    def test_llvm_version_reports_what_happened(self) -> None:
+        """The version probe carries its diagnostics: exit code, empty output, whatever.
+
+        The report's machine compiles fine and its --version exits non-zero silently — "does not
+        run" was all the row said, three reports in a row. Now the row can say exactly what the
+        probe saw.
+        """
+        ver, diag = tc.llvm_version(Path('clang.exe')) if False else (None, None)
+        # empty output, exit 0: no version line, and the diagnostic says so
         fake = subprocess.CompletedProcess(['clang'], 0, None, '')
         with mock.patch('subprocess.run', return_value=fake):
-            self.assertEqual(tc.llvm_version(Path('clang.exe')), '')
+            ver, diag = tc.llvm_version(Path('clang.exe'))
+        self.assertEqual(ver, '')
+        self.assertIn('no version line', diag)
+
+        # exit 1, silent: the diagnostic carries the code (0xC0000135 = STATUS_DLL_NOT_FOUND would
+        # have been visible immediately in the report)
+        fake = subprocess.CompletedProcess(['clang'], 0xC0000135, '', '')
+        with mock.patch('subprocess.run', return_value=fake):
+            ver, diag = tc.llvm_version(Path('clang.exe'))
+        self.assertEqual(ver, '')
+        self.assertIn('0xc0000135', diag)
 
     def test_llvm_version_reads_stderr_too(self) -> None:
         """A clang that prints its banner on stderr still tells us its version."""
         fake = subprocess.CompletedProcess(['clang'], 0, None,
                                            'clang version 23.1.4\nTarget: x86_64-pc-windows')
         with mock.patch('subprocess.run', return_value=fake):
-            self.assertEqual(tc.llvm_version(Path('clang.exe')), '23.1.4')
+            ver, diag = tc.llvm_version(Path('clang.exe'))
+        self.assertEqual(ver, '23.1.4')
+        self.assertEqual(diag, '')
 
     def test_llvm_version_still_reads_stdout(self) -> None:
         fake = subprocess.CompletedProcess(['clang'], 0,
                                            'clang version 23.1.4 (https://llvm.org)', '')
         with mock.patch('subprocess.run', return_value=fake):
-            self.assertEqual(tc.llvm_version(Path('clang.exe')), '23.1.4')
+            ver, _diag = tc.llvm_version(Path('clang.exe'))
+        self.assertEqual(ver, '23.1.4')
+
+    def test_llvm_row_is_green_when_compile_works_despite_no_version(self) -> None:
+        """The row's verdict is the compile probe, not --version.
+
+        The report: clang compiled the probe green and --version still failed, so the row read
+        "does not run" — three reports in a row, on a toolchain that works.
+        """
+        probes = tc.check_all(deep=False)
+        llvm = next(p for p in probes if p.id == 'llvm')
+        # this Mac has a real clang; the shallow row says ok either way
+        self.assertEqual(llvm.state, 'ok')
+
+    def test_clang_compiles_accepts_a_macho_object(self) -> None:
+        """The fake writes to the -o path the probe asked for, like a real compiler."""
+        def fake_compile(cmd, **k):
+            out = Path(cmd[cmd.index('-o') + 1])
+            out.write_bytes(b'\xce\xfa\xed\xfe' + b'\x00' * 32)
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+
+        with mock.patch.object(tc.subprocess, 'run', side_effect=fake_compile):
+            ok, detail = tc.clang_compiles(Path('clang.exe'))
+        self.assertTrue(ok)
+        self.assertIn('Mach-O', detail)
+
+    def test_clang_compiles_rejects_non_macho(self) -> None:
+        def fake_compile(cmd, **k):
+            out = Path(cmd[cmd.index('-o') + 1])
+            out.write_bytes(b'ELF....')               # a Linux object, not Mach-O
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+
+        with mock.patch.object(tc.subprocess, 'run', side_effect=fake_compile):
+            ok, detail = tc.clang_compiles(Path('clang.exe'))
+        self.assertFalse(ok)
+        self.assertIn('not a Mach-O', detail)
 
     def test_metal_version_survives_empty_output(self) -> None:
         fake = subprocess.CompletedProcess(['metal'], 0, None, None)

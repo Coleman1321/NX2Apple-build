@@ -260,12 +260,18 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
         staging.replace(target)
         log(f'LLVM-MinGW {tc.LLVM_MINGW_VERSION} unpacked: {target}')
 
-    def clang_runs() -> bool:
-        """Whether the installed clang.exe actually executes (not a half-written unpack)."""
-        return bool(tc.llvm_version(target / 'bin' / 'clang.exe'))
+    def clang_runs() -> tuple[bool, str]:
+        """Whether the installed clang.exe can actually compile (not a half-written unpack).
+
+        Judged by a compile, not --version: the report's machine compiles fine and its --version
+        exits non-zero silently, so a version-based check would have re-unpacked a good
+        toolchain forever and never gone green.
+        """
+        return tc.clang_compiles(target / 'bin' / 'clang.exe')
 
     if (target / 'bin' / 'clang.exe').is_file():
-        if clang_runs():
+        runs, why = clang_runs()
+        if runs:
             log(f'LLVM-MinGW already installed: {target}')
         else:
             # File existence is not installation. An unpack killed mid-way (the app closed during
@@ -273,14 +279,15 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
             # folder whose clang.exe exists but cannot run, and from then on every check said
             # "does not run (a partial or 32-bit install?)" while every install said "already
             # installed". The archive is cached, so the repair is a re-unpack, not a re-download.
-            log(f'{target} holds an unusable clang.exe — the unpack did not finish; unpacking '
-                f'again from the cached archive')
+            log(f'{target} holds a clang that cannot compile ({why}) — unpacking again from the '
+                f'cached archive')
             unpack()
-            if not clang_runs():
+            runs, why = clang_runs()
+            if not runs:
                 raise DownloadError(
-                    f'LLVM-MinGW was unpacked but {target / "bin" / "clang.exe"} still does not '
-                    'run. Delete that folder and install again; if it keeps failing, the archive '
-                    'or this machine\'s emulator is at fault — send the log.')
+                    f'LLVM-MinGW was unpacked but {target / "bin" / "clang.exe"} still cannot '
+                    f'compile: {why}. Delete that folder and install again; if it keeps failing, '
+                    'send the log — the message names the failure now.')
     else:
         zpath = download(asset['url'], zpath, asset['sha256'], asset['size'],
                          log=log, progress=progress)
@@ -406,6 +413,56 @@ def install_python(dest: Path | None = None,
                          text=True, timeout=60, **tc.no_window())
     log(f'Python installed: {(ver.stdout or ver.stderr or "").strip()} at {target}')
     return target
+
+
+def install_zstd(dest: Path | None = None,
+                 log: Callable[[str], None] | None = None,
+                 progress: Callable[[int, int], None] | None = None) -> Path:
+    """Download facebook/zstd's Windows release and unpack the CLI into the tools folder.
+
+    The dependency row for zstd used to have no fix at all on Windows — the hint named Homebrew,
+    which is the macOS answer — so a machine that needed it just stayed red. The exe is a single
+    file inside a flat zip; verified by the SHA-256 pinned from the downloaded artifact.
+    """
+    log = log or (lambda s: None)
+    asset = tc.ZSTD_ASSET
+    root = Path(dest) if dest else tc.tools_dir()
+    target = root / f'zstd-{tc.ZSTD_VERSION}'
+    exe = target / 'zstd.exe'
+    if exe.is_file():
+        log(f'zstd already installed: {exe}')
+        return exe
+    cache = root / 'downloads'
+    zpath = download(asset['url'], cache / asset['name'], asset['sha256'], asset['size'],
+                     log=log, progress=progress)
+    log(f'unpacking {zpath.name} → {target}')
+    staging = root / '.unpack-zstd'
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(zpath) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                out = staging / _strip_root(info.filename)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(info) as src, open(out, 'wb') as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+    except zipfile.BadZipFile as e:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise DownloadError(f'{zpath.name} is not a valid zip: {e}') from e
+    inner = [q for q in staging.iterdir()]
+    if len(inner) == 1 and inner[0].is_dir():
+        staging = inner[0]
+    shutil.rmtree(target, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging.replace(target)
+    if not exe.is_file():
+        shutil.rmtree(target, ignore_errors=True)
+        raise DownloadError(f'{zpath.name} unpacked without zstd.exe: the release layout changed; '
+                            'install zstd by hand and point "zstd_dir" in toolchain.json at it')
+    log(f'zstd installed: {exe}')
+    return exe
 
 
 def metal_tools_hint() -> str:

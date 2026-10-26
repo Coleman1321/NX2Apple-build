@@ -164,6 +164,16 @@ PYTHON_ASSET = {
     'size': 26964224,
 }
 
+#: zstd for Windows, from facebook/zstd's own release (the build's decompression step calls the
+#: CLI). Flat zip: the exe sits one folder down.
+ZSTD_VERSION = '1.5.7'
+ZSTD_ASSET = {
+    'name': f'zstd-v{ZSTD_VERSION}-win64.zip',
+    'url': f'https://github.com/facebook/zstd/releases/download/v{ZSTD_VERSION}/zstd-v{ZSTD_VERSION}-win64.zip',
+    'sha256': 'acb4e8111511749dc7a3ebedca9b04190e37a17afeb73f55d4425dbf0b90fad9',
+    'size': 1747181,
+}
+
 #: Mirrors tried after the canonical URL, in order, when the direct download fails or crawls.
 #: GitHub release assets are the slow ones on mainland networks (a report measured 974 s for the
 #: 182 MiB LLVM archive); Microsoft's CDN is not, so it is absent here. A mirror only changes
@@ -391,15 +401,23 @@ def _lld_has_macho(exe: Path) -> bool:
     return b'MachO' in data and b'ld64.lld' in data
 
 
-def llvm_version(clang: Path) -> str:
-    """clang's version line, or '' when it does not run."""
+def llvm_version(clang: Path) -> tuple[str, str]:
+    """clang's version line and, when it could not be read, why — (version, diagnostics).
+
+    The version is **informational**: the fifth handheld report had a clang that compiles
+    (probe_compile green) but whose `--version` exits non-zero with no output on that machine —
+    judging the row by --version alone kept a working toolchain red. The row's verdict now comes
+    from the compile probe; this function only names the version and, when it cannot, says what
+    happened so the next report is conclusive instead of "does not run".
+    """
     try:
         r = subprocess.run([str(clang), '--version'], capture_output=True, text=True,
-                           timeout=60, **no_window())
-    except (OSError, subprocess.SubprocessError):
-        return ''
+                           errors='replace', timeout=60, **no_window())
+    except (OSError, subprocess.SubprocessError) as e:
+        return '', f'--version cannot start: {e}'
     if r.returncode != 0:
-        return ''
+        return '', (f'--version exit {r.returncode} (0x{r.returncode & 0xFFFFFFFF:08x}), '
+                    f'output: {(r.stderr or r.stdout or "(empty)")[:200]}')
     # `r.stdout` is None when capture came back empty — `text=True` with no output, or a
     # redirected stdout on Windows. `re.search` then raises TypeError, which used to take the
     # whole dependency check down (the report: "dependency check failed: TypeError: expected
@@ -407,7 +425,41 @@ def llvm_version(clang: Path) -> str:
     # writes its banner there still tells us its version.
     text = (r.stdout or '') + (r.stderr or '')
     m = re.search(r'clang version (\d+\.\d+\.\d+)', text)
-    return m.group(1) if m else (text.splitlines() or [''])[0].strip()
+    if m:
+        return m.group(1), ''
+    return '', f'--version ran but the output has no version line: {text[:200]!r}'
+
+
+def clang_compiles(clang: Path) -> tuple[bool, str]:
+    """Whether clang can actually produce an object — the check that makes the row trustworthy.
+
+    No SDK on purpose: a bare C file with no includes exercises the compiler and its resource
+    directory only, which is the capability every later step depends on. Same shape of probe
+    that was green on the machine where --version failed.
+    """
+    with tempfile.TemporaryDirectory(prefix='nspb-clang-') as td:
+        c = Path(td) / 'probe.c'
+        o = Path(td) / 'probe.o'
+        c.write_text('int dm_clang_probe(void) { return 42; }\n', encoding='utf-8')
+        cmd = [str(clang), '-target', f'arm64-apple-ios{IOS_DEPLOYMENT}', '-c', str(c), '-o', str(o)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, errors='replace',
+                               timeout=180, **no_window())
+        except subprocess.TimeoutExpired:
+            return False, 'clang timed out on the probe'
+        except OSError as e:
+            return False, f'cannot run {clang}: {e}'
+        if r.returncode != 0:
+            tail = ((r.stderr or r.stdout or '').strip().splitlines() or ['(no output)'])[-1]
+            return False, f'compile exit {r.returncode} (0x{r.returncode & 0xFFFFFFFF:08x}): {tail[:200]}'
+        try:
+            data = o.read_bytes()
+            size = o.stat().st_size      # read inside the temp dir: it is deleted at the with
+        except OSError as e:
+            return False, f'probe object unreadable: {e}'
+    if data[:4] not in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe'):
+        return False, f'probe wrote {data[:4].hex()}, not a Mach-O object'
+    return True, f'arm64 Mach-O object, {size} bytes'
 
 
 # ---------------------------------------------------------------- Python
@@ -700,6 +752,11 @@ def find_exe(name: str) -> Path | None:
         for cand in (Path(d) / f'{name}.exe', Path(d) / 'Bin' / f'{name}.exe', Path(d) / name):
             if cand.is_file():
                 return cand
+    # the copy this app installed for itself (fetch.install_zstd): not on PATH, so which() alone
+    # missed it and the row stayed red after a successful install
+    own = tools_dir() / f'zstd-{ZSTD_VERSION}' / f'{name}.exe'
+    if name == 'zstd' and own.is_file():
+        return own
     for cand in (f'{name}.exe', name):
         if w := shutil.which(cand):
             return Path(w)
@@ -834,8 +891,11 @@ def probe_link(sdk: Path) -> tuple[bool, str]:
         except OSError as e:
             return False, f'cannot run clang: {e}'
         if r.returncode != 0:
-            tail = ((r.stderr or r.stdout or '').strip().splitlines() or ['no output'])[-1]
-            return False, f'link failed: {tail[:300]}'
+            # the exit code is the evidence: 0xC0000135 (STATUS_DLL_NOT_FOUND) reads as "a DLL is
+            # missing", not "the linker is bad" — the report's "link failed: no output" carried
+            # neither, because an empty output tail replaced the code
+            tail = ((r.stderr or r.stdout or '').strip().splitlines() or ['(no output)'])[-1]
+            return False, f'link exit {r.returncode} (0x{r.returncode & 0xFFFFFFFF:08x}): {tail[:200]}'
         try:
             data = out.read_bytes()
         except OSError as e:
@@ -894,22 +954,36 @@ def check_all(deep: bool = False) -> list[Probe]:
     # ---- .NET (the extractor and the shader translator both target net10.0)
     out.append(probe_dotnet())
 
-    # ---- LLVM
+    # ---- LLVM. The verdict is the compile probe (clang_compiles), not --version: the report's
+    # machine compiles fine and its --version exits non-zero silently, so a version-only check
+    # kept a working toolchain red with "does not run". The version string is decoration; the
+    # diagnostics ride along in the detail so the next report names the actual failure.
     root = llvm_dir()
     clang = llvm_tool('clang')
+    llvm_compile: tuple[bool, str] | None = None
+    if deep and clang:
+        llvm_compile = clang_compiles(clang)
     if not root or not clang:
         out.append(Probe(
             'llvm', f'LLVM (clang {LLVM_MINGW_LLVM})', 'missing',
             'clang.exe not found', pinned=LLVM_MINGW_ASSETS['AMD64']['name'],
             extra={'download': LLVM_MINGW_ASSETS.get(_arch(), LLVM_MINGW_ASSETS['AMD64'])}))
     else:
-        ver = llvm_version(clang)
+        ver, diag = llvm_version(clang)
         if ver:
             out.append(Probe('llvm', 'LLVM (clang)', 'ok', str(clang), path=str(root), version=ver,
                              pinned=LLVM_MINGW_LLVM))
+        elif llvm_compile:
+            # the compiler works; only its self-report does not. Green, with the oddity said out
+            # loud — a toolchain the build can use must not read as broken.
+            out.append(Probe('llvm', 'LLVM (clang)', 'ok',
+                             f'{clang} compiles; --version could not be read: {diag}',
+                             path=str(root), pinned=LLVM_MINGW_LLVM))
         else:
-            out.append(Probe('llvm', 'LLVM (clang)', 'wrong',
-                             f'{clang} does not run (a partial or 32-bit install?)',
+            detail = f'{clang} does not run: {diag or "no diagnostics (shallow check)"}'
+            if llvm_compile is not None:
+                detail += f'; compile probe: {llvm_compile[1]}'
+            out.append(Probe('llvm', 'LLVM (clang)', 'wrong', detail,
                              pinned=LLVM_MINGW_LLVM, path=str(root)))
 
     # ---- the Mach-O linker, which llvm-mingw does not ship under its own name
@@ -977,6 +1051,8 @@ def check_all(deep: bool = False) -> list[Probe]:
 
     if deep:
         if sdk and clang:
+            # probe_compile itself ran already for the LLVM row (clang_compiles covers the bare
+            # compiler); this one adds the SDK to the same probe shape the build uses
             ok, detail = probe_compile(sdk, clang)
             out.append(Probe('probe_compile', 'cross-compile probe', 'ok' if ok else 'wrong', detail))
             ok2, detail2 = probe_link(sdk)

@@ -368,6 +368,7 @@ class MainWindow(QMainWindow):
                 else:
                     hint = QLabel(self.m.t(d.hint_key))
                     hint.setObjectName('note')
+                    hint.setOpenExternalLinks(True)   # the Windows hints carry download links
                     h.addWidget(hint)
             self.deps_container.addWidget(row)
         if self.m.deps_checked:

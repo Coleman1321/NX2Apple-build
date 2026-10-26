@@ -365,10 +365,12 @@ class Model(QObject):
             out.append(Dep('ios_sdk', 'dep.iossdk', 'dep.iossdk.hint', state(p), detail,
                            install=install))
 
-        # Metal
+        # Metal. The hint is the Windows one: on macOS this row says
+        # `xcodebuild -downloadComponent`, which is an Apple ID login away on Windows
+        # (developer.apple.com → "Metal Developer Tools for Windows").
         p = by_id.get('metal')
         if p:
-            out.append(Dep('metal', 'dep.metal', 'dep.metal.hint', state(p),
+            out.append(Dep('metal', 'dep.metal', 'dep.metal.hint.win', state(p),
                            (p.path or 'ok') if p.ok else (p.detail or '')))
 
         # the probes: one row each, so a broken toolchain names the step that fails
@@ -380,14 +382,20 @@ class Model(QObject):
                 out.append(Dep(pid, key, key + '.hint',
                                DepState.OK if p.ok else DepState.MISSING, p.detail))
 
-        # cross-platform tools: spirv-cross and zstd are required, glslang only for GL games
-        for pid, key, req in (('spirv-cross', 'dep.spirv', True),
-                              ('zstd', 'dep.zstd', True),
-                              ('glslangValidator', 'dep.glslang', False)):
+        # cross-platform tools: spirv-cross and zstd are required, glslang only for GL games.
+        # Titles and hints are the Windows ones here ('brew: …' is the macOS row's wording, and
+        # the report read "brew: spirv-cross" on a handheld); zstd is installable in-app, and
+        # spirv-cross points at the Vulkan SDK — Apple-style gated downloads are not the only
+        # thing this panel cannot fetch silently.
+        for pid, key, hint, req, install in (
+                ('spirv-cross', 'dep.spirv.win', 'dep.spirv.hint.win', True, []),
+                ('zstd', 'dep.zstd.win', 'dep.zstd.hint.win', True, ['__win__:zstd']),
+                ('glslangValidator', 'dep.glslang', 'dep.glslang.hint', False, [])):
             p = by_id.get(pid)
             if p:
-                d = Dep(pid, key, key + '.hint',
-                        DepState.OK if p.ok else DepState.MISSING, p.path if p.ok else '')
+                d = Dep(pid, key, hint,
+                        DepState.OK if p.ok else DepState.MISSING, p.path if p.ok else '',
+                        install=[] if p.ok else install)
                 if not req:
                     # an optional tool must not block the build
                     d.state = DepState.OK if p.ok else DepState.OK
@@ -629,10 +637,24 @@ class Model(QObject):
                     ok = False
             if not ok:
                 self.log(self.t('dep.install.fail', '-') + '\n')
-            dep.installing = False
+            self._clear_installing(dep)
             self.depsChanged.emit()
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _clear_installing(self, dep: Dep) -> None:
+        """Drop `installing` on every row with this id, wherever it currently lives.
+
+        `check_deps` may have rebuilt the rows mid-install (the user pressing Check again, or the
+        end-of-install refresh racing the panel): the flag was carried forward onto the NEW
+        object, while the installer only clears the one it holds — so the row stayed grey ("Install"
+        disabled) forever. The screenshot's LLVM row, grey with its install already failed, was
+        exactly that.
+        """
+        dep.installing = False
+        for r in self.deps:
+            if r.id == dep.id:
+                r.installing = False
 
     def _install_win(self, dep: Dep, what: str) -> None:
         """Download and unpack a Windows toolchain piece, with progress in the log.
@@ -675,6 +697,13 @@ class Model(QObject):
                         unpack_progress=progress_logger(self.t('dep.phase.unpack')))
                     self.log(self.t('dep.llvm.done', str(path)) + '\n')
                     ok = True
+                elif what == 'zstd':
+                    path = wf.install_zstd(
+                        log=lambda s: self.log(str(s) + '\n'),
+                        progress=progress_logger(self.t('dep.phase.download')),
+                        unpack_progress=progress_logger(self.t('dep.phase.unpack')))
+                    self.log(f'zstd installed: {path}\n')
+                    ok = True
                 elif what == 'ios_sdk':
                     self.log(self.t('dep.iossdk.downloading') + '\n')
                     from .win import sdk_fetch as sf
@@ -689,7 +718,7 @@ class Model(QObject):
                 import traceback
                 self.log(self.t('dep.install.fail', f'{type(e).__name__}: {e}') + '\n')
                 self.log(traceback.format_exc() + '\n')
-            dep.installing = False
+            self._clear_installing(dep)
             self.depsChanged.emit()
             self.check_deps()
 
@@ -744,42 +773,54 @@ class Model(QObject):
             return False
 
     def install_all_missing(self) -> None:
-        """Install every missing dependency, one at a time, in order.
+        """Install every missing dependency, one at a time, in order — and re-scan between passes.
 
         Genuinely sequential: each installer runs on its own thread, so an earlier version
         started them all at once and their downloads interleaved in the log (reported from a
         handheld: LLVM and SDK lines mixed). Order also matters for correctness — the SDK is
         fetched with git, which the git row may be installing.
 
-        The plan (which ids, in which order) is snapshotted once, but **the row object is
-        re-resolved by id at every step**. `_install_win` ends with `check_deps()`, which
-        replaces every `Dep` in `self.deps`, and the panel renders those new objects: installing
-        on a snapshot is invisible to the UI, so a row showed Install (enabled!) while its
-        download ran, and nothing ever looked busy — the report's "the SDK is a cross but its
-        Install is grey" is this state machine crossed with itself. Waiting is also on the live
-        object, for the same reason. A Python install changes the very row it runs from (once
-        the interpreter is there the row's fix becomes "pip install the packages"), which only
-        works when the row is re-read.
+        **Passes, not a snapshot.** One pass over a snapshot list stopped after the SDK: every
+        row after it (Metal, spirv-cross, zstd, the link probe) has no in-app installer, so the
+        loop skipped them all and nothing else ran — including the Python *packages* step, whose
+        row had changed under the interpreter the same pass had just installed. The plan is now:
+        scan → install what is missing and installable → re-scan → repeat, until a pass makes no
+        progress. An id that failed is not retried in a later pass; a row whose fix changed
+        (interpreter in → "pip install the packages") is picked up by the next pass.
+
+        The row object is resolved by id at every step: `check_deps()` replaces every `Dep`
+        after each install, and the panel renders those new objects — flags landing on a
+        snapshot are invisible to the UI.
         """
-        pending = [d.id for d in self.deps if not d.ok and d.install]
-        if not pending or getattr(self, '_install_all_running', False):
+        if not self.deps_checked or getattr(self, '_install_all_running', False):
             return
         self._install_all_running = True
 
         def run_all() -> None:
             try:
-                for dep_id in pending:
-                    d = next((r for r in self.deps if r.id == dep_id), None)
-                    if d is None or d.ok or not d.install:
-                        continue      # gone, or an earlier step fixed it
-                    self.log(f'--- {self.t(d.title_key)} ---\n')
-                    self.install_dep(d)
-                    waited = 0.0
-                    while d.installing and waited < 1800:
-                        time.sleep(0.25)
-                        waited += 0.25
-                    if d.installing:
-                        self.log(self.t('dep.installTimeout') + '\n')
+                attempted: set[str] = set()
+                while True:
+                    rows = [d for d in self.deps if not d.ok and d.install
+                            and d.id not in attempted]
+                    if not rows:
+                        break
+                    progressed = False
+                    for d in rows:
+                        live = next((r for r in self.deps if r.id == d.id), None)
+                        if live is None or live.ok or not live.install or live.installing:
+                            continue
+                        attempted.add(live.id)
+                        self.log(f'--- {self.t(live.title_key)} ---\n')
+                        self.install_dep(live)
+                        progressed = True
+                        waited = 0.0
+                        while live.installing and waited < 1800:
+                            time.sleep(0.25)
+                            waited += 0.25
+                        if live.installing:
+                            self.log(self.t('dep.installTimeout') + '\n')
+                    if not progressed:
+                        break
                 self.check_deps()      # one refresh at the end, with everything in place
             finally:
                 self._install_all_running = False

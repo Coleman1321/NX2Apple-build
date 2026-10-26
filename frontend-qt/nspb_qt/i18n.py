@@ -32,12 +32,17 @@ class Lang(Enum):
             tag = ''
         tag = tag or os.environ.get('LANG', '') or os.environ.get('LC_ALL', '')
         if not tag and sys.platform.startswith('win'):
+            # The **user's** UI language, not the system's: a Chinese Windows install on
+            # English-labelled hardware (most handhelds ship en-US as the OS locale) has
+            # LOCALE_SYSTEM_DEFAULT = en, and asking that showed an English interface to a
+            # Chinese user — the report's "the exe is not fully Chinese". GetUserDefaultUILanguage
+            # is what the Settings app's display language reflects.
             import ctypes
             try:
+                lang = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0xFF   # primary id
                 buf = ctypes.create_unicode_buffer(85)
-                ctypes.windll.kernel32.GetUserDefaultUILanguage()  # noqa: F841  (kept for clarity)
-                ctypes.windll.kernel32.GetLocaleInfoW(0x0800, 0x00000002, buf, 85)  # LOCALE_SISO639LANGNAME
-                tag = buf.value
+                if ctypes.windll.kernel32.GetLocaleInfoW(lang, 0x00000002, buf, 85):   # LOCALE_SISO639LANGNAME
+                    tag = buf.value
             except Exception:
                 tag = ''
         return Lang.ZH if tag.lower().startswith('zh') else Lang.EN
