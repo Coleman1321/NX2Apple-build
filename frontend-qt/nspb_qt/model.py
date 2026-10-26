@@ -269,10 +269,13 @@ class Model(QObject):
                 d.installing = True
 
         self.deps = deps
-        self.python_path, self.python_ok, self.python_ver = py, py_ok, py_ver
         if not pu.IS_WIN:
-            # On Windows `_windows_deps` already set these from the toolchain probe, which is
-            # where the app-installed SDK is visible; this branch is the macOS one.
+            # On Windows `_windows_deps` already set python_path (the interpreter the app
+            # installed, which find_python without its candidates cannot see) and dotnet_path
+            # from the toolchain probes; assigning the plain find_python result here overwrote
+            # the interpreter with the bare fallback "python", and the venv step then ran
+            # "python -m venv" — which is exactly how it failed on the report's machine.
+            self.python_path, self.python_ok, self.python_ver = py, py_ok, py_ver
             self.dotnet_path, self.dotnet_ok = dn, dn_ok
         self.deps_checked = True
         self.depsChanged.emit()

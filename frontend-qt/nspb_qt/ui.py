@@ -49,6 +49,9 @@ class MainWindow(QMainWindow):
         body = QWidget()
         body.setObjectName('body')
         self.body = QVBoxLayout(body)
+        # (widget, string key) pairs re-set on every refresh: anything built once here would
+        # otherwise keep its start-up language after the toggle (the half-Chinese report)
+        self._translatable: list[tuple[QLabel, str]] = []
         self.body.setContentsMargins(12, 10, 12, 10)
         self.body.setSpacing(8)
         scroll.setWidget(body)
@@ -100,7 +103,10 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- cards
 
-    def _card(self, title: str, note: str = '') -> tuple[QFrame, QVBoxLayout]:
+    def _card(self, title_key: str, note_key: str = '') -> tuple[QFrame, QVBoxLayout]:
+        # title/note are registered for re-translation: the language toggle rebuilds nothing, it
+        # re-sets text — and a card title built once at start-up stayed English after the toggle
+        # (the report's half-Chinese interface).
         box = QFrame()
         box.setObjectName('card')
         lay = QVBoxLayout(box)
@@ -108,24 +114,28 @@ class MainWindow(QMainWindow):
         lay.setSpacing(6)
         head = QHBoxLayout()
         head.setSpacing(6)
-        t = QLabel(title)
+        t = QLabel(self.m.t(title_key))
         t.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         f = t.font()
         f.setBold(True)
         f.setPointSize(13)
         t.setFont(f)
         head.addWidget(t)
-        if note:
-            n = QLabel(note)
+        n = None
+        if note_key:
+            n = QLabel(self.m.t(note_key))
             n.setObjectName('note')
             head.addWidget(n)
         head.addStretch(1)
         lay.addLayout(head)
+        self._translatable.append((t, title_key))
+        if n is not None:
+            self._translatable.append((n, note_key))
         self.body.addWidget(box)
         return box, lay
 
     def _build_repository(self) -> None:
-        box, lay = self._card(self.m.t('repo.title'), self.m.t('repo.note'))
+        box, lay = self._card('repo.title', 'repo.note')
         self.repo_box = box
         row = QHBoxLayout()
         self.repo_dot = QLabel('●')
@@ -138,6 +148,7 @@ class MainWindow(QMainWindow):
         self.repo_path_label.setMinimumWidth(60)
         row.addWidget(self.repo_path_label, 1)
         self.choose_btn = QPushButton(self.m.t('repo.choose'))
+        self._translatable.append((self.choose_btn, 'repo.choose'))
         self.choose_btn.clicked.connect(self._choose_repo)
         row.addWidget(self.choose_btn)
         lay.addLayout(row)
@@ -146,8 +157,10 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         actions.setSpacing(8)
         self.download_btn = QPushButton(self.m.t('repo.download'))
+        self._translatable.append((self.download_btn, 'repo.download'))
         self.download_btn.clicked.connect(lambda: self.m.clone_repo())
         self.update_btn = QPushButton(self.m.t('repo.update'))
+        self._translatable.append((self.update_btn, 'repo.update'))
         self.update_btn.clicked.connect(self.m.update_repo)
         for b in (self.download_btn, self.update_btn):
             actions.addWidget(b)
@@ -158,7 +171,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.repo_status)
 
     def _build_inputs(self) -> None:
-        box, lay = self._card(self.m.t('data.title'), self.m.t('data.note'))
+        box, lay = self._card('data.title', 'data.note')
         self.data_box = box
         self.folder_label = QLabel(self.m.t('data.folderHint'))
         self.folder_label.setObjectName('mono')
@@ -175,11 +188,13 @@ class MainWindow(QMainWindow):
             dot.setFixedWidth(14)
             name = QLabel(self.m.t(l10n))
             name.setFixedWidth(110)
+            self._translatable.append((name, l10n))
             val = QLabel('—')
             val.setObjectName('mono')
             val.setTextInteractionFlags(Qt.TextSelectableByMouse)
             val.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # filenames are long; the Choose button must stay visible
             btn = QPushButton(self.m.t('data.choose'))
+            self._translatable.append((btn, 'data.choose'))
             btn.setFixedWidth(72)
             btn.clicked.connect(lambda _=False, k=key: self._choose_input(k))
             grid.addWidget(dot, i, 0)
@@ -191,21 +206,24 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row.addStretch(1)
         pick = QPushButton(self.m.t('data.pickFolder'))
+        self._translatable.append((pick, 'data.pickFolder'))
         pick.clicked.connect(self._pick_folder)
         row.addWidget(pick)
         lay.addLayout(row)
 
     def _build_deps(self) -> None:
-        box, lay = self._card(self.m.t('dep.title'))
+        box, lay = self._card('dep.title')
         self.deps_box = box
         head = QHBoxLayout()
         self.deps_summary = QLabel('')
         head.addWidget(self.deps_summary)
         head.addStretch(1)
         self.install_all_btn = QPushButton(self.m.t('dep.installAll'))
+        self._translatable.append((self.install_all_btn, 'dep.installAll'))
         self.install_all_btn.clicked.connect(self.m.install_all_missing)
         head.addWidget(self.install_all_btn)
         recheck = QPushButton(self.m.t('dep.recheck'))
+        self._translatable.append((recheck, 'dep.recheck'))
         recheck.clicked.connect(self.m.check_deps)
         head.addWidget(recheck)
         lay.addLayout(head)
@@ -214,7 +232,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(self.deps_container)
 
     def _build_progress(self) -> None:
-        box, lay = self._card(self.m.t('prog.title'))
+        box, lay = self._card('prog.title')
         self.progress_box = box
         self.progress_box.setVisible(False)
         self.overall = QProgressBar()
@@ -233,6 +251,7 @@ class MainWindow(QMainWindow):
         self.log_path_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         head.addWidget(self.log_path_label, 1)
         self.export_btn = QPushButton(self.m.t('log.export'))
+        self._translatable.append((self.export_btn, 'log.export'))
         self.export_btn.clicked.connect(self._export_log)
         head.addWidget(self.export_btn)
         self.body.addLayout(head)
@@ -265,6 +284,7 @@ class MainWindow(QMainWindow):
             self.target_btn.clicked.connect(self._toggle_target)
             row.addWidget(self.target_btn)
         self.out_btn = QPushButton(self.m.t('build.outDir'))
+        self._translatable.append((self.out_btn, 'build.outDir'))
         self.out_btn.clicked.connect(self._choose_out)
         row.addWidget(self.out_btn)
         self.centralWidget().layout().addWidget(wrap)
@@ -281,6 +301,11 @@ class MainWindow(QMainWindow):
     def _refresh_all(self) -> None:
         self.subtitle.setText(self.m.t('app.subtitle'))
         self.lang_btn.setText(self.m.lang.toggle_label)
+        # everything built once at start-up re-reads its string here: the language toggle emits
+        # repoChanged, and without this the card titles, the notes and the buttons kept their
+        # start-up language — the report's half-Chinese interface
+        for w, key in self._translatable:
+            w.setText(self.m.t(key))
         full = (pu.short_path(self.m.repo_path) if self.m.repo_ok
                 else (self.m.repo_path or self.m.t('repo.notFound')))
         self.repo_path_label.setText(full)
@@ -436,11 +461,18 @@ class MainWindow(QMainWindow):
         self.build_btn.style().unpolish(self.build_btn)
         self.build_btn.style().polish(self.build_btn)
         self.build_btn.setEnabled(running or self.m.can_build)
-        if not running and not self.footer.text():
-            if not self.m.base_path:
-                self.footer.setText(self.m.t('status.needInputs'))
-            elif not self.m.repo_ok:
-                self.footer.setText(self.m.t('status.chooseRepo'))
+        # Re-set on every refresh, and clear when a build runs (the build's own progress text
+        # takes the footer). "only when empty" wrote the start-up language once and never
+        # updated it — the footer was English after the toggle.
+        if running:
+            self.footer.setText('')
+        elif not self.m.base_path:
+            self.footer.setText(self.m.t('status.needInputs'))
+        elif not self.m.repo_ok:
+            self.footer.setText(self.m.t('status.chooseRepo'))
+        elif not self.footer.text() or self.footer.text() in (
+                self.m.t('status.needInputs'), self.m.t('status.chooseRepo')):
+            self.footer.setText('')
 
     def _append_log(self, s: str) -> None:
         self.log.moveCursor(self.log.textCursor().MoveOperation.End)

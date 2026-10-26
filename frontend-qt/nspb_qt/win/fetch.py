@@ -417,7 +417,8 @@ def install_python(dest: Path | None = None,
 
 def install_zstd(dest: Path | None = None,
                  log: Callable[[str], None] | None = None,
-                 progress: Callable[[int, int], None] | None = None) -> Path:
+                 progress: Callable[[int, int], None] | None = None,
+                 unpack_progress: Callable[[int, int], None] | None = None) -> Path:
     """Download facebook/zstd's Windows release and unpack the CLI into the tools folder.
 
     The dependency row for zstd used to have no fix at all on Windows — the hint named Homebrew,
