@@ -67,7 +67,7 @@ GIT_ASSETS = {
     'AMD64': {
         'name': f'PortableGit-{GIT_VERSION}-64-bit.7z.exe',
         'sha256': 'b1f3e52216e2ed6882d1bebfd4d3fdf319bec40d2edbbf9fd26ec4fd3fce7ed1',
-        'size': 57200000,
+        'size': 60087472,   # measured from the published asset; a guess here fails the length check
     },
 }
 # The tag is v<version>.windows.<n>, and GIT_VERSION already carries the patch number after the

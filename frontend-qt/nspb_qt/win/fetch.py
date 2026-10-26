@@ -90,9 +90,12 @@ def download(url: str, dest: Path, sha256: str, size: int | None = None,
             f'  expected {sha256.lower()}\n  got      {got}\n'
             'The download was deleted. If this repeats, the release was replaced upstream: '
             'set "llvm_dir" in toolchain.json to an existing install instead.')
+    # The length is a progress hint, not a check: SHA-256 above is the authority. A pinned size
+    # that is off by a byte (an estimate, or an asset re-uploaded without its hash changing in the
+    # code) must not fail a download whose content is provably right.
     if size and total != size:
-        part.unlink(missing_ok=True)
-        raise DownloadError(f'{dest.name} is {total} bytes, expected {size}')
+        log(f'note: {dest.name} is {total} bytes, the pinned size says {size} — content verified '
+            f'by SHA-256, continuing')
     part.replace(dest)
     log(f'downloaded {dest.name} ({total / 2**20:.0f} MiB in {time.time() - t0:.0f} s, '
         f'sha256 {got[:16]}…)')
