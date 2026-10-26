@@ -353,9 +353,15 @@ def build_id(nso):
         f.seek(0x40); return f.read(16).hex()
 
 
+def _rmtree_enoent(func, p, exc):
+    if isinstance(exc[1], FileNotFoundError): return   # already gone: the goal is achieved
+    time.sleep(0.2); func(p)                           # one retry: exFAT directory-cache races clear
+
+
 def rmtree(p):
     if p.is_symlink() or p.is_file(): p.unlink()
-    elif p.exists(): shutil.rmtree(p)
+    elif p.exists(): shutil.rmtree(p, onerror=_rmtree_enoent)
+    if p.exists(): shutil.rmtree(p, onerror=_rmtree_enoent)   # the caller needs it gone (copytree follows)
 
 
 def build_nx_extract(repo, work, logs, env):

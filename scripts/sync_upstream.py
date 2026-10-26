@@ -525,6 +525,23 @@ def patch_nsp(t):
         '''        if pkg_ver not in builds:
             _reg = ", ".join("{} {}".format(v, b["display"]) for v, b in builds.items())
             derived = f'{pkg_ver} is not a version game profile {g.id} registers ({_reg})\'''')]))
+    # An external work folder (an exFAT USB drive, the report's own setup) can report entries
+    # during shutil.rmtree's walk that vanish by their unlink — FileNotFoundError mid-delete — and
+    # the partially deleted folder then breaks the copytree right after. "Make this path gone" is
+    # the contract, so ENOENT passes and everything else gets one retry.
+    P.append(('rmtree exfat', '_rmtree_enoent', [(
+        """def rmtree(p):
+    if p.is_symlink() or p.is_file(): p.unlink()
+    elif p.exists(): shutil.rmtree(p)""",
+        """def _rmtree_enoent(func, p, exc):
+    if isinstance(exc[1], FileNotFoundError): return   # already gone: the goal is achieved
+    time.sleep(0.2); func(p)                           # one retry: exFAT directory-cache races clear
+
+
+def rmtree(p):
+    if p.is_symlink() or p.is_file(): p.unlink()
+    elif p.exists(): shutil.rmtree(p, onerror=_rmtree_enoent)
+    if p.exists(): shutil.rmtree(p, onerror=_rmtree_enoent)   # the caller needs it gone (copytree follows)""")]))
     # Xcode 15 and later download the iOS platform separately: xcodebuild and the Metal compiler can
     # both be present with no iOS SDK, and the failure then surfaced deep inside xcodebuild. Naming
     # the SDK makes the error actionable (found while auditing environment assumptions, 2026-10-26).
