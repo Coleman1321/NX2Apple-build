@@ -400,9 +400,12 @@ struct ContentView: View {
                     Image(systemName: "wrench.and.screwdriver").font(.system(size: 22, weight: .light)).foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(m.t(m.target == "mac-app" ? "activity.mac" : "activity.ios")).font(.manrope(15, .bold))
-                        Text(m.stages.last(where: { $0.state == .running }).map { [$0.name, $0.detail].filter { !$0.isEmpty }.joined(separator: " · ") }
-                             ?? m.t("library.preparing"))
-                            .font(.manrope(13)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        TimelineView(.periodic(from: Date(), by: 1)) { context in   // the clock ticks while a count may stand still
+                            Text(m.stages.last(where: { $0.state == .running })
+                                    .map { [$0.name, $0.detail, $0.clock(at: context.date, left: m.t("prog.eta"))].filter { !$0.isEmpty }.joined(separator: " · ") }
+                                 ?? m.t("library.preparing"))
+                                .font(.manrope(13)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
                     }
                     .frame(minWidth: 180, alignment: .leading)
                     LauncherProgressBar(value: buildProgress).frame(maxWidth: 480)

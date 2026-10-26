@@ -204,13 +204,21 @@ final class LibraryTests: XCTestCase {
     }
 
     func testProgressDetailReadsTheScriptsCounts() {
-        let eta = "%@ left"
-        XCTAssertEqual(BuildModel.progressDetail(["step": "splitting", "done": 1203, "total": 19592, "unit": "shaders", "eta": 130], eta: eta),
+        XCTAssertEqual(BuildModel.progressDetail(["step": "splitting", "done": 1203, "total": 19592, "unit": "shaders", "eta": 130]),
                        "splitting · " + NumberFormatter.localizedString(from: 1203, number: .decimal) + " / "
-                       + NumberFormatter.localizedString(from: 19592, number: .decimal) + " shaders · " + BuildModel.duration(130) + " left")
-        XCTAssertEqual(BuildModel.progressDetail(["done": 2301, "unit": "files"], eta: eta), NumberFormatter.localizedString(from: 2301, number: .decimal) + " files")
-        XCTAssertTrue(BuildModel.progressDetail(["done": 1_000_000_000, "total": 3_000_000_000, "unit": "B", "est": true], eta: eta).contains(" / ~"))
-        XCTAssertEqual(BuildModel.progressDetail(["step": "booting the game"], eta: eta), "booting the game")
+                       + NumberFormatter.localizedString(from: 19592, number: .decimal) + " shaders")
+        XCTAssertEqual(BuildModel.progressDetail(["done": 2301, "unit": "files"]), NumberFormatter.localizedString(from: 2301, number: .decimal) + " files")
+        XCTAssertTrue(BuildModel.progressDetail(["done": 1_000_000_000, "total": 3_000_000_000, "unit": "B", "est": true]).contains(" / ~"))
+        XCTAssertEqual(BuildModel.progressDetail(["step": "booting the game"]), "booting the game")
+    }
+
+    /// The stage's clock runs on while the count stands still, and the script's estimate counts down from when it came, then goes.
+    func testStageClockCountsOnAndTheEstimateRunsOut() {
+        let t0 = Date()
+        let stage = Stage(id: 1, name: "shader split", started: t0, eta: 71, etaAt: t0.addingTimeInterval(10))
+        XCTAssertEqual(stage.clock(at: t0.addingTimeInterval(42), left: "%@ left"), "0:42 · " + BuildModel.duration(39) + " left")
+        XCTAssertEqual(stage.clock(at: t0.addingTimeInterval(125), left: "%@ left"), "2:05")   // the estimate ran out: no stale "1 min 11 s left"
+        XCTAssertEqual(stage.clock(at: t0.addingTimeInterval(3725), left: "%@ left"), "1:02:05")
     }
 
     /// Stop ends the build and leaves no stage behind (a spinner and a percentage of a build that no longer runs).

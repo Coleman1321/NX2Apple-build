@@ -18,6 +18,24 @@ struct Stage: Identifiable {
     var state: StepState = .running
     var detail: String = ""
     var percent: Double? = nil
+    var started: Date? = nil   // when the stage began here: its clock runs while the count may stand still
+    var eta: Double? = nil     // the script's estimate of the seconds left, as of etaAt
+    var etaAt: Date? = nil
+
+    /// "3:42" since the stage began, then "1 min left" while the script's estimate, counted down from when it came,
+    /// lasts: the estimate only arrives with a new count, so one taken as it was would stand still with the count.
+    func clock(at now: Date, left: String) -> String {
+        var parts: [String] = []
+        if let started {
+            let t = max(0, Int(now.timeIntervalSince(started)))
+            parts.append(t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60))
+        }
+        if let eta, let etaAt {
+            let remaining = eta - now.timeIntervalSince(etaAt)
+            if remaining >= 1 { parts.append(String(format: left, BuildModel.duration(remaining))) }
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 enum StepState: Equatable {
@@ -849,7 +867,7 @@ final class BuildModel: ObservableObject {
             if !s.detail.isEmpty { stages[i].detail = s.detail }
             stages[i].percent = s.percent
         } else if s.state != .pending {
-            stages.append(Stage(id: s.k, name: s.name, state: s.state, detail: s.detail, percent: s.percent))
+            stages.append(Stage(id: s.k, name: s.name, state: s.state, detail: s.detail, percent: s.percent, started: Date()))
             stages.sort { $0.id < $1.id }
         }
     }
@@ -881,20 +899,21 @@ final class BuildModel: ObservableObject {
             let name = e["name"] as? String ?? "", step = e["step"] as? String ?? ""
             let n = (e["n"] as? NSNumber)?.intValue ?? 0
             append("[\(k)/\(n)] \(name)" + (step.isEmpty ? "" : " · \(step)") + " …\n")
-            stage { $0.name = name; $0.state = .running; $0.detail = step; $0.percent = nil }
+            stage { $0.name = name; $0.state = .running; $0.detail = step; $0.percent = nil; $0.started = Date(); $0.eta = nil }
         case "step":
             let step = e["step"] as? String ?? ""
             append("    · \(step)\n")
-            stage { $0.detail = step; $0.percent = nil }
+            stage { $0.detail = step; $0.percent = nil; $0.eta = nil }
         case "progress":
             let fraction = (e["frac"] as? NSNumber)?.doubleValue
-            let detail = Self.progressDetail(e, eta: t("prog.eta"))
-            stage { $0.percent = fraction.map { $0 * 100 }; $0.detail = detail }
+            let detail = Self.progressDetail(e)
+            let eta = (e["eta"] as? NSNumber)?.doubleValue
+            stage { $0.percent = fraction.map { $0 * 100 }; $0.detail = detail; $0.eta = eta; $0.etaAt = eta == nil ? nil : Date() }
         case "stage_end":
             let ok = e["ok"] as? Bool ?? true, summary = e["summary"] as? String ?? ""
             let elapsed = Self.duration((e["elapsed"] as? NSNumber)?.doubleValue ?? 0)
             append("\(ok ? "✓" : "✗") \(e["name"] as? String ?? "") (\(elapsed))" + (summary.isEmpty ? "" : ": \(summary)") + "\n")
-            stage { $0.state = ok ? .done : .failed; $0.detail = summary; $0.percent = ok ? 100 : $0.percent }
+            stage { $0.state = ok ? .done : .failed; $0.detail = summary; $0.percent = ok ? 100 : $0.percent; $0.eta = nil }
         case "say":
             let msg = e["msg"] as? String ?? ""
             append(msg + "\n")
@@ -906,8 +925,8 @@ final class BuildModel: ObservableObject {
         }
     }
 
-    /// "1.2 of 3.4 GB · 2 min left", "1,203 of 19,592 shaders", "2,301 files": the step, the count and its ETA.
-    nonisolated static func progressDetail(_ e: [String: Any], eta: String) -> String {
+    /// "splitting · 1.2 / 3.4 GB", "1,203 / 19,592 shaders", "2,301 files": the step and the count (the time left is the Stage's clock).
+    nonisolated static func progressDetail(_ e: [String: Any]) -> String {
         let step = e["step"] as? String ?? "", unit = e["unit"] as? String ?? "", note = e["note"] as? String ?? ""
         let done = (e["done"] as? NSNumber)?.doubleValue, total = (e["total"] as? NSNumber)?.doubleValue
         let estimate = (e["est"] as? Bool ?? false) ? "~" : ""
@@ -921,8 +940,7 @@ final class BuildModel: ObservableObject {
                 count = (total.map { "\(number(done)) / \(estimate)\(number($0))" } ?? number(done)) + (unit.isEmpty ? "" : " \(unit)")
             }
         }
-        let left = (e["eta"] as? NSNumber).map { String(format: eta, duration($0.doubleValue)) } ?? ""
-        return [step, count, note, left].filter { !$0.isEmpty }.joined(separator: " · ")
+        return [step, count, note].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     nonisolated static func duration(_ seconds: Double) -> String {
@@ -1687,7 +1705,12 @@ struct BuilderView: View {
                         else { Circle().fill(s.state.color).frame(width: 7, height: 7).frame(width: 14) }
                         Text(s.name).font(.manrope(14)).lineLimit(1)
                         Spacer(minLength: 12)
-                        if !s.detail.isEmpty { Text(s.detail).font(.manrope(12)).foregroundStyle(.secondary).lineLimit(1) }
+                        if s.state == .running {
+                            TimelineView(.periodic(from: Date(), by: 1)) { context in
+                                Text([s.detail, s.clock(at: context.date, left: m.t("prog.eta"))].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.manrope(12)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        } else if !s.detail.isEmpty { Text(s.detail).font(.manrope(12)).foregroundStyle(.secondary).lineLimit(1) }
                         if s.state == .running {
                             LauncherProgressBar(value: s.percent.map { $0 / 100 }, height: 6).frame(width: 180)
                             Text(s.percent.map { "\(Int($0))%" } ?? "").font(.manrope(13, .semibold)).monospacedDigit()
