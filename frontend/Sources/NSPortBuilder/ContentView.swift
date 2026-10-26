@@ -79,6 +79,13 @@ final class BuildModel: ObservableObject {
     @Published var done = false
     @Published var doneNote = ""
     @Published var ipaPath = ""      // captured from the script's "output IPA:" line
+    @Published var macAppPath = ""   // --platform mac-app: the .app this build produced
+    /// 'ios' = an IPA for an iPhone; 'mac-app' = a double-clickable Mac app (upstream's
+    /// --platform mac-app). A Mac app is a different output of the same pipeline, not a
+    /// different pipeline: same extraction, rewrite and shaders, then dm/mac/pack_app.py.
+    @Published var target = (UserDefaults.standard.string(forKey: "buildTarget") ?? "ios") {
+        didSet { UserDefaults.standard.set(target, forKey: "buildTarget") }
+    }
     @Published var archivePath = ""  // the romfs folder the pack wrote
     /// Where this build's folder actually is: --work-dir when the checkout has it, else the script's
     /// default under the input folder (issue #5 — an upstream checkout has no --work-dir).
@@ -578,7 +585,16 @@ final class BuildModel: ObservableObject {
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
                     "--progress", "lines"]
         if hasWorkDir { args += ["--work-dir", workDir] }
-        if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
+        let macApp = target == "mac-app"
+        if macApp {
+            // -o names the .app; the RomFS goes inside it, so the archive step is skipped below.
+            args += ["--platform", "mac-app"]
+            macAppPath = (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + ".app"
+            args += ["-o", macAppPath]
+        } else if !outDir.isEmpty {
+            ipaPath = outDir + "/" + tidHex + ".ipa"
+            args += ["-o", ipaPath]
+        }
         // The archive step packs whatever folder the build reported; without --work-dir that is the
         // script's default, which is the same workDir unless a separate output folder was chosen.
         effectiveWorkDir = hasWorkDir ? workDir : (inputDir as NSString).appendingPathComponent(tidHex + "_build")
@@ -608,7 +624,19 @@ final class BuildModel: ObservableObject {
                 self.flushLines()
                 if status.terminationStatus == 0 {
                     self.markAllDone()
-                    self.packArchive(workDir: self.effectiveWorkDir)   // keeps running=true until the archive is done
+                    if self.target == "mac-app" {
+                        // A Mac app carries its RomFS inside, so the archive step would be wasted
+                        // work; the .app's existence is the real check (the script can exit 0
+                        // without writing it, e.g. when pack_app.py is missing from the checkout).
+                        let made = !self.macAppPath.isEmpty &&
+                                   FileManager.default.fileExists(atPath: self.macAppPath)
+                        self.done = made
+                        self.doneNote = self.t(made ? "msg.macAppDone" : "msg.macAppMissing")
+                        self.running = false
+                        self.cleanupStaging()
+                    } else {
+                        self.packArchive(workDir: self.effectiveWorkDir)   // keeps running=true until the archive is done
+                    }
                 } else {
                     if let i = self.stages.lastIndex(where: { $0.state == .running }) {
                         self.stages[i].state = .failed
@@ -1575,6 +1603,17 @@ struct ContentView: View {
 
             statusText
             Spacer(minLength: 8)
+            // Output target. Two different outputs of one pipeline; an iPhone IPA is the default
+            // because that is what most people build.
+            Picker("", selection: $m.target) {
+                Text(m.t("target.ios")).tag("ios")
+                Text(m.t("target.mac")).tag("mac-app")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 240)
+            .disabled(m.running)
+            .help(m.t("target.tip"))
             Button(m.t("btn.outDir")) {
                 let d = NSOpenPanel(); d.canChooseDirectories = true; d.canChooseFiles = false
                 if d.runModal() == .OK, let u = d.url { m.outDir = u.path }

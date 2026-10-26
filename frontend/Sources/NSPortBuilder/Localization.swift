@@ -117,6 +117,9 @@ enum L10n {
         // ---- Qt front end (frontend-qt): keys the SwiftUI app does not use yet ----
         "build.start": ("开始构建", "Start build"),
         "build.cancel": ("取消构建", "Cancel build"),
+        "msg.macAppDone": ("Mac App 已生成，可在访达里双击运行", "Mac app ready — double-click it in the Finder"),
+        "msg.macAppMissing": ("构建结束但没有找到 .app（仓库里缺 dm/mac/pack_app.py？）",
+                              "Build finished but no .app was produced (is dm/mac/pack_app.py in the checkout?)"),
         "target.ios": ("输出：iPhone IPA", "Output: iPhone IPA"),
         "target.mac": ("输出：Mac App", "Output: Mac app"),
         "target.tip": ("点一下切换（Mac App 可直接双击运行，不需要 iPhone）",
