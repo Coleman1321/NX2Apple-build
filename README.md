@@ -43,12 +43,13 @@ This is a community fork of **[nxnative](https://github.com/seedds/nxnative)** �
 the Horizon host, the NVN-on-Metal layer and the per-game profiles are upstream work, and this fork
 follows upstream automatically. What it adds:
 
-- **🖱️ A GUI app for everyone.** [NS Port Builder](frontend/README.md) walks a first-time user
-  through the whole build: four inputs picked separately (or one folder for all), device
-  dependencies detected and installed with one click, progress from the build's own stages, and an
-  install guide with Reveal-in-Finder buttons at the end. English by default; Chinese on Chinese
-  devices. **It also downloads the repository for you and updates itself** — no git knowledge
-  needed.
+- **🖱️ A GUI app for everyone.** [nxnative for Mac](frontend/README.md) is a game library and a
+  build tool in one window: pick a game's folder, choose *This Mac* or *iPhone / iPad*, and the build
+  runs with live progress from the script's own counts. Finished Mac games appear in the library with
+  their eShop key art, start with **Play**, and keep per-game launch options (the iPhone launcher's
+  settings: frame rate, console mode, upscaling, …). Device dependencies are detected and installed
+  with one click; English or Chinese, following the system. **It also downloads the repository for you
+  and updates itself** — no git knowledge needed.
 - **📦 A RomFS archive.** Tears of the Kingdom's 304,243 files become 127 shards — the difference
   between an iOS install that fails with `PackageExtractionFailed` and one that works (details
   below).
@@ -174,23 +175,26 @@ the shard, so the page cache still works.
 ### The GUI front end
 
 `frontend/` is a macOS app that does the build steps with a window instead of a terminal, for
-people who would rather not read a build log: four inputs picked separately (base game, update,
-DLC, `prod.keys`), a dependency panel that detects and installs what is missing, the script's real
-stage list with live percentages, and the archive shards produced at the end.
+people who would rather not read a build log: a library of your games with their key art, a build
+page (one game folder, or base game, update, DLC and `prod.keys` picked separately; Mac or iPhone),
+the script's real stage list with live counts and time left, per-game launch options for Mac builds,
+and a settings page that detects and installs what is missing.
+
+<img src="frontend/screenshots/launcher-library.webp" width="100%" alt="nxnative for Mac: the library, with a build in progress">
 
 <details>
-<summary>界面截图（点开）</summary>
+<summary>Build page and launch options</summary>
 
-<img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
+<img src="frontend/screenshots/launcher-build.webp" width="66%" alt="Build game"> <img src="frontend/screenshots/launcher-launch-options.webp" width="32%" alt="Launch options">
 
 </details>
 
 ```bash
-cd frontend && swift run          # or double-click frontend/NS Port Builder.app
+cd frontend && swift run          # or double-click frontend/nxnative.app
 ```
 
-The interface is bilingual: it follows the device (Chinese for any Chinese variant, **English for
-everything else**) and the `中文` / `EN` button in the title bar switches at any time.
+The interface is bilingual: it follows the system language (Chinese for any Chinese variant, **English
+for everything else**).
 
 It runs the same scripts the command line does, so everything below still applies; see
 [frontend/README.md](frontend/README.md). The prebuilt app, and the release notes in English and

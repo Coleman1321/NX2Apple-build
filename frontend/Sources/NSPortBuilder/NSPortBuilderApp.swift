@@ -3,6 +3,9 @@ import SwiftUI
 @main
 struct NSPortBuilderApp: App {
     var body: some Scene {
-        WindowGroup("NS Port Builder") { ContentView() }.windowResizability(.contentSize)
+        WindowGroup("nxnative") { ContentView() }
+            .windowStyle(.hiddenTitleBar)
+            .defaultSize(width: 1280, height: 900)
+            .windowResizability(.automatic)
     }
 }

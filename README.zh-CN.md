@@ -41,10 +41,11 @@ shader 翻译成 Metal、打包出装得进手机的瘦身 IPA 和分片 RomFS �
 本仓库是 **[nxnative](https://github.com/seedds/nxnative)** 的社区 fork——NSO 重写器、Horizon 宿主层、
 NVN-on-Metal、各游戏的 profile 都是上游的工作，本 fork 自动跟随上游。在此之上它增加了：
 
-- **🖱️ 给普通用户的图形界面。** [NS Port Builder](frontend/README.md) 引导第一次接触的用户完成整个
-  构建：四项输入分开选（或一个文件夹全选）、设备依赖检测并一键安装、来自构建自身的实时进度、最后是带
-  「在访达中显示」按钮的安装引导。默认英文；中文设备显示中文。**它还会替你下载仓库、并自己更新自己**
-  ——完全不需要懂 git。
+- **🖱️ 给普通用户的图形界面。** [nxnative for Mac](frontend/README.md) 把游戏库和构建工具放在一个窗口里：
+  选好游戏文件夹，选择「这台 Mac」或「iPhone / iPad」，构建过程按脚本自己的计数实时显示进度。构建好的
+  Mac 游戏带着 eShop 封面出现在游戏库里，点 **Play** 即可启动，并可为每个游戏设置启动选项（与 iPhone
+  启动器相同：帧率、主机模式、超分辨率等）。设备依赖自动检测并一键安装；界面跟随系统语言显示中文或英文。
+  **它还会替你下载仓库、并自己更新自己**——完全不需要懂 git。
 - **📦 RomFS 归档。** 《王国之泪》的 304,243 个文件变成 127 个分片——这就是 iOS 从
   `PackageExtractionFailed` 安装失败到安装成功之间的差别（细节见下）。
 - **⏸️ 构建中断可续。** 解包、DLC、模块改写和 shader 编译都会保留复用：失败或中途停止的构建从上次
@@ -124,10 +125,10 @@ NVN-on-Metal、各游戏的 profile 都是上游的工作，本 fork 自动跟�
 <summary><b>问题、解法与归档格式（点开）</b></summary>
 
 ```bash
-cd frontend && swift run          # 或双击 frontend/NS Port Builder.app
+cd frontend && swift run          # 或双击 frontend/nxnative.app
 ```
 
-界面双语：跟随设备（任何中文变体显示中文，**其他一律英文**），标题栏的 `中文` / `EN` 按钮随时切换。
+界面双语：跟随系统语言（任何中文变体显示中文，**其他一律英文**）。
 
 它跑的脚本和命令行完全相同，所以下面的一切同样适用；详见 [frontend/README.md](frontend/README.md)。
 预编译的 App 和中英双语的发布说明（含哪些游戏已验证）在
@@ -177,23 +178,24 @@ romfs.00 ... .125        126 个分片，每片 200 MiB，源文件字节原样
 
 ## 🖥️ 图形界面
 
-`frontend/` 是一个 macOS App，用窗口代替终端完成下面第 2–5 步，给不想读构建日志的人用：四项输入
-分开选（本体、更新包、DLC、`prod.keys`）、依赖面板自动检测并一键安装缺失项、直接显示脚本自己的
-阶段列表和实时百分比、最后自动产出归档分片。
+`frontend/` 是一个 macOS App，用窗口代替终端完成下面第 2–5 步，给不想读构建日志的人用：带封面的游戏库；
+构建页（选一个游戏文件夹，或分别选本体、更新包、DLC 和 `prod.keys`；目标为 Mac 或 iPhone）；直接显示
+脚本自己的阶段列表、实时计数和剩余时间；Mac 版游戏的启动选项；以及自动检测并一键安装缺失依赖的设置页。
+
+<img src="frontend/screenshots/launcher-library.webp" width="100%" alt="nxnative for Mac：游戏库，正在构建">
 
 <details>
-<summary>界面截图（点开）</summary>
+<summary>构建页与启动选项</summary>
 
-<img src="frontend/screenshots/main-window.png" width="620" alt="NS Port Builder">
+<img src="frontend/screenshots/launcher-build.webp" width="66%" alt="构建游戏"> <img src="frontend/screenshots/launcher-launch-options.webp" width="32%" alt="启动选项">
 
 </details>
 
 ```bash
-cd frontend && swift run          # 或直接双击 frontend/NS Port Builder.app
+cd frontend && swift run          # 或直接双击 frontend/nxnative.app
 ```
 
-界面支持中英双语：首次启动跟随设备语言（中文系统用中文，**其他所有语言都用英文**），标题栏的
-`中文` / `EN` 按钮可随时切换并记住选择。
+界面支持中英双语：跟随系统语言（中文系统用中文，**其他所有语言都用英文**）。
 
 它调用的就是命令行那套脚本，下面的说明全部适用；细节见
 [frontend/README.md](frontend/README.md)。打包好的 App 和英中双语发布说明（含已验证游戏清单）在

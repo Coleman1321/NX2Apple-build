@@ -34,6 +34,9 @@ def main() -> None:
         'TABLE: dict[str, tuple[str, str]] = {',
     ]
     for key, zh, en in rows:
+        # Swift Unicode escapes keep the shared table ASCII without losing translations.
+        zh = re.sub(r'\\u\{([0-9a-fA-F]+)\}', lambda m: chr(int(m[1], 16)), zh)
+        en = re.sub(r'\\u\{([0-9a-fA-F]+)\}', lambda m: chr(int(m[1], 16)), en)
         zh = zh.replace('\\"', '"').replace('\\n', '\\n')
         en = en.replace('\\"', '"').replace('\\n', '\\n')
         lines.append(f'    {key!r}: ({zh!r}, {en!r}),')
