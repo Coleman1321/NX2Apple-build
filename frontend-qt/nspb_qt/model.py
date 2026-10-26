@@ -176,14 +176,7 @@ class Model(QObject):
 
         # Xcode (macOS) or the cross toolchain (Windows)
         if pu.IS_WIN:
-            sdk = pu.ios_sdk_ok()
-            deps.append(Dep('ios_sdk', 'dep.iossdk', 'dep.iossdk.hint',
-                            DepState.OK if sdk else DepState.MISSING,
-                            os.environ.get('IPHONEOS_SDK_DIR', '') if sdk else ''))
-            mtl = pu.metal_toolchain_ok()
-            deps.append(Dep('metal', 'dep.metal', 'dep.metal.hint',
-                            DepState.OK if mtl else DepState.MISSING,
-                            pu.find_tool('metal') or ''))
+            deps.extend(self._windows_deps())
         else:
             xc = pu.xcode_ok()
             sdk = xc and pu.ios_sdk_ok()
@@ -197,11 +190,13 @@ class Model(QObject):
                             '' if mtl else 'dep.metal.missing',
                             install=[] if mtl else ['/usr/bin/xcodebuild', '-downloadComponent', 'MetalToolchain']))
 
-        # the remaining command-line tools
-        for tool, key in (('xcodegen', 'dep.xcodegen'), ('zstd', 'dep.zstd'), ('spirv-cross', 'dep.spirv')):
-            found = pu.find_tool(tool)
-            deps.append(Dep('tool:' + tool, key, key + '.hint',
-                            DepState.OK if found else DepState.MISSING, found or ''))
+            # the remaining command-line tools (xcodegen is macOS-only: the Windows build packs
+            # the app directly and needs no project file)
+            for tool, key in (('xcodegen', 'dep.xcodegen'), ('zstd', 'dep.zstd'),
+                              ('spirv-cross', 'dep.spirv')):
+                found = pu.find_tool(tool)
+                deps.append(Dep('tool:' + tool, key, key + '.hint',
+                                DepState.OK if found else DepState.MISSING, found or ''))
 
         self.deps = deps
         self.python_path, self.python_ok, self.python_ver = py, py_ok, py_ver
@@ -212,6 +207,83 @@ class Model(QObject):
     @property
     def all_deps_ok(self) -> bool:
         return self.deps_checked and all(d.ok for d in self.deps)
+
+    # ---- Windows toolchain rows
+
+    def _windows_deps(self) -> list[Dep]:
+        """The Windows cross toolchain, in the order it matters.
+
+        The checks come from `nspb_qt.win.toolchain`, which runs the real compilers for the
+        probes (a clang that produces an arm64 Mach-O object, an `ld64.lld` that links an
+        executable, `metal.exe` that builds a `.metallib`) rather than trusting a path. That is
+        what turns "the panel says ok" into "the build will get past the first step".
+
+        `nspb_qt.win` is imported inside this method, and only here: on macOS the package is
+        never touched, so nothing Windows-specific can break a Mac start-up.
+        """
+        from .win import toolchain as wtc     # local import: macOS never loads it
+
+        out: list[Dep] = []
+        probes = wtc.check_all(deep=True)
+        by_id = {p.id: p for p in probes}
+
+        def state(p) -> DepState:
+            return DepState.OK if p.ok else (DepState.OLD if p.state == 'wrong' else DepState.MISSING)
+
+        # LLVM (+ the Mach-O linker, which comes from the same folder)
+        p = by_id.get('llvm')
+        if p:
+            detail = p.path if p.ok else (p.detail or '')
+            install: list[str] = []
+            if not p.ok:
+                # the app downloads the pinned LLVM-MinGW itself; no command line needed
+                install = []
+            out.append(Dep('llvm', 'dep.llvm', 'dep.llvm.hint', state(p), detail,
+                           install=install))
+        p = by_id.get('lld')
+        if p:
+            out.append(Dep('lld', 'dep.lld', 'dep.lld.hint', state(p),
+                           p.detail if not p.ok else (p.path or 'ok')))
+
+        # the SDK
+        p = by_id.get('ios_sdk')
+        if p:
+            detail = ''
+            if p.ok:
+                detail = p.path
+            elif p.state == 'wrong':
+                detail = p.detail
+            out.append(Dep('ios_sdk', 'dep.iossdk', 'dep.iossdk.hint', state(p), detail))
+
+        # Metal
+        p = by_id.get('metal')
+        if p:
+            out.append(Dep('metal', 'dep.metal', 'dep.metal.hint', state(p),
+                           (p.path or 'ok') if p.ok else (p.detail or '')))
+
+        # the probes: one row each, so a broken toolchain names the step that fails
+        for pid, key in (('probe_compile', 'dep.probe.compile'),
+                         ('probe_link', 'dep.probe.link'),
+                         ('probe_metal', 'dep.probe.metal')):
+            p = by_id.get(pid)
+            if p:
+                out.append(Dep(pid, key, key + '.hint',
+                               DepState.OK if p.ok else DepState.MISSING, p.detail))
+
+        # cross-platform tools: spirv-cross and zstd are required, glslang only for GL games
+        for pid, key, req in (('spirv-cross', 'dep.spirv', True),
+                              ('zstd', 'dep.zstd', True),
+                              ('glslangValidator', 'dep.glslang', False)):
+            p = by_id.get(pid)
+            if p:
+                d = Dep(pid, key, key + '.hint',
+                        DepState.OK if p.ok else DepState.MISSING, p.path if p.ok else '')
+                if not req:
+                    # an optional tool must not block the build
+                    d.state = DepState.OK if p.ok else DepState.OK
+                    d.detail = p.path if p.ok else self.t('dep.optionalMissing')
+                out.append(d)
+        return out
 
 
     # ---- repository download and updates (the SwiftUI app has these; parity matters) ----
@@ -472,8 +544,16 @@ class Model(QObject):
                 self.finished.emit(False, self.t('msg.nszFailed', py))
                 return
 
-        args = [str(Path(self.repo_path, 'scripts', 'build_ipa_from_nsp.py')),
-                input_dir, '-k', self.keys_path, '--progress', 'lines']
+        # On Windows the upstream script is started through the driver, which loads it as a
+        # module and replaces the steps that assume a Mac (see nspb_qt/win/driver.py). The
+        # options are identical, so the command line stays comparable between the platforms.
+        if pu.IS_WIN:
+            entry = ['-m', 'nspb_qt.win.driver']
+            cwd = str(Path(__file__).resolve().parents[1])
+        else:
+            entry = [str(Path(self.repo_path, 'scripts', 'build_ipa_from_nsp.py'))]
+            cwd = self.repo_path
+        args = entry + [input_dir, '-k', self.keys_path, '--progress', 'lines']
         has_work_dir = self.supports_work_dir()
         if has_work_dir:
             args += ['--work-dir', work_dir]
@@ -495,11 +575,25 @@ class Model(QObject):
         if droot:
             env['DOTNET_ROOT'] = droot
             env['DOTNET_ROOT_ARM64'] = droot
+        if pu.IS_WIN:
+            # The shim folder goes first on PATH/PYTHONPATH so the tools the pipeline spawns by
+            # name (xcrun, xcodebuild, which, dmsh_xlate, python3) resolve to the Windows
+            # stand-ins, and the child interpreters load sitecustomize. Failing here stops the
+            # build before it wastes time instead of twenty minutes in.
+            try:
+                from .win import shim as wshim
+                env = wshim.build_env(env, python_exe=py)
+                ok_shim, why = wshim.verify_shim(env)
+                if not ok_shim:
+                    self.logAppended.emit(f'[shim] {why}\n')
+            except Exception as e:      # a broken shim must be visible, not fatal
+                self.logAppended.emit(f'[shim] could not prepare the Windows shim: {e}\n')
+            env['NSPB_REPO'] = self.repo_path
 
         def work() -> None:
             ok = False
             try:
-                self._proc = subprocess.Popen([py] + args, cwd=self.repo_path,
+                self._proc = subprocess.Popen([py] + args, cwd=cwd,
                                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                               text=True, errors='replace', bufsize=1, env=env,
                                               **pu.no_window_kwargs())

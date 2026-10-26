@@ -33,8 +33,8 @@ wherever `NSPB_REPO` points, and the repository group lets you pick it by hand.
 ## What works today
 
 - Dependency detection per platform: Python + packages, .NET SDK, and either **Xcode + iOS SDK +
-  Metal toolchain** (macOS) or **iPhoneOS SDK + Apple's Metal Developer Tools** (Windows), plus
-  xcodegen / zstd / spirv-cross. Each row has an install button when a command can fix it.
+  Metal toolchain** (macOS) or the **Windows cross toolchain** (see [Windows build](#windows-build)),
+  plus xcodegen / zstd / spirv-cross. Each row has an install button when a command can fix it.
 - Pick a game folder (or its four inputs separately); base / update / DLC / `prod.keys` are
   recognised from the dump names.
 - Build: runs the same script the SwiftUI app runs, streams its stage lines and log, then packs
@@ -45,9 +45,10 @@ wherever `NSPB_REPO` points, and the repository group lets you pick it by hand.
 
 ## What is not there yet
 
-- **The Windows build path is untested.** The platform layer is written (tool discovery, the
-  SDK/Metal checks, `CREATE_NO_WINDOW` for child processes) but no Windows machine has run it.
-  The cross-compile steps themselves live in the WebUI-style toolchain, not here yet.
+- **The Windows build path has not run on a real Windows machine.** Everything below is written
+  and unit-tested on macOS (69 tests in `tests/test_win.py`), but the compile, link, `Metal`
+  compile and the final IPA have not been exercised against a genuine LLVM-MinGW + iPhoneOS SDK
+  + Metal Developer Tools install. See [Windows build → Open risks](#open-risks).
 - No self-update, no repository download/update buttons (the SwiftUI app has both).
 - No per-stage progress bar, no cancel-with-cleanup (cancel terminates the child).
 
@@ -61,5 +62,172 @@ nspb_qt/
   platform_util.py  per-OS paths, tool discovery, child environment
   i18n.py           language choice
   localization.py   generated from ../frontend/Sources/NSPortBuilder/Localization.swift
+  win/              the Windows build path; imported only when sys.platform is win32
 gen_localization.py regenerates localization.py
+tests/test_win.py   the Windows-path tests that can run on macOS
 ```
+
+---
+
+# Windows build
+
+On a Windows PC the pipeline cannot call `xcrun`, `xcodebuild` or `xcodegen`, and
+`scripts/build_ipa_from_nsp.py` does not even import (`pwd` is a POSIX-only module). So the app
+does not run the script directly on Windows. It runs `nspb_qt/win/driver.py`, which loads the
+upstream file **as a module**, replaces the steps that assume a Mac, and calls its `cli()`.
+
+The upstream file is never edited, so the daily sync cannot conflict with this work.
+
+## What each macOS step becomes
+
+| macOS | Windows |
+|---|---|
+| `xcodegen` + `xcodebuild` | LLVM clang per source file, linked by `ld64.lld` |
+| `Launcher.swift` (SwiftUI) | `win/ios/Launcher.m` (UIKit, same `dm_show_launcher` contract) |
+| `xcrun -sdk iphoneos metal` | Apple's **Metal Developer Tools for Windows**: `metal.exe` / `metallib.exe` |
+| `xcrun -sdk iphoneos clang` | LLVM-MinGW `clang.exe` with `-target arm64-apple-ios26.0 -isysroot <SDK>` |
+| `actool` asset catalog | loose PNGs named in `CFBundleIcons` (Pillow) |
+| `sips` / `plutil` | Pillow / `plistlib` |
+| Darwin compiler-rt (`@available`) | `win/ios/compat_rt.c`, linked only when LLVM has no `libclang_rt.ios.a` |
+| `make -n -B dmhost` (source list) | the Makefile rules reproduced in `build_app.host_sources()`, **checked against the Makefile text** |
+| `dmsh_xlate` apphost (a Mach-O) | `dotnet dmsh_xlate.dll`, the same locked build |
+| `which`, `python3`, `ctypes.CDLL(None)` | `sitecustomize.py` rewrites them at the subprocess boundary |
+| app icon via `actool` | Pillow, five sizes |
+| `codesign` ad-hoc + entitlements | skipped; the sideloader re-signs the IPA anyway |
+| the IPA's Unix `x` bit | `win/fix_ipa_modes.py` rewrites the zip's central directory in place |
+
+## What you need to install
+
+Run this first; it lists what is missing and where to get it:
+
+```bat
+python -m nspb_qt.win.doctor
+```
+
+1. **Python 3.10+**, then `pip install PySide6 lz4 capstone fonttools pillow`
+   (and `backports.zstd` before Python 3.14).
+2. **.NET SDK 10** — <https://dotnet.microsoft.com/download/dotnet/10.0> (SDK, x64).
+3. **LLVM-MinGW 20261020** — the app's Dependencies panel downloads and verifies it, or:
+
+   ```bat
+   python -m nspb_qt.win.doctor --fix
+   ```
+
+   Pinned SHA-256 (also in `toolchain.py`):
+
+   | archive | SHA-256 |
+   |---|---|
+   | `llvm-mingw-20261020-ucrt-x86_64.zip` | `fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd` |
+   | `llvm-mingw-20261020-ucrt-aarch64.zip` | `8f24fedd0b75c674c6c83dec2d76a7ac31a690120212843a17e465ef49854f69` |
+
+   The official `LLVM-*-win64.msi` from llvm.org works too (same clang, same LLD).
+
+4. **An iPhoneOS SDK 26.x** — either route works:
+
+   ```bat
+   python -m nspb_qt.win.doctor --sdk                     :: git, no Apple ID
+   python -m nspb_qt.win.doctor --sdk-xip Xcode_26.5.xip  :: Apple's own, free Apple ID
+   python -m nspb_qt.win.doctor --import-sdk D:\SDKs\iPhoneOS26.0.sdk
+   ```
+
+   The git route sparse-clones one SDK out of `xybp888/iOS-SDKs`. The `.xip` route streams
+   Apple's archive and writes only `Platforms/iPhoneOS.platform/Developer/SDKs/`.
+
+5. **Metal Developer Tools for Windows 6.x** —
+   <https://developer.apple.com/download/all/?q=metal%20developer%20tools> (free Apple ID).
+   The app cannot download this for you: Apple gates it behind a login.
+
+6. **spirv-cross** and **zstd** — Windows builds. The Vulkan SDK has `spirv-cross` (and
+   `glslangValidator`); zstd has releases on GitHub.
+
+If auto-detection picks the wrong folder, set it in
+`%LOCALAPPDATA%\NS Port Builder\toolchain.json`:
+
+```json
+{
+  "llvm_dir": "D:\\tools\\llvm-mingw-20261020-ucrt-x86_64",
+  "ios_sdk": "D:\\SDKs\\iPhoneOS26.0.sdk",
+  "metal_dir": "C:\\Program Files\\Metal Developer Tools",
+  "spirv_cross_dir": "C:\\VulkanSDK\\1.4.321.0\\Bin",
+  "zstd_dir": "C:\\tools\\zstd"
+}
+```
+
+## Verify each step
+
+`nspb_qt.win.toolchain` does not trust that a path exists — it runs the tool:
+
+| check | what it proves |
+|---|---|
+| `probe_compile` | `clang -target arm64-apple-ios26.0 -isysroot <SDK> -c` writes a **0xfeedfacf** arm64 `MH_OBJECT` |
+| `probe_link` | `ld64.lld` links an arm64 **`MH_EXECUTE`** with `LC_BUILD_VERSION` platform 2 (iOS) |
+| `probe_metal` | `metal.exe` → `.air`, then `metallib.exe` → a non-empty `.metallib` |
+
+```bat
+python -m nspb_qt.win.doctor            :: human-readable, runs the probes
+python -m nspb_qt.win.doctor --json     :: for a bug report
+```
+
+Exit code 0 means every required row passed its probe.
+
+### The one thing llvm-mingw gets wrong
+
+llvm-mingw's release script (`strip-llvm.sh`) **deletes `ld64.lld.exe`**; the zip only has
+`ld.lld.exe`. That is not a dead end: LLD is one binary containing every driver and picks one
+from `argv[0]`. Copying `ld.lld.exe` to `ld64.lld.exe` gives the Mach-O linker, and the app does
+that automatically (`toolchain.ensure_ld64_lld`). A build of LLD that was stripped down to ELF
+only is detected (`MachO` / `ld64.lld` strings absent) and reported instead of failing at link
+time.
+
+## Known unsupported game types
+
+These need the game's own arm64 code to run, which upstream does inside a **Mac host**. No
+Windows PC can do that, so the build stops with an explanatory message rather than producing a
+broken IPA:
+
+- **Run-time shader capture** — GLSLC capture (Fire Emblem: Three Houses, Portal), Vulkan
+  capture (Super Mario Galaxy), GL capture of a non-LÖVE game. The game compiles its shaders
+  only while running.
+- **Unreal / Oodle decoding** — games whose shaders sit inside Oodle-compressed or Trinity packs
+  (Pokémon Legends: Z-A, PlatinumGames titles, DRAGON QUEST XI S, …). Upstream decodes them by
+  running the game's own decoder.
+- **The heap check** for a provisional profile. Replaced by an estimate (a 2 GB pool for a game
+  with virtual address memory); see `driver.heap_check`.
+- **The pipeline archive** (`pso_offline.py` / `metal-tt`). Apple's Windows Metal tools do not
+  ship `metal-tt`, so `DM_PSO_GPUS` is forced to `none`: the device builds those pipeline bases
+  on its first start instead (slower first launch, same result).
+- **`--prepare-xcode`**, **`--platform mac`** and **`--platform mac-app`**. Refused up front.
+
+Games whose shaders are in the RomFS — Mario Wonder, Odyssey, Mario Kart 8 Deluxe, the Zelda
+titles, Metroid Dread — do not need any of that.
+
+## Run a build
+
+```bat
+python -m nspb_qt.win.driver D:\Games\MarioWonder -k D:\keys\prod.keys
+```
+
+The options are the upstream script's (`-h`). The IPA is unsigned, as on a Mac: sign it with
+Sideloadly (Windows), AltStore, or similar, and enable the Increased Memory Limit capability if
+the tool offers it. The IPA name and the RomFS archive come out where the macOS build puts them.
+
+## Open risks
+
+Not verifiable without a real Windows machine; check these in order on the first real build:
+
+1. **Shader libraries on the device.** They come from the Windows Metal compiler, not Xcode's.
+   They must load and render on iOS 26+ (`newLibraryWithURL`). `own_compilers.py` accepts a
+   different compiler version, so the build will not fail — only a device run proves it.
+2. **The real rewritten modules.** Sections hundreds of MB, linked by `ld64.lld`, then signed by
+   the sideloader.
+3. **The UIKit launcher.** `win/ios/Launcher.m` is a hand port of `Launcher.swift`; it honours
+   `section` grouping, a toggle's `on`/`off` values, env-file locking and Reset, but no one has
+   tapped through it on a device.
+4. **Icons without an asset catalog** on iOS 26.
+5. **Line endings.** The checkout must keep LF. The shader chain hashes source bytes, so a CRLF
+   checkout breaks `dmsh_xlate --source-sha`. `.gitattributes` enforces this; a ZIP download
+   with autocrlf on can still break it.
+
+`nspb_qt/win/doctor.py` is the fastest way to narrow a failure: it separates "a tool is missing"
+from "the tool exists but cannot do the job".
+
