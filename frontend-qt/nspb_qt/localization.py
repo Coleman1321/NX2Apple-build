@@ -82,6 +82,8 @@ TABLE: dict[str, tuple[str, str]] = {
     'dep.llvm.hint': ('Windows 上编译 iOS 二进制用（app 内自动下载）', 'builds the iOS binary on Windows (downloaded in-app)'),
     'dep.llvm.downloading': ('正在下载 LLVM-MinGW…（约 250 MB）', 'Downloading LLVM-MinGW… (about 250 MB)'),
     'dep.llvm.done': ('LLVM-MinGW 已安装：%@', 'LLVM-MinGW installed: %@'),
+    'dep.hostArch': ('运行架构', 'host architecture'),
+    'dep.hostArch.hint': ('Windows on ARM 会用 x86-64 工具链模拟运行（较慢但可用）', 'Windows on ARM runs the x86-64 tools emulated (slower, works)'),
     'dep.lld': ('Mach-O 链接器（ld64.lld）', 'Mach-O linker (ld64.lld)'),
     'dep.lld.hint': ('随 LLVM-MinGW 提供', 'comes with LLVM-MinGW'),
     'dep.iossdk.downloading': ('正在下载 iPhoneOS SDK…（约 100 MB）', 'Downloading the iPhoneOS SDK… (about 100 MB)'),

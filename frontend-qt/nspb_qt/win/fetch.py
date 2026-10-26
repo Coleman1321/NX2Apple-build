@@ -251,9 +251,8 @@ def install_git(arch: str | None = None, dest: Path | None = None,
 
 
 def _arch_key() -> str:
-    import platform
-    m = platform.machine().lower()
-    return 'ARM64' if m in ('arm64', 'aarch64') else 'AMD64'
+    """Always AMD64: this app publishes only the x86-64 host tools (see toolchain._arch)."""
+    return 'AMD64'
 
 
 def _download_unverified(url: str, dest: Path, log: Callable[[str], None],

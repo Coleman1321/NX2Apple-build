@@ -42,8 +42,9 @@ ENV_METAL = 'NSPB_METAL_DIR'
 
 # ---------------------------------------------------------------- pinned versions
 
-#: LLVM-MinGW release the port was validated with (LLVM 23.1.4). Two architectures, because a
-#: player may run either Windows build; the ARM64 one matters for Windows-on-ARM.
+#: LLVM-MinGW release the port was validated with (LLVM 23.1.4). x86-64 only: Windows-on-ARM
+#: devices are rare enough that a second 186 MB download (and the packaging that goes with it)
+#: is not worth carrying. The target is iOS arm64 either way — this is the host architecture.
 LLVM_MINGW_VERSION = '20261020'
 LLVM_MINGW_LLVM = '23.1.4'
 LLVM_MINGW_ASSETS = {
@@ -51,11 +52,6 @@ LLVM_MINGW_ASSETS = {
         'name': f'llvm-mingw-{LLVM_MINGW_VERSION}-ucrt-x86_64.zip',
         'sha256': 'fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd',
         'size': 190612575,
-    },
-    'ARM64': {
-        'name': f'llvm-mingw-{LLVM_MINGW_VERSION}-ucrt-aarch64.zip',
-        'sha256': '8f24fedd0b75c674c6c83dec2d76a7ac31a690120212843a17e465ef49854f69',
-        'size': 185737889,
     },
 }
 LLVM_MINGW_RELEASE_URL = ('https://github.com/mstorsjo/llvm-mingw/releases/download/'
@@ -72,11 +68,6 @@ GIT_ASSETS = {
         'name': f'PortableGit-{GIT_VERSION}-64-bit.7z.exe',
         'sha256': 'b1f3e52216e2ed6882d1bebfd4d3fdf319bec40d2edbbf9fd26ec4fd3fce7ed1',
         'size': 57200000,
-    },
-    'ARM64': {
-        'name': f'PortableGit-{GIT_VERSION}-arm64.7z.exe',
-        'sha256': '044110f9d951858452ddb5e4b5415ea0f2b5b2598e794d6fec77fe28b9aa8cc0',
-        'size': 57100000,
     },
 }
 # The tag is v<version>.windows.<n>, and GIT_VERSION already carries the patch number after the
@@ -790,8 +781,20 @@ def missing_required(probes: list[Probe]) -> list[Probe]:
 
 
 def _arch() -> str:
-    """Which llvm-mingw archive this machine needs."""
-    return 'ARM64' if os.environ.get('PROCESSOR_ARCHITECTURE', '').upper() in ('ARM64', 'AARCH64') else 'AMD64'
+    """The llvm-mingw archive to use. Only x86-64 is published by this app.
+
+    A Windows-on-ARM machine runs the x86-64 tools under emulation, which works but is slower;
+    there is no ARM64 archive here on purpose (the device population is too small to justify a
+    second 186 MB download). host_arch_note() says so in the dependency panel.
+    """
+    return 'AMD64'
+
+
+def host_arch_note() -> str | None:
+    """A line to show when the host is ARM64 and will run the x86-64 tools emulated."""
+    if os.environ.get('PROCESSOR_ARCHITECTURE', '').upper() in ('ARM64', 'AARCH64'):
+        return 'Windows on ARM: running the x86-64 toolchain under emulation (slower, works)'
+    return None
 
 
 def download_asset(arch: str | None = None) -> dict:

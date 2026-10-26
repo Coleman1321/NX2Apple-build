@@ -285,6 +285,10 @@ class Model(QObject):
                     d.state = DepState.OK if p.ok else DepState.OK
                     d.detail = p.path if p.ok else self.t('dep.optionalMissing')
                 out.append(d)
+        # Windows-on-ARM gets a visible note: the tools are x86-64 and run emulated.
+        if note := wtc.host_arch_note():
+            out.append(Dep('host_arch', 'dep.hostArch', 'dep.hostArch.hint',
+                           DepState.OK, note))
         return out
 
 
