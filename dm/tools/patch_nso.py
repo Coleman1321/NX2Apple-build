@@ -469,8 +469,15 @@ starts = sorted(x for x in starts if x < TEXT_END)
 # Data blocks in the text (nso_code.py: Absolum's main starts with 1.7 MB of them) are not code: words there that read as rewrite sites are left alone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import nso_code
-DATA_BLOCKS = nso_code.data_blocks(IMG, TEXT_END, md)
-CODE_RANGES = list(zip([0] + [e for _, e in DATA_BLOCKS], [s for s, _ in DATA_BLOCKS] + [TEXT_END]))
+DATA_BLOCKS = nso_code.data_blocks(IMG, TEXT_LO + TEXT_END, md, lo=TEXT_LO)
+# The text segment starts at its memory offset: 0 for an NSO (the image is rebuilt from 0) and
+# 0x80 for an NRO (the file is the image preceded by its header, so text sits at 0x80). Scanning
+# an NRO from 0 read the header's build ID as instructions and reported
+# "44 ldr x18, #0xfffffffffff40370" on Final Fantasy X/X-2 HD Remaster (GitHub issue #14).
+# TEXT_LO is where the code really begins in IMG; data_blocks() gets the same lower bound so its
+# returned offsets are already IMG-absolute and CODE_RANGES needs no further shift.
+TEXT_LO = segs[0][1]
+CODE_RANGES = list(zip([TEXT_LO] + [e for _, e in DATA_BLOCKS], [s for s, _ in DATA_BLOCKS] + [TEXT_LO + TEXT_END]))
 md_lite = Cs(CS_ARCH_ARM64, CS_MODE_ARM)   # no details: the x18 scan reads only the operand text
 R18 = re.compile(r'\b[xw]18\b')
 def x18_words(lo, hi):

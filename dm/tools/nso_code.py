@@ -85,9 +85,12 @@ def fde_ranges(img):
     return sorted(out)
 
 
-def data_blocks(img, text_end, md):
-    """Sorted [(start, end)] of the data blocks in text [0, text_end) (see the module docstring). md: a capstone AArch64 disassembler"""
-    gaps, last = [], 0
+def data_blocks(img, text_end, md, lo=0):
+    """Sorted [(start, end)] of the data blocks in text [lo, text_end) (see the module docstring).
+    md: a capstone AArch64 disassembler. lo is the text segment's offset inside img: 0 for an NSO,
+    0x80 for an NRO, whose file starts with a header (GitHub issue #14 — without it the header's
+    build ID was read as instructions)."""
+    gaps, last = [], lo
     for s, e in fde_ranges(img):
         if s >= text_end: break
         if s > last: gaps.append((last, s))
