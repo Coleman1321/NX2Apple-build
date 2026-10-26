@@ -353,13 +353,24 @@ def patch_nsp(t):
     # --work-dir, so nsp_dir is not where the IPA belongs. The second patch puts the assignment
     # above the out_ipa line and the first drops it from its upstream position (a later position
     # read as an unbound local; issue #15).
+    # Upstream #278 moved out_ipa under `if want_ios:` and indented it: both shapes are handled, so the
+    # sync keeps working before and after that change (the 8-space line is matched only in that shape,
+    # because the 4-space string also occurs inside it).
+    work_line = "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere"
+    out_ipa_4 = "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/"
+    out_ipa_4_new = "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/"
     P.append(('work-dir work', 'args.work_dir', [(
         "    work = nsp_dir / f'{g.id}_build'\n",
         "")]))
-    P.append(('work-dir out_ipa', 'work.parent / g.get', [(
-        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/",
-        "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere\n"
-        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/")]))
+    if "\n    out_ipa = None\n    if want_ios:\n" in t:   # the shape after upstream #278
+        P.append(('work-dir out_ipa', 'work.parent / g.get', [(
+            "\n    out_ipa = None\n    if want_ios:\n",
+            "\n" + work_line + "\n    out_ipa = None\n    if want_ios:\n"),
+            ("\n    " + out_ipa_4, "\n    " + out_ipa_4_new)]))
+    else:
+        P.append(('work-dir out_ipa', 'work.parent / g.get', [(
+            out_ipa_4,
+            work_line + "\n" + out_ipa_4_new)]))
     P.append(('DOTNET_ROOT', 'list-runtimes', [(
         "    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)",
         """    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)
