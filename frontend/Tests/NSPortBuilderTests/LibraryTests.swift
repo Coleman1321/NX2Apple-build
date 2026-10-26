@@ -265,6 +265,112 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(model.doneNote, model.t("msg.stopped"))
     }
 
+    func testPairedDevicesAndSigningTeamsAreRead() {
+        let json = """
+        {"result": {"devices": [
+          {"hardwareProperties": {"reality": "physical", "platform": "iOS", "udid": "00008150-AAAA", "marketingName": "iPhone 17 Pro Max"},
+           "deviceProperties": {"name": "Z", "osVersionNumber": "27.0.1"}, "connectionProperties": {"pairingState": "paired", "transportType": "wired"}},
+          {"hardwareProperties": {"reality": "physical", "platform": "iOS", "udid": "00008110-BBBB", "marketingName": "iPad mini"},
+           "deviceProperties": {"name": "Kunegunde"}, "connectionProperties": {"pairingState": "paired"}},
+          {"hardwareProperties": {"reality": "simulated", "platform": "iOS", "udid": "SIM"}, "deviceProperties": {"name": "Simulator"},
+           "connectionProperties": {"pairingState": "paired", "transportType": "sameMachine"}},
+          {"hardwareProperties": {"reality": "physical", "platform": "iOS", "udid": "UNPAIRED"}, "deviceProperties": {"name": "Other"},
+           "connectionProperties": {"pairingState": "unpaired"}}]}}
+        """
+        let devices = DeviceTools.parseDevices(Data(json.utf8))
+        XCTAssertEqual(devices.map(\.id), ["00008150-AAAA", "00008110-BBBB"])   // physical and paired, reachable first
+        XCTAssertEqual(devices.map(\.reachable), [true, false])
+        let identities = DeviceTools.identities("""
+          1) 0123456789ABCDEF0123456789ABCDEF01234567 "Apple Development: Jo Doe (ABCDE12345)"
+          2) 89ABCDEF0123456789ABCDEF0123456789ABCDEF "Apple Distribution: Jo Doe (TEAM123456)"
+             2 valid identities found
+        """)
+        XCTAssertEqual(identities, ["Apple Development: Jo Doe (ABCDE12345)"])   // development only: distribution does not sign for a device
+        XCTAssertEqual(DeviceTools.team(fromSubject: "subject=UID=X, CN=Apple Development: Jo Doe (ABCDE12345), OU=TEAM123456, O=Jo Doe, C=US"), "TEAM123456")
+        XCTAssertNil(DeviceTools.team(fromSubject: "subject=CN=Something"))
+    }
+
+    /// An iPhone build with a device and a team: the script prepares the Xcode project, xcodebuild signs it for the
+    /// device, devicectl installs it, and the library opens it there. The tools are stand-ins; nothing is signed.
+    @MainActor func testBuildSignsAndInstallsOnTheChosenDevice() throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/python3") else { throw XCTSkip("System Python is required for the process fixture") }
+        let saved = ["repoPath", "buildTarget", "buildOutputDirectory", "installDevice", "signingTeam"].map { ($0, UserDefaults.standard.object(forKey: $0)) }
+        defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
+        let model = BuildModel()
+        model.repoPath = temporary.path
+        model.target = "ios"
+        model.outDir = temporary.path
+        model.pythonPath = "/usr/bin/python3"
+        model.dotnetPath = "/usr/bin/true"
+        model.depsChecked = true
+        model.deps = [BuildModel.Dep(id: "test", name: "test", hint: "", present: true, installCmd: [])]
+        model.installDevice = "00008150-AAAA"
+        model.signingTeam = "TEAM123456"
+        let marker = temporary.appendingPathComponent("dm/tools/nx_extract/Program.cs")
+        try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: marker)
+        let calls = temporary.appendingPathComponent("calls.txt")
+        let script = temporary.appendingPathComponent("scripts/build_ipa_from_nsp.py")
+        try FileManager.default.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        import sys, json, pathlib   # stand-in for the NSP script; it takes '--work-dir'
+        open('\(calls.path)', 'a').write('script ' + ' '.join(sys.argv[1:]) + '\\n')
+        work = pathlib.Path(sys.argv[sys.argv.index('--work-dir') + 1])
+        (work / 'xcode/DmIOS.xcodeproj').mkdir(parents=True)
+        def ev(**e): print(json.dumps(e), flush=True)
+        ev(ev='stage', k=1, n=1, name='prepare Xcode')
+        ev(ev='say', msg='[12:00:00] app name: Test; version: 1.0; bundle ID: org.nxnative.test')
+        ev(ev='stage_end', k=1, name='prepare Xcode', ok=True, summary='', elapsed=1)
+        """.write(to: script, atomically: true, encoding: .utf8)
+        let xcrun = temporary.appendingPathComponent("xcrun")
+        try """
+        #!/usr/bin/python3
+        import sys, json, pathlib, plistlib   # stand-in for xcrun: xcodebuild -list / build, devicectl install / launch
+        a = sys.argv[1:]
+        open('\(calls.path)', 'a').write(' '.join(a) + '\\n')
+        if a[0] == 'xcodebuild' and '-list' in a:
+            print('Command line invocation:'); print(json.dumps({'project': {'schemes': ['DmIOS', 'Test (0100535012974000)']}}))
+        elif a[0] == 'xcodebuild':
+            app = pathlib.Path(a[a.index('-derivedDataPath') + 1]) / 'Build/Products/Release-iphoneos/DmIOS.app'
+            app.mkdir(parents=True)
+            with (app / 'Info.plist').open('wb') as f: plistlib.dump({'CFBundleIdentifier': 'org.nxnative.test'}, f)
+            print('CodeSign ' + str(app), flush=True)
+        elif a[:3] == ['devicectl', 'device', 'install']:
+            print('45%', flush=True); print('App installed', flush=True)
+        """.write(to: xcrun, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: xcrun.path)
+        model.xcrunPath = xcrun.path
+        let base = temporary.appendingPathComponent("Test [\(titleID)].nsp"), keys = temporary.appendingPathComponent("prod.keys")
+        try Data([0]).write(to: base); try Data().write(to: keys)
+        model.slots[0].paths = [base.path]; model.slots[3].paths = [keys.path]
+        let finished = expectation(description: "Signed and installed")
+        let token = model.$done.filter { $0 }.prefix(1).sink { _ in finished.fulfill() }
+        model.startBuild()
+        wait(for: [finished], timeout: 20)
+        withExtendedLifetime(token) {}
+        let log = try String(contentsOf: calls, encoding: .utf8).split(separator: "\n").map(String.init)
+        let work = temporary.appendingPathComponent(titleID + "_build").path
+        XCTAssertTrue(log[0].contains("--prepare-xcode --keep-extracted --team-id TEAM123456"))
+        XCTAssertFalse(log[0].contains(" -o "))   // no IPA: the project goes to the device
+        let build = try XCTUnwrap(log.first { $0.hasPrefix("xcodebuild -project") })
+        for part in ["-scheme Test (0100535012974000)", "-destination id=00008150-AAAA", "-derivedDataPath \(work)/xcode-derived-data",
+                     "-allowProvisioningUpdates", "DEVELOPMENT_TEAM=TEAM123456"] { XCTAssertTrue(build.contains(part), part) }
+        let app = work + "/xcode-derived-data/Build/Products/Release-iphoneos/DmIOS.app"
+        XCTAssertTrue(log.contains("devicectl device install app --device 00008150-AAAA \(app)"))
+        XCTAssertEqual(model.installedOn, "00008150-AAAA")
+        XCTAssertEqual(model.stages.filter { $0.id >= 1001 }.map(\.state), [.done, .done])
+        XCTAssertFalse(model.stages.contains { $0.id == 1000 })   // no RomFS archive: the game files are in the app
+        let library = GameLibrary(file: temporary.appendingPathComponent("library.json"))
+        model.slots[0].paths = [base.path]
+        let id = try XCTUnwrap(library.rememberInputs(model))
+        library.recordCompletedIOS(ipa: model.ipaPath, archive: model.archivePath, app: model.installedAppPath, device: model.installedOn, for: id)
+        XCTAssertTrue(library.games[0].onDevice)
+        let opened = expectation(description: "Opened on the device")
+        model.openOnDevice(udid: model.installedOn, app: model.installedAppPath) { error in XCTAssertNil(error); opened.fulfill() }
+        wait(for: [opened], timeout: 10)
+        XCTAssertTrue(try String(contentsOf: calls, encoding: .utf8).contains("devicectl device process launch --device 00008150-AAAA org.nxnative.test"))
+    }
+
     func testCorruptLibraryIsReportedWithoutOverwritingIt() throws {
         let file = temporary.appendingPathComponent("library.json")
         let data = Data("broken JSON".utf8)
@@ -533,6 +639,17 @@ final class LibraryTests: XCTestCase {
         try capture("build", page: .builds)
         try capture("build-small", width: 900, height: 680, page: .builds)
         try capture("settings", page: .settings)
+        // An iPhone build with a paired device and a team (example values)
+        let previousTarget = model.target
+        model.target = "ios"
+        model.devicesChecked = true
+        model.devices = [AppleDevice(id: "00008150-AAAA", name: "iPhone", model: "iPhone 17 Pro Max", os: "27.0", reachable: true),
+                         AppleDevice(id: "00008110-BBBB", name: "iPad mini", model: "iPad mini", os: "26.2", reachable: false)]
+        model.teams = [SigningTeam(id: "TEAM123456", identity: "Apple Development: Jo Doe (ABCDE12345)")]
+        let previousDevice = model.installDevice, previousTeam = model.signingTeam
+        model.installDevice = "00008150-AAAA"; model.signingTeam = "TEAM123456"
+        try capture("build-install", height: 1300, page: .builds)
+        model.installDevice = previousDevice; model.signingTeam = previousTeam; model.target = previousTarget
         if let json = ProcessInfo.processInfo.environment["NX_LAUNCHER_CAPTURE_SETTINGS"] {   // a launcher.json from dm/games/settings.py
             let first = library.games[0]
             let dm = URL(fileURLWithPath: first.appPath).appendingPathComponent("Contents/Resources/dm")

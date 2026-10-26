@@ -120,6 +120,42 @@ final class BuildModel: ObservableObject {
     /// default under the input folder (issue #5 — an upstream checkout has no --work-dir).
     var effectiveWorkDir = ""
 
+    // ---- Installing on an iPhone or iPad (Xcode with a development certificate) ----
+    // Optional: with a paired device and a signing team chosen, the script prepares the game's Xcode project
+    // (--prepare-xcode, the route its README gives developers), xcodebuild signs it for that device with the
+    // team (Xcode makes the provisioning profile), and devicectl installs it. The game files are inside the app,
+    // so no RomFS copy follows. Without a device or a team the build stays an unsigned IPA, as before.
+    @Published var devices: [AppleDevice] = []
+    @Published var teams: [SigningTeam] = []
+    @Published var devicesChecked = false
+    @Published var installDevice = UserDefaults.standard.string(forKey: "installDevice") ?? "" {
+        didSet { UserDefaults.standard.set(installDevice, forKey: "installDevice") }
+    }
+    @Published var signingTeam = UserDefaults.standard.string(forKey: "signingTeam") ?? "" {
+        didSet { UserDefaults.standard.set(signingTeam, forKey: "signingTeam") }
+    }
+    @Published var installedOn = ""       // the device the last build went to (its UDID)
+    @Published var installedAppPath = ""  // the signed app that went there
+    private var bundleID = ""             // from the script's "bundle ID:" line
+    var xcrunPath = "/usr/bin/xcrun"      // tests stand in for xcodebuild and devicectl
+
+    /// This iPhone build goes straight to a device.
+    var installsDirectly: Bool { target != "mac-app" && !installDevice.isEmpty && !signingTeam.isEmpty }
+
+    func deviceName(_ udid: String) -> String { devices.first { $0.id == udid }?.name ?? "iPhone" }
+
+    /// The paired devices and the signing teams, read in the background (devicectl can take a few seconds).
+    func refreshDevices() {
+        let xcrun = xcrunPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let devices = DeviceTools.devices(xcrun: xcrun), teams = DeviceTools.teams()
+            DispatchQueue.main.async {
+                self.devices = devices; self.teams = teams; self.devicesChecked = true
+                if !teams.contains(where: { $0.id == self.signingTeam }) { self.signingTeam = teams.first?.id ?? "" }
+            }
+        }
+    }
+
     @Published var deps: [Dep] = []
     @Published var depsChecked = false
     /// Whether the dependency list is expanded. nil = not chosen yet: open while something is
@@ -622,6 +658,7 @@ final class BuildModel: ObservableObject {
         guard !running else { return }
         stopping = false
         running = true; done = false; doneNote = ""; stages = []; logTail = ""; lineBuf = ""; chainNoteShown = false
+        installedOn = ""; installedAppPath = ""; bundleID = ""
         guard repoOK else {
             fail(repoPath.isEmpty ? t("msg.repoInvalidEmpty") : String(format: t("msg.repoInvalid"), shortPath(repoPath)))
             return
@@ -697,6 +734,9 @@ final class BuildModel: ObservableObject {
             args += ["--platform", "mac-app"]
             macAppPath = (outDir.isEmpty ? baseDir : outDir) + "/" + tidHex + ".app"
             args += ["-o", macAppPath]
+        } else if installsDirectly {
+            // The game's Xcode project instead of an IPA, signed for the device after the script (signAndInstall)
+            args += ["--prepare-xcode", "--keep-extracted", "--team-id", signingTeam]
         } else if !outDir.isEmpty {
             ipaPath = outDir + "/" + tidHex + ".ipa"
             args += ["-o", ipaPath]
@@ -749,6 +789,8 @@ final class BuildModel: ObservableObject {
                         self.doneNote = self.t(made ? "msg.macAppDone" : "msg.macAppMissing")
                         self.running = false
                         self.cleanupStaging()
+                    } else if self.installsDirectly {
+                        self.signAndInstall()   // keeps running=true until the app is on the device
                     } else {
                         self.packArchive(workDir: self.effectiveWorkDir)   // keeps running=true until the archive is done
                     }
@@ -857,6 +899,7 @@ final class BuildModel: ObservableObject {
         }
         append(line + "\n")
         noteChainChange(line)
+        noteBundleID(line)
         if let range = line.range(of: "output IPA: ") {
             ipaPath = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -885,6 +928,12 @@ final class BuildModel: ObservableObject {
         a.alertStyle = .informational
         a.addButton(withTitle: "OK")
         a.runModal()
+    }
+
+    /// The script's "app name: …; version: …; bundle ID: org.nxnative.…" line: the app to open on the device.
+    private func noteBundleID(_ text: String) {
+        guard let range = text.range(of: #"bundle ID: [A-Za-z0-9.\-]+"#, options: .regularExpression) else { return }
+        bundleID = String(text[range].dropFirst("bundle ID: ".count))
     }
 
     /// One event of `--progress json`: the stage list follows it, and the log gets a readable line (no count updates).
@@ -918,6 +967,7 @@ final class BuildModel: ObservableObject {
             let msg = e["msg"] as? String ?? ""
             append(msg + "\n")
             noteChainChange(msg)
+            noteBundleID(msg)
             if let range = msg.range(of: "output IPA: ") {
                 ipaPath = String(msg[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
@@ -1069,6 +1119,144 @@ final class BuildModel: ObservableObject {
                 stages[i].state = .failed; stages[i].detail = t("msg.archiveNoStart")
             }
             running = false; doneNote = t("msg.archiveIpaOnly"); cleanupStaging()
+        }
+    }
+
+    // MARK: Installing on a device
+
+    /// After the script prepared the Xcode project: sign it for the device, then install it there.
+    private func signAndInstall() {
+        let work = effectiveWorkDir, project = work + "/xcode/DmIOS.xcodeproj", derived = work + "/xcode-derived-data"
+        let device = installDevice, team = signingTeam, name = deviceName(device), xcrun = xcrunPath
+        guard FileManager.default.fileExists(atPath: project) else { return finishInstall(String(format: t("dev.noProject"), shortPath(project))) }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let scheme = Self.scheme(of: project, xcrun: xcrun)
+            DispatchQueue.main.async {
+                guard let scheme else { return self.finishInstall(String(format: self.t("dev.noProject"), self.shortPath(project))) }
+                let sign = [xcrun, "xcodebuild", "-project", project, "-scheme", scheme, "-configuration", "Release",
+                            "-destination", "id=\(device)", "-derivedDataPath", derived, "-allowProvisioningUpdates",
+                            "DEVELOPMENT_TEAM=\(team)", "build"]
+                self.runTool(id: 1001, name: String(format: self.t("dev.signStage"), name), sign, step: Self.xcodeStep) { error in
+                    if let error { return self.finishInstall(String(format: self.t("dev.signFailed"), error)) }
+                    let app = derived + "/Build/Products/Release-iphoneos/DmIOS.app"
+                    guard FileManager.default.fileExists(atPath: app) else { return self.finishInstall(String(format: self.t("dev.noProject"), self.shortPath(app))) }
+                    self.runTool(id: 1002, name: String(format: self.t("dev.installStage"), name),
+                                 [xcrun, "devicectl", "device", "install", "app", "--device", device, app], step: Self.installStep) { error in
+                        if let error { return self.finishInstall(String(format: self.t("dev.installFailed"), error)) }
+                        self.installedOn = device
+                        self.installedAppPath = app
+                        self.finishInstall(nil)
+                    }
+                }
+            }
+        }
+    }
+
+    private func finishInstall(_ failure: String?) {
+        running = false
+        done = failure == nil
+        doneNote = failure ?? String(format: t("dev.installed"), deviceName(installDevice))
+        cleanupStaging()
+    }
+
+    /// The scheme the script made for the game ("<name> (<profile>)"), from `xcodebuild -list`.
+    nonisolated static func scheme(of project: String, xcrun: String) -> String? {
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: xcrun)
+        p.arguments = ["xcodebuild", "-list", "-json", "-project", project]
+        p.standardOutput = out; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let start = data.firstIndex(of: UInt8(ascii: "{")) ?? data.startIndex   // xcodebuild may print a line before the JSON
+        guard let root = try? JSONSerialization.jsonObject(with: data[start...]) as? [String: Any],
+              let schemes = (root["project"] as? [String: Any])?["schemes"] as? [String] else { return nil }
+        return schemes.first { $0 != "DmIOS" } ?? schemes.first
+    }
+
+    /// What xcodebuild is doing, from the actions it prints.
+    nonisolated static func xcodeStep(_ line: String) -> (detail: String, percent: Double?)? {
+        let actions = [("CompileC ", "compiling"), ("SwiftCompile ", "compiling"), ("Ld ", "linking"),
+                       ("PhaseScriptExecution ", "copying the game files"), ("CodeSign ", "signing"), ("ProcessProductPackaging ", "provisioning")]
+        return actions.first { line.hasPrefix($0.0) }.map { ($0.1, nil) }
+    }
+
+    /// devicectl's install progress ("… 45%").
+    nonisolated static func installStep(_ line: String) -> (detail: String, percent: Double?)? {
+        guard let range = line.range(of: #"(\d{1,3})%"#, options: .regularExpression), let n = Double(line[range].dropLast()) else { return nil }
+        return ("installing", min(n, 100))
+    }
+
+    /// One of Xcode's tools as a stage of the build: in its own process group (Stop ends it), its output in the log,
+    /// its progress in the stage. `then` gets nil on success, else the last error line.
+    private func runTool(id: Int, name: String, _ command: [String], step: @escaping (String) -> (detail: String, percent: Double?)?,
+                         then: @escaping (String?) -> Void) {
+        stages.append(Stage(id: id, name: name, state: .running, started: Date()))
+        append("[\(name)] \(command.joined(separator: " "))\n")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: command[0])
+        p.arguments = Array(command.dropFirst())
+        p.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": NSHomeDirectory(), "USER": NSUserName(), "LANG": "en_US.UTF-8"]
+        Self.inOwnGroup(p, python: pythonPath.isEmpty ? "/usr/bin/python3" : pythonPath)
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        var buffer = "", lastError = ""
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let d = h.availableData
+            guard !d.isEmpty, let chunk = String(data: d, encoding: .utf8) else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                buffer += chunk
+                while let nl = buffer.firstIndex(of: "\n") {
+                    let line = String(buffer[..<nl]); buffer = String(buffer[buffer.index(after: nl)...])
+                    self.append(line + "\n")
+                    if line.contains("error:") || line.hasPrefix("ERROR:") { lastError = line.trimmingCharacters(in: .whitespaces) }
+                    if let s = step(line), let i = self.stages.firstIndex(where: { $0.id == id }) {
+                        self.stages[i].detail = s.detail
+                        if let percent = s.percent { self.stages[i].percent = percent }
+                    }
+                }
+            }
+        }
+        p.terminationHandler = { [weak self] status in
+            Self.untrack(status)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                pipe.fileHandleForReading.readabilityHandler = nil
+                if self.stopping {
+                    self.stopping = false; self.running = false
+                    self.resetProgress(); self.doneNote = self.t("msg.stopped"); self.cleanupStaging()
+                    return
+                }
+                let ok = status.terminationStatus == 0
+                if let i = self.stages.firstIndex(where: { $0.id == id }) {
+                    self.stages[i].state = ok ? .done : .failed
+                    if ok { self.stages[i].percent = 100; self.stages[i].detail = "" }
+                }
+                then(ok ? nil : (lastError.isEmpty ? String(format: self.t("msg.exitCode"), status.terminationStatus) : lastError))
+            }
+        }
+        proc = p
+        do { try p.run(); Self.track(p) } catch { then(error.localizedDescription) }
+    }
+
+    /// Start the game on the device it was installed on.
+    func openOnDevice(udid: String, app: String, completion: @escaping (String?) -> Void) {
+        let info = NSDictionary(contentsOfFile: app + "/Info.plist")
+        guard let bundle = info?["CFBundleIdentifier"] as? String else { return completion(String(format: t("dev.noProject"), shortPath(app))) }
+        let xcrun = xcrunPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let p = Process(), out = Pipe()
+            p.executableURL = URL(fileURLWithPath: xcrun)
+            p.arguments = ["devicectl", "device", "process", "launch", "--device", udid, bundle]
+            p.standardOutput = out; p.standardError = out
+            var message: String?
+            do {
+                try p.run()
+                let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                p.waitUntilExit()
+                if p.terminationStatus != 0 { message = text.split(separator: "\n").last(where: { $0.contains("rror") }).map(String.init) ?? text }
+            } catch { message = error.localizedDescription }
+            DispatchQueue.main.async { completion(message) }
         }
     }
 
@@ -1547,9 +1735,39 @@ struct BuilderView: View {
         }
         files.disabled(m.running)
         target
+        if m.target != "mac-app" { install.disabled(m.running) }
         action
         outcome
         progress
+    }
+
+    /// Where an iPhone build goes: exported as an IPA (as before), or signed and installed on a paired device.
+    private var install: some View {
+        let devices = [(value: "", label: m.t("dev.none"))] + m.devices.map { d in
+            (value: d.id, label: d.name + (d.reachable ? "" : " (" + m.t("dev.notConnected") + ")"))
+        }
+        let teams = m.teams.map { t in
+            (value: t.id, label: t.identity.replacingOccurrences(of: #"^(Apple Development|iPhone Developer): "#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #" \([A-Z0-9]+\)$"#, with: "", options: .regularExpression) + " · " + t.id)
+        }
+        return group(m.t("dev.section"), footnote: m.installDevice.isEmpty ? "" : m.t("dev.note")) {
+            row(m.t("dev.target"), detail: m.devicesChecked && m.devices.isEmpty ? m.t("dev.noDevices") : "") {
+                if !m.devicesChecked { ProgressView().controlSize(.small) }
+                Button(m.t("dev.refresh")) { m.refreshDevices() }.buttonStyle(.plain).font(.manrope(13)).foregroundStyle(.secondary)
+                LauncherMenuPicker(options: devices, selection: m.installDevice) { m.installDevice = $0 }
+            }
+            if !m.installDevice.isEmpty {
+                divider
+                if teams.isEmpty {
+                    row(m.t("dev.team"), detail: m.t("dev.noTeam"), dot: LauncherPalette.building) { EmptyView() }
+                } else {
+                    row(m.t("dev.team")) {
+                        LauncherMenuPicker(options: teams, selection: m.signingTeam) { m.signingTeam = $0 }
+                    }
+                }
+            }
+        }
+        .onAppear { if !m.devicesChecked { m.refreshDevices() } }
     }
 
     private var files: some View {
@@ -1664,7 +1882,15 @@ struct BuilderView: View {
                 }
             }
         }
-        if m.done && m.target != "mac-app" {
+        if m.done && !m.installedOn.isEmpty {
+            group(String(format: m.t("dev.installed"), m.deviceName(m.installedOn))) {
+                row(m.t("dev.installedNote"), dot: LauncherPalette.ready) {
+                    Button(String(format: m.t("dev.open"), m.deviceName(m.installedOn))) {
+                        m.openOnDevice(udid: m.installedOn, app: m.installedAppPath) { error in if let error { m.doneNote = error } }
+                    }
+                }
+            }
+        } else if m.done && m.target != "mac-app" {
             group(m.t("install.title")) {
                 VStack(alignment: .leading, spacing: 10) {
                     guideRow(m.t("install.step1")); guideRow(m.t("install.step2")); guideRow(m.t("install.step3"))

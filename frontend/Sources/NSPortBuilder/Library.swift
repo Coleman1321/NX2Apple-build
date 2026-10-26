@@ -22,6 +22,9 @@ struct LibraryGame: Codable, Identifiable, Equatable {
         return app.titleID == titleID
     }
 
+    /// Signed and installed on a paired device (installedDevice is its UDID): Play starts it there.
+    var onDevice: Bool { !installedDevice.isEmpty && FileManager.default.fileExists(atPath: iosAppPath + "/Info.plist") }
+
     var hasIOSBuild: Bool {
         (!ipaPath.isEmpty && FileManager.default.fileExists(atPath: ipaPath)) ||
         (!iosAppPath.isEmpty && FileManager.default.fileExists(atPath: iosAppPath + "/Info.plist"))
@@ -288,10 +291,10 @@ final class GameLibrary: ObservableObject {
     func recordCompletedIOS(ipa: String, archive: String, app: String = "", device: String = "", for id: UUID) {
         guard var game = games.first(where: { $0.id == id }),
               FileManager.default.fileExists(atPath: ipa) || FileManager.default.fileExists(atPath: app + "/Info.plist") else { return }
-        game.ipaPath = ipa
-        game.archivePath = archive
-        game.iosAppPath = app
-        game.installedDevice = device
+        // What this build made; an earlier build's IPA or installed app stays when this one made none
+        if !ipa.isEmpty { game.ipaPath = ipa }
+        if !archive.isEmpty { game.archivePath = archive }
+        if !app.isEmpty { game.iosAppPath = app; game.installedDevice = device }
         upsert(game)
     }
 

@@ -74,7 +74,7 @@ struct ContentView: View {
         .frame(minWidth: 900, idealWidth: 1280, minHeight: 680, idealHeight: 900)
         .onAppear {
             refreshArtwork()
-            if performStartupChecks { library.discover(); fetchArtwork() }
+            if performStartupChecks { library.discover(); fetchArtwork(); m.refreshDevices() }
             if performStartupChecks {
                 m.checkDeps()
                 if m.repoOK && m.repoIsGit { m.checkRepoUpdates(silent: true) }
@@ -257,7 +257,9 @@ struct ContentView: View {
                     .tracking(-1.6).lineLimit(2).shadow(color: .black.opacity(0.25), radius: 12)
                 HStack(spacing: 18) {
                     Button { primaryAction(game) } label: {
-                        Label(m.t(game.isReady ? "library.play" : (game.hasIOSBuild ? "library.showIOS" : "library.newBuild")),
+                        Label(game.isReady ? m.t("library.play")
+                                : (game.onDevice ? String(format: m.t("dev.open"), m.deviceName(game.installedDevice))
+                                   : m.t(game.hasIOSBuild ? "library.showIOS" : "library.newBuild")),
                               systemImage: game.isReady ? "play.fill" : (game.hasIOSBuild ? "iphone" : "hammer.fill"))
                             .font(.manrope(18, .bold))
                             .foregroundStyle(.black).padding(.horizontal, 30).padding(.vertical, 14)
@@ -453,6 +455,14 @@ struct ContentView: View {
     }
 
     private func primaryAction(_ game: LibraryGame) {
+        if !game.isReady && game.onDevice {   // installed on a device: start it there
+            launching = true
+            m.openOnDevice(udid: game.installedDevice, app: game.iosAppPath) { error in
+                launching = false
+                if let error { launchError = error }
+            }
+            return
+        }
         if !game.isReady && game.hasIOSBuild {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: game.ipaPath)])
             return
@@ -476,7 +486,7 @@ struct ContentView: View {
     private func recordBuild() {
         guard m.done, let id = activeBuildID else { return }
         if m.target == "mac-app" { library.recordCompletedApp(path: m.macAppPath, for: id) }
-        else { library.recordCompletedIOS(ipa: m.ipaPath, archive: m.archivePath, for: id) }
+        else { library.recordCompletedIOS(ipa: m.ipaPath, archive: m.archivePath, app: m.installedAppPath, device: m.installedOn, for: id) }
         refreshArtwork()
     }
 

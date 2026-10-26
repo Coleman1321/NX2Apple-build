@@ -20,16 +20,37 @@ writes them as PNG (from a copy of your library, with example paths), and
 2. Add an update or DLC under **Updates & add-on content** when needed.
 3. Choose **This Mac** or **iPhone / iPad**, then **Build game**.
 
-Setup lives under **Settings**: the repository, dependency checks and installers,
-repository updates, app updates, and interface language are still available.
-Missing setup is linked from the build screen. Build details and logs are
-collapsible; the yellow activity bar shows the current step and its percentage
-when the script reports one. Stop waits for the child process to exit before
-allowing another build.
+Setup lives under **Settings**: the games folder, the repository and its updates,
+the dependency checks and installers, and app updates. Missing setup is linked
+from the build screen. The progress shows each of the script's steps with its
+count, the time it has been running and, while the script's estimate lasts, the
+time left; the build log opens under it. **Stop** ends the script and every tool
+it started (the build runs in a process group of its own), and so does quitting
+the app.
 
 A completed Mac build appears in the collection automatically and can be started
-with **Play**. An iPhone build offers its IPA and the existing sideloading and
-RomFS-copy instructions. This app does not install anything on an iPhone.
+with **Play**. An iPhone build, by default, offers its unsigned IPA and the
+sideloading and RomFS-copy instructions.
+
+## Install on an iPhone or iPad
+
+With Xcode, a development certificate (sign in to Xcode with your Apple ID under
+Settings → Accounts) and a device paired with this Mac, an iPhone build can go
+straight to the device: choose it under **Install on** and the **Signing team**
+next to it. The script then prepares the game's Xcode project
+(`--prepare-xcode --team-id`, the route it offers developers) instead of an IPA,
+`xcodebuild -allowProvisioningUpdates` signs it for that device with the team
+(Xcode makes the provisioning profile), and `xcrun devicectl device install app`
+installs it. The game files are inside the app, so there is no RomFS to copy;
+installing a large game takes a few minutes. The game then appears in the
+collection, and its button opens it on the device.
+
+The first time, turn on Developer Mode on the device and trust the developer
+under Settings → General → VPN & Device Management. With a free Apple ID the
+profile expires after seven days. **Don't install, export the IPA** keeps the
+unsigned IPA as before. The devices and teams are read with `devicectl list
+devices` and `security find-identity`; the team is the certificate's
+organizational unit, not the code in its name.
 
 ## Your games folder
 
