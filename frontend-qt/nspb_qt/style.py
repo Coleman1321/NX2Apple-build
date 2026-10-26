@@ -23,7 +23,7 @@ QMainWindow, QDialog, QScrollArea, QWidget#body {{
 }}
 QWidget {{
     color: {TEXT};
-    font-size: 13px;
+    font-size: 9pt;   /* pt, not px: a handheld at 150% scaling keeps readable text and a window that fits */
 }}
 QLabel {{
     background: transparent;
@@ -37,15 +37,15 @@ QScrollArea > QWidget > QWidget {{
 QFrame#card {{
     background: {CARD};
     border: 1px solid {CARD_EDGE};
-    border-radius: 10px;
+    border-radius: 8px;
 }}
 
 /* ---- buttons ---- */
 QPushButton {{
     background: #333a43;
     border: 1px solid #3d444d;
-    border-radius: 7px;
-    padding: 6px 14px;
+    border-radius: 6px;
+    padding: 3px 10px;   /* compact: a 7-inch panel must fit the whole form */
     color: {TEXT};
 }}
 QPushButton:hover {{ background: #3c444e; }}
@@ -56,9 +56,9 @@ QPushButton#primary {{
     background: {ACCENT};
     border: none;
     color: white;
-    font-size: 14px;
+    font-size: 10pt;
     font-weight: 600;
-    padding: 9px 20px;
+    padding: 6px 16px;
 }}
 QPushButton#primary:hover {{ background: #3a9bff; }}
 QPushButton#primary:disabled {{ background: #2c3a4a; color: #6b7683; }}
@@ -67,21 +67,21 @@ QPushButton#danger {{
     background: {RED};
     border: none;
     color: white;
-    font-size: 14px;
+    font-size: 10pt;
     font-weight: 600;
-    padding: 9px 20px;
+    padding: 6px 16px;
 }}
 
 /* ---- labels ---- */
-QLabel#title {{ font-size: 26px; font-weight: 700; background: transparent; }}
-QLabel#subtitle {{ color: {MUTED}; font-size: 13px; background: transparent; }}
-QLabel#note {{ color: {MUTED}; font-size: 12px; background: transparent; }}
-QLabel#mono {{ color: {MUTED}; font-family: Menlo, Consolas, monospace; font-size: 12px; background: transparent; }}
+QLabel#title {{ font-size: 17pt; font-weight: 700; background: transparent; }}
+QLabel#subtitle {{ color: {MUTED}; font-size: 9pt; background: transparent; }}
+QLabel#note {{ color: {MUTED}; font-size: 8pt; background: transparent; }}
+QLabel#mono {{ color: {MUTED}; font-family: Menlo, Consolas, monospace; font-size: 8pt; background: transparent; }}
 QLabel#ok {{ color: {GREEN}; font-weight: 600; background: transparent; }}
 QLabel#warn {{ color: {ORANGE}; font-weight: 600; }}
 QLabel#bad {{ color: {RED}; font-weight: 600; background: transparent; }}
-QLabel#rowname {{ font-size: 14px; background: transparent; }}
-QLabel#footer {{ color: {MUTED}; font-size: 12px; padding: 8px 4px; background: transparent; }}
+QLabel#rowname {{ font-size: 10pt; background: transparent; }}
+QLabel#footer {{ color: {MUTED}; font-size: 8pt; padding: 4px 2px; background: transparent; }}
 
 /* ---- the log ---- */
 QTextEdit {{
@@ -91,7 +91,7 @@ QTextEdit {{
     padding: 8px;
     color: #b9c2cc;
     font-family: Menlo, Consolas, monospace;
-    font-size: 11px;
+    font-size: 8pt;
 }}
 
 /* ---- progress ---- */

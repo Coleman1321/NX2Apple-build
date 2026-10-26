@@ -29,10 +29,12 @@ class MainWindow(QMainWindow):
         # reach it. Fit within 90% of the available area and let the scroll area do the rest.
         avail = self.screen().availableGeometry() if self.screen() else None
         if avail is not None:
-            self.resize(min(1000, int(avail.width() * 0.92)), min(980, int(avail.height() * 0.90)))
+            # Use most of the panel: a 1280x800 handheld at 150% has only ~853x533 logical pixels,
+            # so the margins must be small and the height is what matters.
+            self.resize(min(900, int(avail.width() * 0.98)), min(900, int(avail.height() * 0.96)))
         else:
-            self.resize(1000, 980)
-        self.setMinimumSize(560, 400)
+            self.resize(900, 800)
+        self.setMinimumSize(420, 300)   # the scroll area carries everything below this
         self._mono = QFontDatabase.systemFont(QFontDatabase.FixedFont)
 
         root = QWidget()
@@ -47,8 +49,8 @@ class MainWindow(QMainWindow):
         body = QWidget()
         body.setObjectName('body')
         self.body = QVBoxLayout(body)
-        self.body.setContentsMargins(22, 20, 22, 18)
-        self.body.setSpacing(14)
+        self.body.setContentsMargins(12, 10, 12, 10)
+        self.body.setSpacing(8)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
 
@@ -75,11 +77,11 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> None:
         row = QHBoxLayout()
-        row.setSpacing(14)
+        row.setSpacing(8)
         badge = QLabel('🎮')
-        badge.setFixedSize(54, 54)
+        badge.setFixedSize(40, 40)
         badge.setAlignment(Qt.AlignCenter)
-        badge.setStyleSheet(f'background: {GREEN}; border-radius: 13px; font-size: 26px;')
+        badge.setStyleSheet(f'background: {GREEN}; border-radius: 10px; font-size: 18px;')
         row.addWidget(badge)
         left = QVBoxLayout()
         left.setSpacing(3)
@@ -102,10 +104,10 @@ class MainWindow(QMainWindow):
         box = QFrame()
         box.setObjectName('card')
         lay = QVBoxLayout(box)
-        lay.setContentsMargins(18, 16, 18, 16)
-        lay.setSpacing(10)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(6)
         head = QHBoxLayout()
-        head.setSpacing(8)
+        head.setSpacing(6)
         t = QLabel(title)
         f = t.font()
         f.setBold(True)
@@ -160,8 +162,8 @@ class MainWindow(QMainWindow):
         self.folder_label.setObjectName('mono')
         lay.addWidget(self.folder_label)
         grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(9)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(4)
         grid.setColumnStretch(2, 1)
         self.input_rows: dict[str, tuple[QLabel, QLabel]] = {}
         specs = [('base', 'data.base', False), ('update', 'data.update', True),
@@ -170,12 +172,12 @@ class MainWindow(QMainWindow):
             dot = QLabel('○')
             dot.setFixedWidth(14)
             name = QLabel(self.m.t(l10n))
-            name.setFixedWidth(150)
+            name.setFixedWidth(110)
             val = QLabel('—')
             val.setObjectName('mono')
             val.setTextInteractionFlags(Qt.TextSelectableByMouse)
             btn = QPushButton(self.m.t('data.choose'))
-            btn.setFixedWidth(92)
+            btn.setFixedWidth(72)
             btn.clicked.connect(lambda _=False, k=key: self._choose_input(k))
             grid.addWidget(dot, i, 0)
             grid.addWidget(name, i, 1)
@@ -205,7 +207,7 @@ class MainWindow(QMainWindow):
         head.addWidget(recheck)
         lay.addLayout(head)
         self.deps_container = QVBoxLayout()
-        self.deps_container.setSpacing(7)
+        self.deps_container.setSpacing(3)
         lay.addLayout(self.deps_container)
 
     def _build_progress(self) -> None:
@@ -216,7 +218,7 @@ class MainWindow(QMainWindow):
         self.overall.setTextVisible(False)
         lay.addWidget(self.overall)
         self.stages_container = QVBoxLayout()
-        self.stages_container.setSpacing(7)
+        self.stages_container.setSpacing(3)
         lay.addLayout(self.stages_container)
 
     def _build_log(self) -> None:
@@ -224,18 +226,18 @@ class MainWindow(QMainWindow):
         self.log.setReadOnly(True)
         self.log.setFont(self._mono)
         self.log.setPlaceholderText(self.m.t('log.placeholder'))
-        self.log.setMinimumHeight(150)
+        self.log.setMinimumHeight(90)
         self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.body.addWidget(self.log, 1)
 
     def _build_footer(self) -> None:
         wrap = QWidget()
         row = QHBoxLayout(wrap)
-        row.setContentsMargins(22, 10, 22, 12)
+        row.setContentsMargins(12, 6, 12, 8)
         row.setSpacing(10)
         self.build_btn = QPushButton(self.m.t('build.start'))
         self.build_btn.setObjectName('primary')
-        self.build_btn.setMinimumWidth(150)
+        self.build_btn.setMinimumWidth(110)
         self.build_btn.clicked.connect(self._build_clicked)
         row.addWidget(self.build_btn)
         self.footer = QLabel('')
@@ -311,13 +313,13 @@ class MainWindow(QMainWindow):
             row = QWidget()
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(8)
+            h.setSpacing(6)
             mark = QLabel('●' if d.ok else ('◐' if d.state is DepState.OLD else '✕'))
             mark.setFixedWidth(14)
             mark.setStyleSheet(f'color: {GREEN if d.ok else (ORANGE if d.state is DepState.OLD else RED)};')
             h.addWidget(mark)
             name = QLabel(self.m.t(d.title_key))
-            name.setFixedWidth(190)
+            name.setFixedWidth(140)
             h.addWidget(name)
             detail = d.detail
             if detail.startswith('dep.'):
@@ -373,7 +375,7 @@ class MainWindow(QMainWindow):
             row = QWidget()
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(8)
+            h.setSpacing(6)
             mark = {'done': '●', 'running': '◐', 'failed': '✕'}.get(st.state, '○')
             colour = {'done': GREEN, 'failed': RED}.get(st.state, MUTED)
             lab = QLabel(mark)

@@ -234,10 +234,10 @@ class Model(QObject):
         p = by_id.get('llvm')
         if p:
             detail = p.path if p.ok else (p.detail or '')
-            install: list[str] = []
-            if not p.ok:
-                # the app downloads the pinned LLVM-MinGW itself; no command line needed
-                install = []
+            # A missing LLVM is installable in-app: fetch.install_llvm downloads the pinned
+            # LLVM-MinGW and verifies its SHA-256. The marker tells install_dep to run that
+            # instead of a command line.
+            install = [] if p.ok else ['__win__:llvm']
             out.append(Dep('llvm', 'dep.llvm', 'dep.llvm.hint', state(p), detail,
                            install=install))
         p = by_id.get('lld')
@@ -253,7 +253,9 @@ class Model(QObject):
                 detail = p.path
             elif p.state == 'wrong':
                 detail = p.detail
-            out.append(Dep('ios_sdk', 'dep.iossdk', 'dep.iossdk.hint', state(p), detail))
+            install = [] if p.ok else ['__win__:ios_sdk']
+            out.append(Dep('ios_sdk', 'dep.iossdk', 'dep.iossdk.hint', state(p), detail,
+                           install=install))
 
         # Metal
         p = by_id.get('metal')
@@ -410,6 +412,11 @@ class Model(QObject):
         """Run a dependency's fix on a thread, streaming its output to the log."""
         if not dep.install:
             return
+        # A Windows toolchain row carries a marker instead of a command line: the download is
+        # in-process (nspb_qt.win.fetch), so there is nothing to spawn.
+        if dep.install[0].startswith('__win__:'):
+            self._install_win(dep, dep.install[0].split(':', 1)[1])
+            return
         dep.installing = True
         self.depsChanged.emit()
 
@@ -432,6 +439,42 @@ class Model(QObject):
                 except OSError as e:
                     self.logAppended.emit(f'{e}\n')
                     ok = False
+            dep.installing = False
+            self.depsChanged.emit()
+            self.check_deps()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _install_win(self, dep: Dep, what: str) -> None:
+        """Download and unpack a Windows toolchain piece, with progress in the log.
+
+        Runs on a thread. Every failure names the step and what to do by hand, because a
+        download can fail for reasons the app cannot fix (a proxy, a proxy that blocks GitHub,
+        an Apple ID needed for the Metal tools).
+        """
+        dep.installing = True
+        self.depsChanged.emit()
+
+        def work() -> None:
+            ok = False
+            try:
+                from .win import fetch as wf, toolchain as wtc
+                if what == 'llvm':
+                    self.logAppended.emit(self.t('dep.llvm.downloading') + '\n')
+                    path = wf.install_llvm(log=lambda s: self.logAppended.emit(str(s) + '\n'),
+                                           progress=lambda d, t_: self.logAppended.emit(
+                                               f'  {d // 1048576} MB' + (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
+                    self.logAppended.emit(self.t('dep.llvm.done', str(path)) + '\n')
+                    ok = True
+                elif what == 'ios_sdk':
+                    self.logAppended.emit(self.t('dep.iossdk.downloading') + '\n')
+                    from .win import sdk_fetch as sf
+                    path = sf.clone_sdk(log=lambda s: self.logAppended.emit(str(s) + '\n'))
+                    self.logAppended.emit(self.t('dep.iossdk.done', str(path)) + '\n')
+                    ok = True
+            except Exception as e:      # DownloadError, OSError, a missing attribute: all reported
+                self.logAppended.emit(self.t('dep.install.fail', str(e)) + '\n')
+                ok = False
             dep.installing = False
             self.depsChanged.emit()
             self.check_deps()
