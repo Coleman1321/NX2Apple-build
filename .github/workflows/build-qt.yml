@@ -62,6 +62,15 @@ jobs:
             --collect-submodules PySide6.QtCore \
             --collect-submodules PySide6.QtGui \
             --collect-submodules PySide6.QtWidgets \
+            --collect-submodules nspb_qt \
+            --hidden-import nspb_qt.win.toolchain \
+            --hidden-import nspb_qt.win.fetch \
+            --hidden-import nspb_qt.win.sdk_fetch \
+            --hidden-import nspb_qt.win.driver \
+            --hidden-import nspb_qt.win.shim \
+            --hidden-import nspb_qt.win.build_app \
+            --hidden-import nspb_qt.win.fix_ipa_modes \
+            --hidden-import nspb_qt.win.doctor \
             --collect-data PySide6 \
             --hidden-import PySide6.QtCore \
             --hidden-import PySide6.QtGui \

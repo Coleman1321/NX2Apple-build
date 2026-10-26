@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         head = QHBoxLayout()
         head.setSpacing(6)
         t = QLabel(title)
+        t.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         f = t.font()
         f.setBold(True)
         f.setPointSize(13)
@@ -133,6 +134,8 @@ class MainWindow(QMainWindow):
         self.repo_path_label = QLabel('')
         self.repo_path_label.setObjectName('mono')
         self.repo_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.repo_path_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # long paths shrink, the buttons stay on screen
+        self.repo_path_label.setMinimumWidth(60)
         row.addWidget(self.repo_path_label, 1)
         self.choose_btn = QPushButton(self.m.t('repo.choose'))
         self.choose_btn.clicked.connect(self._choose_repo)
@@ -176,6 +179,7 @@ class MainWindow(QMainWindow):
             val = QLabel('—')
             val.setObjectName('mono')
             val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            val.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # filenames are long; the Choose button must stay visible
             btn = QPushButton(self.m.t('data.choose'))
             btn.setFixedWidth(72)
             btn.clicked.connect(lambda _=False, k=key: self._choose_input(k))
@@ -260,9 +264,10 @@ class MainWindow(QMainWindow):
     def _refresh_all(self) -> None:
         self.subtitle.setText(self.m.t('app.subtitle'))
         self.lang_btn.setText(self.m.lang.toggle_label)
-        self.repo_path_label.setText(
-            pu.short_path(self.m.repo_path) if self.m.repo_ok
-            else (self.m.repo_path or self.m.t('repo.notFound')))
+        full = (pu.short_path(self.m.repo_path) if self.m.repo_ok
+                else (self.m.repo_path or self.m.t('repo.notFound')))
+        self.repo_path_label.setText(full)
+        self.repo_path_label.setToolTip(full)   # the full path on hover when elided
         if self.m.repo_ok:
             self.repo_dot.setStyleSheet(f'color: {GREEN};')
             self.repo_status.setText(self.m.repo_status or
@@ -333,6 +338,8 @@ class MainWindow(QMainWindow):
             lab = QLabel(detail)
             lab.setObjectName('mono')
             lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            lab.setToolTip(detail)
             h.addWidget(lab, 1)
             if not d.ok:
                 if d.install:
