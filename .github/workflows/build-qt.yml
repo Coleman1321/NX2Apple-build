@@ -49,16 +49,19 @@ jobs:
         shell: bash
         run: |
           # --windowed: no console window. --name: the exe/bundle name.
-          # --collect-all PySide6 keeps the Qt plugins (platforms/, styles/) that a
-          # windowed build otherwise drops, which is the usual "could not find the
-          # Qt platform plugin windows" failure.
-          # --collect-all PySide6 keeps the Qt platform plugins a windowed build
-          # otherwise drops, but it also drags in every Qt module (~180 MB of which
-          # QtWebEngine alone is 100+). The exclusions below cut the package from
-          # ~250 MB to ~70 MB: this app draws widgets and nothing else.
+          # --collect-all PySide6 copies the whole PySide6 package and OVERRIDES
+          # --exclude-module (measured: the package stayed 247 MB with 38 exclusions in
+          # place). Collect only the modules this app imports, plus the platform plugin
+          # directory a windowed build would otherwise miss.
           pyinstaller --noconfirm --clean --windowed \
             --name "NS Port Builder" \
-            --collect-all PySide6 \
+            --collect-submodules PySide6.QtCore \
+            --collect-submodules PySide6.QtGui \
+            --collect-submodules PySide6.QtWidgets \
+            --collect-data PySide6 \
+            --hidden-import PySide6.QtCore \
+            --hidden-import PySide6.QtGui \
+            --hidden-import PySide6.QtWidgets \
             --exclude-module PySide6.QtWebEngineCore \
             --exclude-module PySide6.QtWebEngineWidgets \
             --exclude-module PySide6.QtWebEngineQuick \
@@ -99,6 +102,28 @@ jobs:
             --exclude-module PySide6.QtGraphsWidgets \
             --paths . \
             run_gui.py
+
+
+      - name: Trim the bundle
+        shell: bash
+        run: |
+          # PyInstaller's Qt hooks copy libraries that shiboken links against even when the app
+          # never imports them. QtPdf (6.9 MB), QtQuick (5.8) and QtQml (4.6) reference each
+          # other and nothing we use, so they go. QtDBus stays: QtGui itself links it (removing
+          # it makes the app die at import with "Library not loaded: @rpath/QtDBus").
+          cd frontend-qt/dist
+          if [ -d "NS Port Builder.app" ]; then
+            L="NS Port Builder.app/Contents/Frameworks/PySide6/Qt/lib"
+            for drop in QtPdf QtQuick QtQuickWidgets QtQml QtQmlModels QtQmlWorkerScript QtVirtualKeyboard; do
+              rm -rf "$L/$drop.framework" 2>/dev/null || true
+            done
+          fi
+          if [ -d "NS Port Builder" ]; then
+            for drop in Qt6Pdf Qt6Quick Qt6QuickWidgets Qt6Qml Qt6QmlModels Qt6QmlWorkerScript Qt6VirtualKeyboard; do
+              rm -f "NS Port Builder/$drop.dll" 2>/dev/null || true
+            done
+          fi
+          du -sh "NS Port Builder.app" "NS Port Builder" 2>/dev/null || true
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
