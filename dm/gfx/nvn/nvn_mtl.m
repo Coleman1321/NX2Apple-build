@@ -351,8 +351,13 @@ void mtl_init(void) {
     if (!g_dev) MDIE("no Metal device");
     if (!g_dev.hasUnifiedMemory) MDIE("needs a unified-memory device (zero-copy memory pools)");
     g_bc_gpu = [g_dev supportsBCTextureCompression];
-    g_bc_cpu = !g_bc_gpu && DM_GAME_TEX_BC_CPU;
-    if (g_bc_cpu) MLOG("BC textures: this GPU has no BC support, decoding them on the CPU (profile tex_bc_cpu)");
+    // DM_TEX_BC_CPU overrides the profile at run time, which is what lets the app offer a switch
+    // without rebuilding: 1 turns it on, 0 off, unset keeps the profile's tex_bc_cpu. It only ever
+    // applies to a GPU without BC support — on hardware that has it the GPU path is always better.
+    const char *bc_env = getenv("DM_TEX_BC_CPU");
+    int bc_want = bc_env ? atoi(bc_env) : DM_GAME_TEX_BC_CPU;
+    g_bc_cpu = !g_bc_gpu && bc_want;
+    if (g_bc_cpu) MLOG("BC textures: this GPU has no BC support, decoding them on the CPU (%s)", bc_env ? "DM_TEX_BC_CPU" : "profile tex_bc_cpu");
     g_q = [g_dev newCommandQueue];
     // A device without Metal 4 (the paravirtualized GPU of a virtual Mac, such as GitHub's macos-26 runner: no residency set, no MTL4CommandQueue) cannot run the NVN layer. The GL and
     // Vulkan layers draw on classic queues of their own and need only the device (mtl_device_classic): there the classic part starts and presents are dropped, which is all a

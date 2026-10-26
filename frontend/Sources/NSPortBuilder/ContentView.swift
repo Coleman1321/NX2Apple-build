@@ -86,6 +86,13 @@ final class BuildModel: ObservableObject {
     @Published var target = (UserDefaults.standard.string(forKey: "buildTarget") ?? "ios") {
         didSet { UserDefaults.standard.set(target, forKey: "buildTarget") }
     }
+    /// Decode BC-compressed textures on the CPU. Only relevant for GPUs without BC support
+    /// (A15/A16 and older): on a device that has it the GPU path is always better, so the switch
+    /// is a compatibility option and defaults off. Passed as DM_TEX_BC_CPU through --env-file,
+    /// which the host reads at start-up — no rebuild of the host needed.
+    @Published var bcOnCPU = UserDefaults.standard.bool(forKey: "bcOnCPU") {
+        didSet { UserDefaults.standard.set(bcOnCPU, forKey: "bcOnCPU") }
+    }
     @Published var archivePath = ""  // the romfs folder the pack wrote
     /// Where this build's folder actually is: --work-dir when the checkout has it, else the script's
     /// default under the input folder (issue #5 — an upstream checkout has no --work-dir).
@@ -584,6 +591,19 @@ final class BuildModel: ObservableObject {
         }
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
                     "--progress", "lines"]
+        // A compatibility switch the player turned on: written to a small env file the pipeline
+        // copies into the app bundle (main.m sets one variable per line at boot). Only for an IPA;
+        // a Mac app runs on this Mac's GPU, which always has BC support.
+        if bcOnCPU && target != "mac-app" {
+            let envPath = NSTemporaryDirectory() + "nspb-env-\(UUID().uuidString.prefix(8)).txt"
+            do {
+                try "DM_TEX_BC_CPU=1\n".write(toFile: envPath, atomically: true, encoding: .utf8)
+                args += ["--env-file", envPath]
+                say(t("msg.bcOn"))
+            } catch {
+                say(String(format: t("msg.bcEnvFailed"), error.localizedDescription))
+            }
+        }
         if hasWorkDir { args += ["--work-dir", workDir] }
         let macApp = target == "mac-app"
         if macApp {
@@ -1237,6 +1257,7 @@ struct ContentView: View {
             header
             repository
             inputs
+            buildOptions
             dependencies
             if m.done { installGuide }
             stagesView
@@ -1363,6 +1384,32 @@ struct ContentView: View {
     }
 
     // ---- 游戏数据 ----
+
+    // ---- build options ----
+
+    /// Output-specific switches. A Mac app runs on this Mac's GPU (which always has BC support),
+    /// so the compatibility option is only shown for an iPhone build.
+    @ViewBuilder private var buildOptions: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("slider.horizontal.3", m.t("opt.title"), note: m.t("opt.note"))
+                if m.target == "mac-app" {
+                    Text(m.t("opt.macNoBc"))
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                } else {
+                    Toggle(isOn: $m.bcOnCPU) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(m.t("opt.bc")).font(.system(size: 13))
+                            Text(m.t("opt.bc.note"))
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(m.running)
+                }
+            }.padding(8)
+        }
+    }
 
     private var inputs: some View {
         GroupBox {
