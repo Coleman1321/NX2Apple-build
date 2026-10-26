@@ -57,7 +57,7 @@ void dm_pad_set_player(int p, uint64_t buttons, int32_t lx, int32_t ly, int32_t 
 void dm_pad_set(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry) { dm_pad_set_player(0, buttons, lx, ly, rx, ry); }
 uint64_t dm_input_samples(void) { return (uint64_t)atomic_load(&g_sampling); }
 // DM_KEYS scripted input (for tests): "seconds:key[+key][~hold seconds][*count/interval seconds],...", e.g. "8:A,12:A,15:Down~0.5,16:A+B,40:A*80/2" (A every 2 s from 40 s on, 80 times). Key names A B X Y LS RS L R ZL ZR (plus the sticks LLeft LUp LRight LDown and RLeft RUp RRight RDown) Plus Minus Left Up Right Down, left stick LLeft LUp LRight LDown,
-//   T<x>x<y> = a touch at normalized picture coordinates (origin top left) for the hold time, and Shake = the controller shaken for the hold time (at least one whole shake);
+//   L<x>/<y> and R<x>/<y> = a stick tilted part way (each -1 to 1, y up: a cursor that a full tilt sweeps past its target), T<x>x<y> = a touch at normalized picture coordinates (origin top left) for the hold time, and Shake = the controller shaken for the hold time (at least one whole shake);
 //   held 0.15 s by default, at most 1024 steps (counted after repeats are expanded). Goes through player 1's controller path (dm_pad_set), ORed with keyboard / touch, neither overrides the other. Times are counted from host start.
 //   An f before the time means a presented frame number ("f7600:A", and the repeat interval counts frames too): when the machine is busy seconds drift from the game's progress, frame numbers do not (used for the Zelda BotW opening route)
 typedef struct { double at, hold; uint64_t btn; int32_t lx, ly, rx, ry; int frame, tap; float tx, ty; } key_step;   // tap: a touch at (tx, ty), normalized
@@ -87,6 +87,11 @@ static void parse_keys(char *spec, key_step *st) {
         // right stick the same way: RLeft RUp RRight RDown (camera; Super Mario Odyssey's first hint asks for it)
         static const char *const rsticks[4] = {"RLeft", "RUp", "RRight", "RDown"};
         for (int d = 0; d < 4; d++) if (!strcasecmp(k, rsticks[d])) { if (sx[d]) st->rx = sx[d]; if (sy[d]) st->ry = sy[d]; found = 1; }
+        // a stick tilted part way: L<x>/<y> or R<x>/<y>, each from -1 to 1 (y up), e.g. "L-0.6/-0.4". OCTOPATH TRAVELER II's traveler selection opens a traveler's card only while
+        // its quill cursor rests on them; a fully tilted stick swept the cursor past every traveler (a tilt of 0.3 is inside its dead zone)
+        float fx, fy; if ((k[0] == 'L' || k[0] == 'R') && strchr(k, '/') && sscanf(k + 1, "%f/%f", &fx, &fy) == 2 && fabsf(fx) <= 1 && fabsf(fy) <= 1) {
+            int32_t vx = (int32_t)lrintf(fx * 32767), vy = (int32_t)lrintf(fy * 32767);
+            if (k[0] == 'L') { st->lx = vx; st->ly = vy; } else { st->rx = vx; st->ry = vy; } found = 1; }
         // a touch: T<x>x<y> with x, y normalized on the picture, origin top left ("f3000:T0.31x0.62", Super Mario Galaxy's file select in handheld mode)
         float tx, ty; if ((k[0] == 'T' || k[0] == 't') && sscanf(k + 1, "%fx%f", &tx, &ty) == 2) { st->tap = 1; st->tx = tx; st->ty = ty; found = 1; }
         if (!strcasecmp(k, "Shake")) { st->btn |= DM_BTN_SHAKE; found = 1; }   // the six-axis sensor shaken (Super Mario Odyssey's cap throw)
@@ -350,9 +355,10 @@ static uint32_t vib_targets(uint32_t h) {
 static void vib_send(const uint32_t *handles, const dm_vibration *values, int n) {
     if (!handles || !values || n <= 0) return;
     dm_vibration_update updates[DM_PLAYERS * 2];
-    uint32_t used = 0;
+    uint32_t used = 0; int unrouted = 0;
     for (int i = 0; i < n; i++) {
         uint32_t targets = vib_targets(handles[i]);
+        if (!targets) unrouted++;
         for (int p = 0; p < DM_PLAYERS; p++) if (targets >> p & 1) {
             int m = handles[i] >> 16 & 1, k = p * 2 + m;
             updates[k] = (dm_vibration_update){p, m, values[i]}; used |= 1u << k;
@@ -360,16 +366,31 @@ static void vib_send(const uint32_t *handles, const dm_vibration *values, int n)
     }
     int count = 0;
     for (int k = 0; k < DM_PLAYERS * 2; k++) if (used >> k & 1) updates[count++] = updates[k];
+    if (getenv("DM_RUMBLE_LOG")) {   // Count input values before deduplicating motors, including partially routed batches.
+        static pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
+        static uint64_t sends, dropped, t0; static float peak; struct timespec ts;
+        pthread_mutex_lock(&log_lock);   // SDK sends can arrive from several game threads.
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t now = ts.tv_sec; sends += n; dropped += unrouted;
+        for (int i = 0; i < n; i++) peak = fmaxf(peak, fmaxf(values[i].amplitude_low, values[i].amplitude_high));
+        if (now != t0) { LOG("rumble: %llu values sent, %llu with no output, peak amplitude %.2f, handle %#x", sends, dropped, peak, handles[0]); sends = dropped = 0; peak = 0; t0 = now; }
+        pthread_mutex_unlock(&log_lock);
+    }
     dm_haptics_send(updates, count);
 }
 HLE_FORCE("_ZN2nn3hid20IsVibrationPermittedEv", "vibration permission: enabled and an output available", unsigned, h_hid_VibPermit, void) { return dm_haptics_available() != 0; }
+// Games can cache handles once at startup, before GameController routes the pad's haptics (Unicorn Overlord kept an empty answer and sent every value to handle 0).
+// On Horizon handles are computed from npad id and style (libnx _hidGetVibrationDeviceHandles); vib_send checks for an output at each send.
 HLE_FORCE("_ZN2nn3hid25GetVibrationDeviceHandlesEPNS0_21VibrationDeviceHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE", "vibration devices of the connected controller",
           int, h_hid_VibHandles, uint32_t *h, int n, const uint32_t *id, uint32_t style) {
-    if (!h || !id || n <= 0 || !(style & style_of(*id))) return 0;
+    if (!h || !id || n <= 0 || !(style & style_of(*id)) || !dm_haptics_enabled()) {
+        if (getenv("DM_RUMBLE_LOG") && id) LOG("rumble: game asked for vibration handles of npad %u style %#x: none (connected style %#x, rumble %s)", *id, style, style_of(*id), dm_haptics_enabled() ? "on" : "off");
+        return 0;
+    }
     uint32_t base = (*id << 8) | (*id == NPAD_HANDHELD ? 4u : 3u);
-    if (!vib_targets(base)) return 0;
     int count = n < 2 ? n : 2;
     for (int i = 0; i < count; i++) h[i] = base | (uint32_t)i << 16;
+    if (getenv("DM_RUMBLE_LOG")) LOG("rumble: game asked for vibration handles of npad %u style %#x: %d, first %#x", *id, style, count, h[0]);
     return count;
 }
 HLE_FORCE("_ZN2nn3hid25InitializeVibrationDeviceERKNS0_21VibrationDeviceHandleE", "vibration: initialize one channel", void, h_hid_InitVib, const uint32_t *h) {

@@ -43,12 +43,13 @@ The tables below are what to check by hand afterwards.
 ## SVCs and instructions to rewrite
 
 - `dm/tools/insn_census.py <module.nso> [--sites tsv]` counts every site the rewriter must handle: `svc`, `mrs/msr tpidr*`, `x18` use, exclusive windows (`ldxr`/`stxr`), timers (`cntpct`, `cntfrq`), cache maintenance, and system registers.
-- Run `DM_RULESET=native python3 dm/tools/patch_nso.py <nso> <out dir> <name>` and check that its counts match the census. New system registers appear with new SDKs: SDK 16 reads `CTR_EL0` (macOS traps it), now rewritten to a constant.
+- Run `python3 dm/tools/patch_nso.py <nso> <out dir> <name>` and check that its counts match the census. New system registers appear with new SDKs: SDK 16 reads `CTR_EL0` (macOS traps it), now rewritten to a constant.
 - Mario's SVC set was a subset of D2R's. A new SVC needs a case in `hle_svc.c` / `hle_thread.c`; the default case logs `SVC %#x … (placeholder returns success)` once and returns success, which is wrong for anything that returns data.
 
 ## NVN surface
 
-- Find how the game obtains NVN entry points. D2R wrote slots with `adrp`-to-slot code (`dm/gfx/tools/nvn_slots.py`); Mario's loader (`main+0x1070910`) calls `GetProcAddress` per name and stores through the GOT (`dm/tools/nvn_slots_got.py <main.bin> <loader> <text end> <out tsv>`). The output lists every fetched function and every call site.
+- First check that the game draws with NVN at all. Importing `nvnBootstrapLoader` is not enough: Digimon Story Cyber Sleuth: Complete Edition imports it and EGL, makes an NVN device for a helper beside its movie player, and renders everything with NVIDIA's desktop OpenGL (`eglBindAPI(EGL_OPENGL_API)`, a glad loader asking `eglGetProcAddress` for 2,956 names). Read the graphics setup that calls `nvnBootstrapLoader` / `eglGetDisplay` / `vkCreateInstance`, and count which loaded entry points the code really reaches: for a glad or NVN C loader that stores each pointer in a global, the GOT slots of those globals that code outside the loader loads (Digimon: 79 GL functions, 30 NVN ones, all in that helper; Balatro's LÖVE: about 150 GL functions, whose globals its code reaches through registers, which `dm/tools/loader_census.py` follows). `profile_guess.py` decides `graphics gl` when `main` imports `eglCreateWindowSurface` and names `glShaderSource`; the host's GL layer is `dm/gfx/gl/hle_gl.m` ([04](04-graphics.md)).
+- Find how the game obtains NVN entry points. Some games write the slots with `adrp`-to-slot code; Mario's loader (`main+0x1070910`) calls `GetProcAddress` per name and stores through the GOT (`dm/tools/nvn_slots_got.py <main.bin> <loader> <text end> <out tsv>`). The output lists every fetched function and every call site.
 - Mario fetched 534 functions and called 236 of them; 79 were new to the host (CommandBuffer 31, Texture 15, Buffer 10, Sampler 10). Names the host doesn't know at all go into `dm/gfx/nvn/names.txt` → `gen_protos.py`.
 
 ## Data containers that matter to the host
@@ -56,7 +57,7 @@ The tables below are what to check by hand afterwards.
 | What | Where to look | Mario |
 |---|---|---|
 | Shaders | Every container that embeds NVN shader binaries, not just the obvious archive. Scan all of RomFS and `main` (see [04](04-graphics.md)) | `Shader/*.bfsha` (BNSH), `Lib/agl/*.sarc` + `Shader/Secred.sarc` (agl BAHS `sharcb`), `Effect/*.esetb` (BNSH), `Layout/*.blarc` (BNSH), and two BNSH inside `main` |
-| Heap budget | A heap-definition file, if the engine has one | `System/HeapSize/*.HeapDef.byml`: per-subsystem heaps in KB, and a 1.75 GB `VirtualAddressMemory` mapped on demand into the alias region (drives the address-space partition, [03](03-bringup.md)) |
+| Heap budget | A heap-definition file, if the engine has one | `System/HeapSize/*.HeapDef.byml`: per-subsystem heaps in KB, and a 1.75 GB `VirtualAddressMemory` mapped on demand into the alias region (drives the address-space partition, [memory.md](../reference/memory.md#partitioning-the-guest-block-between-alias-region-stacks-and-heap)) |
 | Resource sizes | Resource size table | `System/Resource/ResourceSizeTable.*.rsizetable` (RESTBL, CRC32 of the path → decompressed size) |
 | Fonts | Font archives and use of the system shared font | `Font/*.bfarc`; the shared font goes through `nn::fontll::ScalableFontEngineHelper::Decode` (BFTTF) |
 | Languages | Per-language archives | `Mals/<Region><lang>.sarc`, `Voice/Resource/<Region><lang>` |

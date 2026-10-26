@@ -46,6 +46,28 @@ static void roundtrip(const char *tag, int target, int fmt, uint32_t w, uint32_t
 }
 
 int main(void) {
+    printf("L linear render targets without the separate LINEAR flag\n");
+    {
+        // Persona 5 Royal asks for 16x16 RGBA8, flags 0x44, stride 128: 2 KB,
+        // including row padding. Treating it as block-linear returned only 1 KB.
+        nvn_texdesc d = {1, 0x25, 0x44, 0, 16, 16, 1, 1, 128, 0};
+        nvn_texlayout L; nvn_tex_layout(&d, &L);
+        CHECK(L.size == 2048 && L.layer_size == 2048 && L.align == 128,
+              "L render target storage %llu alignment %u, expected 2048 / 128", (unsigned long long)L.size, L.align);
+        CHECK(nvn_tex_level_gobs(&d, 0) == 0 && nvn_tex_level_offset(&d, 0) == 0,
+              "L linear render target must not have block-linear GOB columns");
+        uint8_t storage[2048] = {0}, pixels[1024] = {0};
+        CHECK(nvn_deswizzle(&d, 0, 0, storage, pixels, 64) == -1,
+              "L linear render target must not be deswizzled");
+        d.stride = 0; nvn_tex_layout(&d, &L);
+        CHECK(L.size == 2048 && L.align == 128, "L implicit render target stride must align to 128");
+        d.flags |= 0x10; nvn_tex_layout(&d, &L);
+        CHECK(L.size == 2048 && L.align == 128, "L both linear flags must keep render target alignment");
+        d.flags = 0x10; nvn_tex_layout(&d, &L);
+        CHECK(L.size == 1024 && L.align == 32, "L ordinary linear texture keeps 32-byte alignment");
+        d.flags = 0x44; d.stride = 256; nvn_tex_layout(&d, &L);
+        CHECK(L.size == 4096, "L explicit padded stride must be preserved");
+    }
     printf("A round trip (random data, non-power-of-2 sizes)\n");
     roundtrip("2D 100×37 R8 4 levels", 1, 0x01, 100, 37, 1, 4);
     roundtrip("2D 100×37 RG8 4 levels", 1, 0x0D, 100, 37, 1, 4);
@@ -109,6 +131,34 @@ int main(void) {
         nvn_texdesc lut = {2, 0x29, 0, 0, 32, 32, 32, 1, 0, 0}; nvn_tex_layout(&lut, &L);
         CHECK(L.tileH == 0 && L.tileD == 4 && L.size == 4 * 4 * 2 * 8192ull, "E 32³ RGBA16F block height/depth %u/%u storage %llu, expected 0/4, 262144", L.tileH, L.tileD, (unsigned long long)L.size);
         printf("  E 32³ RGBA16F (the shape of a 32³ color lookup table) block height/depth %u/%u, storage %llu (expected 0/4, 262144)\n", L.tileH, L.tileD, (unsigned long long)L.size);
+    }
+
+    // Packaged 32³ RGBA8: markers computed independently with block height/depth 0/0 or 2/1.
+    // For byte 0x12, (20,11,3) is at depth block 8192 + column 4096 + GOB 2560 + intra-GOB 112 = 14960.
+    // For byte 0x00, the same voxel is at slice 12288 + row 1024 + column 512 + intra-GOB 112 = 13936.
+    printf("E packaged 3D block dimensions and mip reductions\n");
+    for (unsigned c = 0; c < 2; c++) {
+        nvn_texdesc d = {2, 0x25, 0, 0, 32, 32, 32, 3, 0, c ? 0x13 : 1};
+        nvn_texlayout L; nvn_tex_layout(&d, &L);
+        CHECK(L.size == 151552, "E packaged storage %llu expected 151552", (unsigned long long)L.size);
+        for (unsigned l = 0; l < 3; l++) {
+            unsigned th, td; nvn_tex_level_tiles(&d, l, &th, &td);
+            CHECK(th == (c ? 2 - l : 0) && td == (c ? 1 : 0),
+                  "E packaged byte %#x mip %u block %u/%u", d.pkg_block_h - 1, l, th, td);
+        }
+        CHECK(nvn_tex_level_offset(&d, 1) == 131072 && nvn_tex_level_offset(&d, 2) == 147456,
+              "E packaged mip offsets must be 131072 / 147456");
+        static const uint32_t xyz[3][3] = {{20,11,3}, {5,2,1}, {31,31,31}};
+        static const uint64_t addr[2][3] = {{13936,4196,131068}, {14960,2148,131068}};
+        uint8_t *st = calloc(L.size, 1), *lin = calloc(131072, 1);
+        for (unsigned i = 0; i < 3; i++) for (unsigned k = 0; k < 4; k++) st[addr[c][i] + k] = (uint8_t)(i * 16 + k + 1);
+        CHECK(!nvn_deswizzle(&d, 0, 0, st, lin, 128), "E packaged deswizzle failed");
+        for (unsigned i = 0; i < 3; i++) {
+            const uint8_t *p = lin + ((size_t)xyz[i][2] * 32 + xyz[i][1]) * 128 + xyz[i][0] * 4;
+            int ok = 1; for (unsigned k = 0; k < 4; k++) ok &= p[k] == (uint8_t)(i * 16 + k + 1);
+            CHECK(ok, "E packaged byte %#x marker %u at %llu decoded at the wrong voxel", d.pkg_block_h - 1, i, (unsigned long long)addr[c][i]);
+        }
+        free(st); free(lin);
     }
 
     // ---------- S sparse layout: Monster Hunter Rise's streamed 1024×1024 ASTC 6×6 sRGB textures (flag SPARSE, packaged block height 8 GOBs), level 0 checked against the game's data ----------
