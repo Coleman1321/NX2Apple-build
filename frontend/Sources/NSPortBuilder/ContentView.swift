@@ -73,6 +73,7 @@ final class BuildModel: ObservableObject {
         Slot(id: "keys", kind: .keys, title: "data.keys", optional: false),
     ]
     @Published var outDir = ""
+    @Published var alsoMacApp = false   // --platform ios,mac-app: one run makes the IPA and the Mac app
     @Published var stages: [Stage] = []
     @Published var running = false
     @Published var logTail = ""
@@ -130,6 +131,15 @@ final class BuildModel: ObservableObject {
         let script = dir + "/scripts/build_ipa_from_nsp.py"
         guard let text = try? String(contentsOfFile: script, encoding: .utf8) else { return false }
         return text.contains("'--work-dir'") || text.contains("\"--work-dir\"")
+    }
+
+    /// Whether the checkout's script takes a list of platforms (`--platform ios,mac-app`), which the
+    /// "also build the Mac app" switch needs. An older checkout takes one value only and would stop
+    /// with an argparse error, so ask the script the same way as for --work-dir.
+    nonisolated static func repoSupportsPlatformList(_ dir: String) -> Bool {
+        let script = dir + "/scripts/build_ipa_from_nsp.py"
+        guard let text = try? String(contentsOfFile: script, encoding: .utf8) else { return false }
+        return text.contains("'all' in plats")
     }
 
     nonisolated static func findRepo() -> String {
@@ -578,6 +588,11 @@ final class BuildModel: ObservableObject {
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
                     "--progress", "lines"]
         if hasWorkDir { args += ["--work-dir", workDir] }
+        // One run for both outputs: the script builds the Mac app first, then the IPA. Only when the
+        // checkout's --platform takes a list; an older one would stop on "ios,mac-app".
+        let hasPlatformList = Self.repoSupportsPlatformList(repoPath)
+        if alsoMacApp && !hasPlatformList { say(t("msg.noPlatformList")) }
+        if alsoMacApp && hasPlatformList { args += ["--platform", "ios,mac-app"] }
         if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
         // The archive step packs whatever folder the build reported; without --work-dir that is the
         // script's default, which is the same workDir unless a separate output folder was chosen.
@@ -1561,6 +1576,11 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack(spacing: 14) {
+            Toggle(m.t("btn.macApp"), isOn: $m.alsoMacApp)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12.5))
+                .help(m.t("btn.macAppHelp"))
+                .disabled(m.running)
             Button(m.running ? m.t("btn.stop") : (m.done ? m.t("btn.rebuild") : m.t("btn.build"))) {
                 m.running ? m.stop() : m.startBuild()
             }
