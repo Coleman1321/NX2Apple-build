@@ -189,8 +189,8 @@ HLE_FORCE("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci", "fsp-srv → open(2)", Re
         '''HLE_FORCE("_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc", "fsp-srv → stat(2)", Result, h_fs_GetEntryType, int32_t *out, const char *path) {
     HP(path); struct stat st;
     if (ROMFSARC_IS_SYNTH(hp)) {   // archive entry or directory, from the index
-        const char *rel = ROMFSARC_SYNTH_REL(hp);
-        uint32_t sh; uint64_t of, szf;
+        const char *rel = arc_rel(hp);   // no leading slash: the index stores relpaths (a plain
+        uint32_t sh; uint64_t of, szf;   // stat() tolerates one, the index lookup does not)
         if (romfsarc_stat_file(rel, &sh, &of, &szf)) { *out = ENT_FILE; return RES_OK; }
         if (romfsarc_is_dir(rel)) { *out = ENT_DIR; return RES_OK; }
         errno = ENOENT; return err_res("stat", hp);
