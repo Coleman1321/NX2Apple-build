@@ -335,3 +335,5 @@ section，无任何报错（第二个游戏的代码消失了）*；NRO 式"3 �
   github.com/LiveContainer/LiveContainer（README；`LiveContainer/LCBootstrap.m`、`LiveContainer/dyld_bypass_validation.m`）
 - SideStore FAQ（重装同 bundle id 数据保留、重签模型）：docs.sidestore.io/docs/faq；
   免费 Apple ID 3 app / 10 App ID 限制：faq.altstore.io（这也是"所有游戏进一个壳"的动机之一）
+
+> **Update (merged):** the dlopen probe now exists — `dm/ios/probe/` with `build_probe.sh`, committed alongside this document, and `probe-out/DmProbe.ipa` is built. W1 step 1 is done; what remains is running it on an iOS 26 device and reading `Documents/probe-log.txt`.
