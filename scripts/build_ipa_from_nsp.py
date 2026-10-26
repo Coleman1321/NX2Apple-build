@@ -1832,6 +1832,11 @@ def main(args=None):
             env['HOME'] = os.environ['HOME'] = str(home)
             say(f'HOME: {home} (taken from the password database; the environment had none)')
     env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here
+    # No first-run banner, no telemetry: a build neither wants nor reads either, and the telemetry
+    # call can hang the first run on a network that cannot reach Microsoft. setdefault, so a user
+    # who wants telemetry on keeps it.
+    env.setdefault('DOTNET_CLI_TELEMETRY_OPTOUT', '1')
+    env.setdefault('DOTNET_NOLOGO', '1')
     configure_dotnet(env)
     env.setdefault('J', str(os.cpu_count() or 8))   # shader_split.py's and dmsh_build.py's workers (their default is 8)
     py = sys.executable

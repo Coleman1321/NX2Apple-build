@@ -318,7 +318,7 @@ final class BuildModel: ObservableObject {
     // ---- App self-update (GitHub Releases) ----
 
     /// Bump together with each release tag; the update check compares it with the latest release.
-    static let appVersion = "0.4.6"
+    static let appVersion = "0.4.7"
     @Published var appUpdate: (tag: String, url: String)?
     @Published var appBusy = false
     @Published var appStatus = ""

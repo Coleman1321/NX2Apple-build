@@ -493,6 +493,18 @@ def patch_nsp(t):
             env['HOME'] = os.environ['HOME'] = str(home)
             say(f'HOME: {home} (taken from the password database; the environment had none)')
     env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here""")]))
+    # Issue #10 also asked why the first-run experience is not simply skipped. It can be, with the
+    # two knobs .NET still supports (SKIP_FIRST_TIME_EXPERIENCE was retired in .NET Core 3.0): the
+    # banner and the telemetry call are noise for a build, and the telemetry endpoint can hang the
+    # very first run on a mainland connection — which is how a "stuck at dotnet" report looks.
+    P.append(('dotnet quiet', 'DOTNET_CLI_TELEMETRY_OPTOUT', [(
+        "    env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here",
+        """    env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here
+    # No first-run banner, no telemetry: a build neither wants nor reads either, and the telemetry
+    # call can hang the first run on a network that cannot reach Microsoft. setdefault, so a user
+    # who wants telemetry on keeps it.
+    env.setdefault('DOTNET_CLI_TELEMETRY_OPTOUT', '1')
+    env.setdefault('DOTNET_NOLOGO', '1')""")]))
     P.append(('3.9 survey note', "listed = ', '.join('{} ({})'.format(n, mods[n]['kind'])", [(
         '''    if extra: notes.append(f'modules besides main / sdk: {", ".join(f"{n} ({mods[n]["kind"]})" for n in extra)}; the provisional profile loads {G["modules"][0]} (load order main, subsdk*, sdk)')''',
         '''    if extra:

@@ -209,6 +209,11 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         env['HOME'] = str(Path.home())
     env.setdefault('USER', os.environ.get('USERNAME') or os.environ.get('USER') or 'user')
     env.setdefault('DOTNET_CLI_HOME', env['HOME'])
+    # No first-run banner, no telemetry (issue #10's question): the deps panel runs `dotnet
+    # --list-sdks` directly, outside the build script where the same two lines are set. The
+    # telemetry call can hang the very first run on a network that cannot reach Microsoft.
+    env.setdefault('DOTNET_CLI_TELEMETRY_OPTOUT', '1')
+    env.setdefault('DOTNET_NOLOGO', '1')
     if extra:
         env.update(extra)
     return env
