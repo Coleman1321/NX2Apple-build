@@ -1903,11 +1903,21 @@ def nso_image(path):
         img[mo:mo + sz] = lz4.block.decompress(raw, uncompressed_size=sz) if flags >> i & 1 else raw
     return bytes(img)
 
-def counted(results, total, start=0):   # a pool's results, with a 'progress: <done>/<total>' line at most twice a second (the NSP script shows it as the stage's count)
-    shown = 0.0
-    for i, r in enumerate(results, start + 1):
-        if i == total or time.monotonic() - shown >= 0.5: print(f'progress: {i}/{total}', flush=True); shown = time.monotonic()
-        yield r
+def scan_batch(jobs):   # scan_file over a batch of jobs, in a pool worker
+    return [scan_file(j) for j in jobs]
+
+
+def pooled(ex, jobs, total, start=0, chunk=1):
+    """scan_file over jobs in the pool, the results in job order, with a 'progress: <done>/<total>' line at most twice a second (the NSP script shows it as
+    the stage's count). The count is of the jobs finished in any order: counted in order it would stall behind one slow archive range while the others finish"""
+    batches = [jobs[i:i + chunk] for i in range(0, len(jobs), chunk)]
+    futures = {ex.submit(scan_batch, b): len(b) for b in batches}
+    done, pending, shown = start, set(futures), 0.0
+    while pending:
+        finished, pending = cf.wait(pending, timeout=0.5)
+        done += sum(futures[f] for f in finished)
+        if not pending or time.monotonic() - shown >= 0.5: print(f'progress: {done}/{total}', flush=True); shown = time.monotonic()
+    return [r for f in futures for r in f.result()]
 
 
 def main():
@@ -1962,7 +1972,7 @@ def main():
     files = [(p, r) for p, r in files if not linkdata_jobs(p, r) and p not in paks and p not in trp and p not in uep and p not in bdts and p not in arcs and p not in pkzs and p not in cpks and p not in zips]
     with cf.ProcessPoolExecutor(J, initializer=_pool_init, initargs=(common, {}, zdicts)) as ex:
         n = len(big) + len(files)
-        results += list(counted(ex.map(scan_file, big), n)) + list(counted(ex.map(scan_file, files, chunksize=16), n, len(big)))
+        results += pooled(ex, big, n) + pooled(ex, files, n, len(big), chunk=16)
     trees, defer = {}, []
     for rel, uniq, pr, extra in results:
         if extra == 'defer': defer.append(rel)
