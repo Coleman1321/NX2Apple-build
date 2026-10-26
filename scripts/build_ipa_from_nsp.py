@@ -28,7 +28,7 @@
 #   are built through dm/gfx/tools/own_compilers.py, which says so in one line and leaves the lock and the chain version as they are.
 # The Python running this file needs lz4, capstone and fonttools (and backports.zstd before Python 3.14); also needed: Xcode, xcodegen, .NET SDK 10, zstd, spirv-cross. A first run takes 2 (Metroid Dread) to 10 minutes (Breath of the Wild: 5 of them the shader split), longer when shader libraries must be compiled; a repeat run with unchanged inputs takes about 20 s (Metroid Dread), mostly packing the IPA. Key values are never printed.
 # The console shows one line per stage ([k/n] stage, with a bar, done/total, percent, elapsed time and ETA where the work can be counted); the tools' own output goes only to logs/ (PROGRESS / --progress). --progress json writes newline-delimited JSON events to stdout.
-import ast, collections, ctypes, getpass, hashlib, importlib.util, json, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, zlib
+import ast, collections, ctypes, getpass, pwd, hashlib, importlib.util, json, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, zlib
 from pathlib import Path
 
 # ---- Settings ----
@@ -1687,6 +1687,19 @@ def main(args=None):
     if not want_lang: raise BuildError(f'unknown game language {lang_in!r}; give one of {language_list([c for c, _ in nacp.LANGUAGES])}, by code or by name')
     env = dict(os.environ, PATH=os.pathsep.join(TOOL_PATHS + [os.environ.get('PATH', '/usr/bin:/bin:/usr/sbin:/sbin')]))
     env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)
+    # HOME and DOTNET_CLI_HOME for every child: a GUI launch (LaunchServices) can hand the app a
+    # process environment with HOME missing or empty, and .NET's first-run configure then builds a
+    # mutex path from "" and dies with 'NuGet-Migrations' + lstat("") == ENOENT — before any project
+    # is read (issue #10, where the app's own DOTNET_ROOT workaround did not help because the empty
+    # HOME came from the launch, not from the app). Derive it from the password database when the
+    # environment has nothing usable, so the pipeline is correct however it was started.
+    if not env.get('HOME') or not os.path.isdir(env['HOME']):
+        try: home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except Exception: home = Path.home()
+        if home.is_dir():
+            env['HOME'] = os.environ['HOME'] = str(home)
+            say(f'HOME: {home} (taken from the password database; the environment had none)')
+    env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here
     # nx_extract is a framework-dependent app: without DOTNET_ROOT the host refuses to start it even
     # when dotnet is on PATH (~/.dotnet is not a registered install location). The root is parsed from
     # `dotnet --list-runtimes`, not assumed to be the binary's directory: Homebrew's

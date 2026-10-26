@@ -23,7 +23,7 @@ working tree, so CI can open an issue with the log instead.
 
 Usage: sync_upstream.py --old <upstream sha> --new <upstream sha> [--skip-build]
 """
-import argparse, json, os, subprocess, sys, shutil, tempfile
+import argparse, json, os, pwd, subprocess, sys, shutil, tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -407,6 +407,27 @@ def patch_nsp(t):
         elif env.get('DOTNET_ROOT'):
             del env['DOTNET_ROOT']; os.environ.pop('DOTNET_ROOT', None)
             say('DOTNET_ROOT: removed (none verified — the apphost searches its default locations)')""")]))
+    P.append(('pwd import', 'import ast, collections, ctypes, getpass, pwd', [(
+        "import ast, collections, ctypes, getpass, hashlib, importlib.util, json, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, zlib",
+        "import ast, collections, ctypes, getpass, pwd, hashlib, importlib.util, json, os, re, shlex, shutil, struct, subprocess, sys, tempfile, threading, time, types, zlib")]))
+    # HOME can be missing or empty under a GUI launch (issue #10): .NET's first-run configure then
+    # builds a mutex path from "" and dies with NuGet-Migrations + lstat("") before reading a project.
+    P.append(('HOME fallback', 'DOTNET_CLI_HOME', [(
+        "    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)",
+        """    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)
+    # HOME and DOTNET_CLI_HOME for every child: a GUI launch (LaunchServices) can hand the app a
+    # process environment with HOME missing or empty, and .NET's first-run configure then builds a
+    # mutex path from "" and dies with 'NuGet-Migrations' + lstat("") == ENOENT — before any project
+    # is read (issue #10, where the app's own DOTNET_ROOT workaround did not help because the empty
+    # HOME came from the launch, not from the app). Derive it from the password database when the
+    # environment has nothing usable, so the pipeline is correct however it was started.
+    if not env.get('HOME') or not os.path.isdir(env['HOME']):
+        try: home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except Exception: home = Path.home()
+        if home.is_dir():
+            env['HOME'] = os.environ['HOME'] = str(home)
+            say(f'HOME: {home} (taken from the password database; the environment had none)')
+    env.setdefault('DOTNET_CLI_HOME', env['HOME'])   # .NET writes its first-run state here""")]))
     P.append(('3.9 survey note', "listed = ', '.join('{} ({})'.format(n, mods[n]['kind'])", [(
         '''    if extra: notes.append(f'modules besides main / sdk: {", ".join(f"{n} ({mods[n]["kind"]})" for n in extra)}; the provisional profile loads {G["modules"][0]} (load order main, subsdk*, sdk)')''',
         '''    if extra:
