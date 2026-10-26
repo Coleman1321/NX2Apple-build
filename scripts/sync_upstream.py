@@ -349,11 +349,16 @@ def patch_nsp(t):
     # Two separate one-line anchors: upstream inserts lines between them whenever it adds a check
     # (ffcd910 put a mac_pack check right above `work`), which broke the old three-line anchor and
     # stopped the daily sync for two days (issue #13). `work` and that out_ipa line each appear once.
+    # The fork's out_ipa needs `work`: the app stages the NSPs in a temporary folder and passes
+    # --work-dir, so nsp_dir is not where the IPA belongs. The second patch puts the assignment
+    # above the out_ipa line and the first drops it from its upstream position (a later position
+    # read as an unbound local; issue #15).
     P.append(('work-dir work', 'args.work_dir', [(
-        "    work = nsp_dir / f'{g.id}_build'",
-        "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere")]))
+        "    work = nsp_dir / f'{g.id}_build'\n",
+        "")]))
     P.append(('work-dir out_ipa', 'work.parent / g.get', [(
         "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/",
+        "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere\n"
         "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/")]))
     P.append(('DOTNET_ROOT', 'list-runtimes', [(
         "    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)",
