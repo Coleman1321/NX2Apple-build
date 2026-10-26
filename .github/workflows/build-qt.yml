@@ -1,0 +1,89 @@
+# Build the Qt front end for Windows and macOS and attach it to a release.
+#
+# PyInstaller cannot cross-compile: a Windows .exe must be built on Windows and a Mac .app on
+# macOS. This workflow runs both on GitHub's runners, so a release carries both without anyone
+# needing a local toolchain.
+#
+#   - push a tag vX.Y.Z           → both builds run, attached to that release
+#   - workflow_dispatch           → both builds run, uploaded as workflow artifacts only
+name: Build NS Port Builder (Qt)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: NS-Port-Builder-qt-windows-x64
+            sep: ';'
+          - os: macos-latest
+            artifact: NS-Port-Builder-qt-macos-arm64
+            sep: ':'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PySide6 and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PySide6 pyinstaller
+
+      - name: Generate the localisation table
+        run: python frontend-qt/gen_localization.py
+
+      - name: Build
+        working-directory: frontend-qt
+        shell: bash
+        run: |
+          # --windowed: no console window. --name: the exe/bundle name.
+          # --collect-all PySide6 keeps the Qt plugins (platforms/, styles/) that a
+          # windowed build otherwise drops, which is the usual "could not find the
+          # Qt platform plugin windows" failure.
+          pyinstaller --noconfirm --clean --windowed \
+            --name "NS Port Builder" \
+            --collect-all PySide6 \
+            --paths . \
+            run_gui.py
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd frontend-qt/dist
+          powershell -Command "Compress-Archive -Path 'NS Port Builder' -DestinationPath '../${{ matrix.artifact }}.zip'"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd frontend-qt/dist
+          ditto -c -k --keepParent "NS Port Builder.app" "../${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: frontend-qt/${{ matrix.artifact }}.zip
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Qt front end build"
+          gh release upload "$GITHUB_REF_NAME" "frontend-qt/${{ matrix.artifact }}.zip" --clobber
