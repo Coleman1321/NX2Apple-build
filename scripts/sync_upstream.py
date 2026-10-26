@@ -562,21 +562,35 @@ static int g_bc_cpu;       // decode BC on the CPU: no GPU support and the profi
         done(f'nvn_mtl.m {name}')
     return t
 
+MAIN_M_ROMFS = ('static NSString *romfs_locate(void) {\n    NSFileManager *fm = NSFileManager.defaultManager;\n    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];\n    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]])\n        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;   // only a directory containing the game profile\'s romfs_marker path counts (Mario: System/Resource, the resource size table)\n    return nil;\n}\n\n', '// A folder holds this game\'s files if it has a ROMFSARC index or the profile\'s marker path.\n// Shared by romfs_locate and the per-game layout below, so both answer the same question.\nstatic BOOL romfs_dir_ok(NSString *d) {\n    NSFileManager *fm = NSFileManager.defaultManager;\n    // A ROMFSARC archive: <dir>/romfs.idx next to romfs.NN shards. The host opens it when DM_ROMFS\n    // points at the base; the marker check does not apply (there are no directories to walk).\n    if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@"romfs.idx"]]) return YES;\n    // A plain directory tree: only one containing the game profile\'s romfs_marker path counts\n    // (Mario: System/Resource, the resource size table)\n    return [fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]];\n}\n\n// Where one game\'s data lives under the per-game layout: Documents/games/<title ID>/, holding\n//   romfs/      the archive (romfs.idx + shards) or a plain tree\n//   msl/        this game\'s Metal shader libraries (optional; the app\'s own dm/ is used otherwise)\n//   save/ temp/ this game\'s saves and scratch space\n// The layout exists so several games can share one installed app and so the game data can sit on\n// an external drive the Files app exposes (a folder copied there keeps this shape).\nstatic NSString *game_dir_for(const char *title_id) {\n    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];\n    return [[doc stringByAppendingPathComponent:@"games"] stringByAppendingPathComponent:@(title_id)];\n}\n\nstatic NSString *romfs_locate(void) {\n    NSFileManager *fm = NSFileManager.defaultManager;\n    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];\n    // Per-game first: Documents/games/<id>/romfs — what the launcher-style layout produces, and what\n    // lets a user keep several games\' data side by side (or on an external drive).\n    NSString *per_game = [game_dir_for(DM_GAME_ID) stringByAppendingPathComponent:@"romfs"];\n    if ([fm fileExistsAtPath:per_game] && romfs_dir_ok(per_game)) return per_game;\n    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]]) {\n        if (romfs_dir_ok(d)) return d;\n    }\n    return nil;\n}\n\n')
+MAIN_M_ENV = ('    setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);\n    setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);\n    setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);\n    NSString *dm = [res stringByAppendingPathComponent:@"dm"];\n    setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);\n    setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);\n', '    setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);\n    // Saves and scratch space: Documents/games/<id>/{save,temp} when the per-game layout is in use\n    // (so two games in one app never share a save folder), else the old Documents/{save,temp}. An\n    // env file still wins — DM_SAVE/DM_TEMP set there are already in the environment and\n    // setenv(..., 0) leaves them alone.\n    NSString *gdir = game_dir_for(DM_GAME_ID);\n    // Tie the data folder to where the game files actually came from: if romfs_locate fell back to\n    // Documents/romfs, the saves must stay beside it (a game folder without romfs is not in use).\n    BOOL per_game = [romfs hasPrefix:gdir];\n    NSString *save_dir = per_game ? [gdir stringByAppendingPathComponent:@"save"] : [doc stringByAppendingPathComponent:@"save"];\n    NSString *temp_dir = per_game ? [gdir stringByAppendingPathComponent:@"temp"] : [doc stringByAppendingPathComponent:@"temp"];\n    for (NSString *d in @[save_dir, temp_dir]) [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];\n    setenv("DM_SAVE", save_dir.fileSystemRepresentation, 0);\n    setenv("DM_TEMP", temp_dir.fileSystemRepresentation, 0);\n    if (per_game) fprintf(stderr, "boot: per-game data folder %s\\n", gdir.fileSystemRepresentation);\n    NSString *dm = [res stringByAppendingPathComponent:@"dm"];\n    setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);\n    // Shader libraries: a game\'s own <gdir>/msl first (a per-game layout may carry its own), else\n    // the app\'s shared <App>/msl.\n    NSString *per_game_msl = [gdir stringByAppendingPathComponent:@"msl"];\n    NSString *msl = (per_game && [fm fileExistsAtPath:per_game_msl]) ? per_game_msl : [res stringByAppendingPathComponent:@"msl"];\n    setenv("DM_MSL_DIR", msl.fileSystemRepresentation, 0);\n')
+
+
 def patch_main_m(t):
-    if 'romfs.idx' in t: return skip('main.m romfs.idx (already patched)')
-    old = ('    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]])\n'
-           '        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;   // only a directory containing the game profile\'s romfs_marker path counts (Mario: System/Resource, the resource size table)')
-    new = ('    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]]) {\n'
-           '        // A ROMFSARC archive: <dir>/romfs.idx next to romfs.NN shards. The host opens it when DM_ROMFS\n'
-           '        // points at the base; the marker check does not apply (there are no directories to walk).\n'
-           '        NSString *idx = [d stringByAppendingPathComponent:@"romfs.idx"];\n'
-           '        if ([fm fileExistsAtPath:idx]) return d;\n'
-           '        // A plain directory tree: only one containing the game profile\'s romfs_marker path counts\n'
-           '        // (Mario: System/Resource, the resource size table)\n'
-           '        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;\n'
-           '    }')
-    if old not in t: fail('dm/ios/Sources/main.m: romfs_locate anchor missing')
-    return done('main.m romfs.idx', t.replace(old, new, 1))
+    """romfs_locate + the per-game data layout in dm/ios/Sources/main.m.
+
+    Two replacements, both anchored on upstream text:
+    - romfs_locate becomes romfs_dir_ok() + game_dir_for() + a locate that tries
+      Documents/games/<id>/romfs first (the launcher-style layout, which is also what lets the
+      game data sit in a folder the Files app exposes on an external drive).
+    - the DM_ROMFS/DM_SAVE/DM_TEMP/DM_MSL_DIR block gains the per-game folders and the shader
+      library fallback.
+    A missing anchor is an error: these are the fork's only two changes here.
+    """
+    P = [
+        ('romfs per-game', MAIN_M_ROMFS),
+        ('per-game data dirs', MAIN_M_ENV),
+    ]
+    for name, (old, new) in P:
+        if new in t:
+            skip(f'main.m {name} (already patched)')
+            continue
+        if old not in t:
+            fail(f'dm/ios/Sources/main.m: patch "{name}" anchor missing (upstream moved romfs_locate '
+                 'or the environment block)')
+        t = t.replace(old, new, 1)
+        done(f'main.m {name}')
+    return t
 
 def patch_hades2(t):
     """The fork's Hades II profile carries what we verified end to end — the update (v1,

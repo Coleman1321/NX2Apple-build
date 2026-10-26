@@ -759,9 +759,13 @@ final class BuildModel: ObservableObject {
             cleanupStaging(); return
         }
         let romfs = extract + "/" + v + "/RomFS"
-        // The output folder is named romfs and holds romfs.idx + the shards — exactly the layout
-        // Documents/romfs wants, so it can be copied onto the phone without renaming.
-        let dest = (outDir.isEmpty ? (basePath as NSString).deletingLastPathComponent : outDir) + "/romfs"
+        // The output is Documents/games/<title ID>/romfs — the per-game layout the iOS app looks for
+        // first. Copying the whole `games` folder onto the phone (or into a folder the Files app
+        // exposes on an external drive) then needs no renaming, and several games' folders can sit
+        // side by side in one app.
+        let gamesRoot = (outDir.isEmpty ? (basePath as NSString).deletingLastPathComponent : outDir) + "/games"
+        let tid = Self.titleID(basePath).map { String(format: "%016llX", $0) } ?? "game"
+        let dest = gamesRoot + "/" + tid + "/romfs"
         try? fm.createDirectory(atPath: dest, withIntermediateDirectories: true)
         // Reuse: packing is a multi-GB write, and the extracted RomFS is itself reused by the
         // script — so when the source tree's (version, file count, bytes) matches the stamp left

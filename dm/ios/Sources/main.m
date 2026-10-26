@@ -14,17 +14,38 @@ void front_ios_focus_event(int ev);
 
 static char *g_argv[4]; static int g_argc;
 
+// A folder holds this game's files if it has a ROMFSARC index or the profile's marker path.
+// Shared by romfs_locate and the per-game layout below, so both answer the same question.
+static BOOL romfs_dir_ok(NSString *d) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    // A ROMFSARC archive: <dir>/romfs.idx next to romfs.NN shards. The host opens it when DM_ROMFS
+    // points at the base; the marker check does not apply (there are no directories to walk).
+    if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@"romfs.idx"]]) return YES;
+    // A plain directory tree: only one containing the game profile's romfs_marker path counts
+    // (Mario: System/Resource, the resource size table)
+    return [fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]];
+}
+
+// Where one game's data lives under the per-game layout: Documents/games/<title ID>/, holding
+//   romfs/      the archive (romfs.idx + shards) or a plain tree
+//   msl/        this game's Metal shader libraries (optional; the app's own dm/ is used otherwise)
+//   save/ temp/ this game's saves and scratch space
+// The layout exists so several games can share one installed app and so the game data can sit on
+// an external drive the Files app exposes (a folder copied there keeps this shape).
+static NSString *game_dir_for(const char *title_id) {
+    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+    return [[doc stringByAppendingPathComponent:@"games"] stringByAppendingPathComponent:@(title_id)];
+}
+
 static NSString *romfs_locate(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+    // Per-game first: Documents/games/<id>/romfs — what the launcher-style layout produces, and what
+    // lets a user keep several games' data side by side (or on an external drive).
+    NSString *per_game = [game_dir_for(DM_GAME_ID) stringByAppendingPathComponent:@"romfs"];
+    if ([fm fileExistsAtPath:per_game] && romfs_dir_ok(per_game)) return per_game;
     for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]]) {
-        // A ROMFSARC archive: <dir>/romfs.idx next to romfs.NN shards. The host opens it when DM_ROMFS
-        // points at the base; the marker check does not apply (there are no directories to walk).
-        NSString *idx = [d stringByAppendingPathComponent:@"romfs.idx"];
-        if ([fm fileExistsAtPath:idx]) return d;
-        // A plain directory tree: only one containing the game profile's romfs_marker path counts
-        // (Mario: System/Resource, the resource size table)
-        if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;
+        if (romfs_dir_ok(d)) return d;
     }
     return nil;
 }
@@ -66,11 +87,27 @@ static int boot_env(void) {
     if (!romfs) { fprintf(stderr, "boot: game files not found (<App>/romfs or Documents/romfs)\n"); return 0; }
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
-    setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
-    setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
+    // Saves and scratch space: Documents/games/<id>/{save,temp} when the per-game layout is in use
+    // (so two games in one app never share a save folder), else the old Documents/{save,temp}. An
+    // env file still wins — DM_SAVE/DM_TEMP set there are already in the environment and
+    // setenv(..., 0) leaves them alone.
+    NSString *gdir = game_dir_for(DM_GAME_ID);
+    // Tie the data folder to where the game files actually came from: if romfs_locate fell back to
+    // Documents/romfs, the saves must stay beside it (a game folder without romfs is not in use).
+    BOOL per_game = [romfs hasPrefix:gdir];
+    NSString *save_dir = per_game ? [gdir stringByAppendingPathComponent:@"save"] : [doc stringByAppendingPathComponent:@"save"];
+    NSString *temp_dir = per_game ? [gdir stringByAppendingPathComponent:@"temp"] : [doc stringByAppendingPathComponent:@"temp"];
+    for (NSString *d in @[save_dir, temp_dir]) [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+    setenv("DM_SAVE", save_dir.fileSystemRepresentation, 0);
+    setenv("DM_TEMP", temp_dir.fileSystemRepresentation, 0);
+    if (per_game) fprintf(stderr, "boot: per-game data folder %s\n", gdir.fileSystemRepresentation);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
-    setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
+    // Shader libraries: a game's own <gdir>/msl first (a per-game layout may carry its own), else
+    // the app's shared <App>/msl.
+    NSString *per_game_msl = [gdir stringByAppendingPathComponent:@"msl"];
+    NSString *msl = (per_game && [fm fileExistsAtPath:per_game_msl]) ? per_game_msl : [res stringByAppendingPathComponent:@"msl"];
+    setenv("DM_MSL_DIR", msl.fileSystemRepresentation, 0);
     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
     NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
     if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 0);
