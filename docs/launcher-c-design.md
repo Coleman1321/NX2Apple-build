@@ -3,6 +3,10 @@
 状态：设计稿 v1（2026-10-26）。前置阅读：`docs/ROADMAP.md` 第 6 节、`docs/WORK-IN-PROGRESS.md` C5/C7、
 `dm/host/hle_profile.{c,h}`（运行时 profile，已在 main，`3b36083`）。
 
+目标（用户原话）：**"打开启动器就像打开了一台 Switch"**——一个壳 App，里面看到多个已构建的游戏，
+点一个进入那个游戏。架构 A（进行中，WIP:41-47）交付按游戏隔离的数据布局；本文设计 C——壳 +
+每游戏 framework——把"多个游戏装进一个 App"的**代码**维度做对。
+
 本文回答六个问题：framework 边界、与架构 B 的真实差异（含 codesign 的诚实结论）、构建系统改造、
 运行时选择器、风险清单、工作量分解。每个结论都给证据（文件与行号，或外部来源）。
 **一句话结论先放在这里：C 不能"不重签就加游戏"——iOS 只允许 dlopen 安装时已在签名 bundle 内的代码；
@@ -20,7 +24,7 @@ C 的真实价值是"每个游戏一个独立 Mach-O（各自的 255 section 预
 
 | framework 内容 | 来源 | 现状对应 |
 |---|---|---|
-| `<game>` dylib：`__TEXT,__dm<mod>x0` / `__DM<mod>W,__img` / `__TEXT,__dm<mod>x1` 三段式聚合段 | `dm/ios/tools/gen_embed.py`（不改，同样的 embed.S 进一个 dylib target 而不是可执行文件） | 今天这些 section 在主可执行文件里（`loader.c:474-478`） |
+| `<game>` dylib：`__TEXT,__dm<mod>x0` / `__DM<mod>W,__img` / `__TEXT,__dm<mod>x1` 三段式聚合段 | `dm/ios/tools/gen_embed.py`（不改，同样的 embed.S 进一个 dylib target 而不是可执行文件） | 今天这些 section 在主可执行文件里（`loader.c:473-476`） |
 | `__DATA,__dm_nro_tab` + 三个共享 NRO 段（有 NRO 的游戏，如任天堂明星大乱斗 98 个） | `gen_embed.py`（不改） | `loader.c:485-492` |
 | `Info.plist`、`Resources/dm/`（`*.fixups.tsv`、`*.gates.tsv`、`nro.tsv`、shader 表） | `build_ipa.sh:75-81` 的复制清单原样搬进 framework | 今天在 App 的 `dm/` 资源目录（`project.yml` `Gen/dm` resources） |
 | `Resources/profile.tsv`（运行时 game profile，可选；优先用 Documents 里的） | `dm/games/game.py profile <id> <out>`（`game.py:192-232`） | 今天靠 DM_PROFILE 环境变量指向 |
@@ -30,7 +34,7 @@ framework 里**没有**宿主代码、没有 ObjC 类、没有入口函数——
 framework（数据不是代码，走 Documents，见 1.3）。
 
 **方案 FH（备选）：framework = 整个 dmhost + 该游戏的聚合段。** 入口
-`int dmgame_main(int argc, char **argv, const char *profile_path)`（= 现在的 `dm_main`，`main.c:11` 用
+`int dmgame_main(int argc, char **argv, const char *profile_path)`（= 现在的 `dm_main`，`main.m:11` 用
 `-Dmain=dm_main` 编进宿主；framework 内同名导出），壳 dlopen 后 `dlsym(handle, "dmgame_main")` 调用。
 仅当 FR 的探针（第 5 节 R1）失败时退到 FH。FH 的代价：宿主对象码每个游戏重复一份（dm/host 的
 .c/.m 源码合计约 11,265 行，头文件另计——重复是浪费但量级可接受）；**更严重的是壳与 framework
@@ -52,7 +56,7 @@ void *h = dlopen(".../Frameworks/<game>.framework/<game>", RTLD_LAZY);
 //   a. void *marker = dlsym(h, "dmgame_image_marker");   // 3.2 的占位符号
 //      Dl_info info; dladdr(marker, &info);               // info.dli_fbase = 该 framework 的 mach header
 //   b. dlinfo(h, RTLD_DI_LINKMAP, &lm) → lm->l_addr
-//   dm_set_image_header(info.dli_fbase)        ← loader.c 唯一实质改动：IMAGE_MH 从 &_mh_execute_header（loader.c:479）
+//   dm_set_image_header(info.dli_fbase)        ← loader.c 唯一实质改动：IMAGE_MH 从 &_mh_execute_header（loader.c:484）
 //                                                 改为按游戏参数化；getsectiondata 对任意 mach header 可用
 ```
 
@@ -126,7 +130,7 @@ guest"。我们的项目**不采用这条路**：JIT 资格（get-task-allow / �
 加载器建立在进程内 hook dyld 之上——LiveContainer 自己的代码就是"每次系统更新都可能断"的证词
 （README 注明 "(Below iOS 26)"，即 iOS 26 起该路径有变；`LCBootstrap.m:577-583` 为 iOS 27 另加
 `bypass_seg_count_check`）。我们只需要"映射已签名页"，从来不需要"执行未签名代码"，
-loader.c:474-478 的 vm_remap 路线不依赖任何特殊资格。**所以 LiveContainer 证明的恰恰是规则的坚硬，
+loader.c:473-476 的 vm_remap 路线不依赖任何特殊资格。**所以 LiveContainer 证明的恰恰是规则的坚硬，
 不是豁口：绕过它需要 JIT 资格 + dyld hook，二者我们都不具备也不想要。**
 
 ### 2.2 诚实结论：加游戏必须重签整个 bundle
@@ -232,7 +236,7 @@ section，无任何报错（第二个游戏的代码消失了）*；NRO 式"3 �
      文件夹选择器是待办，ROADMAP:129-132），代码在不在 bundle 里才是"装没装"。
   2. **数据**：`Documents/games/*/`，"这个目录是不是一个游戏的文件"的判定已经存在：
      `main.m:19-28 romfs_dir_ok`（有 `romfs.idx` 或 profile 的 `romfs_marker` 路径即算）。
-  - 列表状态：代码+数据 = 可玩；只有代码 = 提示"把 romfs 放进 Files";  只有数据 = 灰显"IPA 里没有这个游戏
+  - 列表状态：代码+数据 = 可玩；只有代码 = 提示"把 romfs 放进 Files"；只有数据 = 灰显"IPA 里没有这个游戏
     的 framework（需要重签安装）"——这条提示就是 2.2 结论的用户可见面。
 - **存档隔离**：已经有了。`Documents/games/<id>/{save,temp}`，`main.m:95-104`：
   romfs 落在游戏目录内才用 per-game save（`per_game = [romfs hasPrefix:gdir]`，98 行），
@@ -254,7 +258,7 @@ section，无任何报错（第二个游戏的代码消失了）*；NRO 式"3 �
   规则层面 2.1 已定（bundle 内可 dlopen），但我们的用法有两个未验证细节：dyld 是否接受带多个
   `__DM*W` rw,rw 自定义段 + 上百 section 的 dylib；`vm_remap` copy=FALSE 把 **dylib**（而非主可执行文件）
   的已签名 __TEXT 页重映射到匿名地址再执行是否被 AMFI 放行。现行机制对"主可执行文件自己的段"成立
-  （loader.c:474-478，注释并援引 libffi trampoline table 先例），dylib 与它在内核路径上是同一类
+  （loader.c:473-476，注释并援引 libffi trampoline table 先例），dylib 与它在内核路径上是同一类
   （同进程内已映射的签名页），但**没有实验前不下结论**。探针必须先跑。
   说明：任务输入里提到 `dm/ios/probe/` 正在另一分支验证——**本工作树核对过 launcher-b、pr17、pr18、
   mg-profile-runtime 四个分支，`dm/ios/probe/` 尚不存在**（只有 `dm/gfx/metal/probe/` 与 `dm/host/probe.c`），
@@ -274,7 +278,10 @@ section，无任何报错（第二个游戏的代码消失了）*；NRO 式"3 �
   只需要加在壳上（build_ipa.sh:119-124 现有做法）。运行时 profile 让内存布局全部运行期可配
   （hle_profile.h:22-23 的 mem_reserve/alias/stack/pool 等），不同游戏不需要不同签名资格。
   **同一时刻只加载一个 framework**：规避跨镜像 ObjC 类重复与 C 符号串扰，也把"多游戏同时运行"明确
-  划出范围（那是 LiveContainer 的多容器问题，不追）。
+  划出范围（那是 LiveContainer 的多容器问题，不追）。内存上多装几个游戏不吃亏：未 dlopen 的
+  framework 不映射任何页；dlopen 后的代码页经 vm_remap copy=FALSE 与原映射共享物理页
+  （loader.c:475 "sharing the same signed pages"），不因加载翻倍；切游戏先终止当前进程（第 4 节），
+  不存在两份 guest 内存布局并存。
 - **R5 dyld 行为随 iOS 版本漂移**：LiveContainer 在 iOS 26 有豁免分支、iOS 27 加段数补丁（其源码
   2.1 节引用处）；我们目标就是 iOS 26+（project.yml `deploymentTarget: iOS 26.0`）。探针必须在
   实际目标 OS 上做，并把这个探针纳入每次大版本升级的回归清单。
@@ -305,7 +312,7 @@ section，无任何报错（第二个游戏的代码消失了）*；NRO 式"3 �
 ## 7. 证据来源汇总
 
 仓库内（文件:行号见正文）：
-- `dm/host/loader.c:474-478`（iOS 嵌入与 vm_remap/libffi 先例）、`:485-492`（255 section 与 NRO 打包）、
+- `dm/host/loader.c:473-476`（iOS 嵌入与 vm_remap/libffi 先例）、`:485-492`（255 section 与 NRO 打包）、
   `:185-186`（fixups.tsv 运行期按目录读取）、`:252`（gates.tsv）
 - `dm/ios/tools/gen_embed.py:1-13`（三段式段、ITMS-90999 单可执行段、NRO 共享段 + 表）
 - `dm/host/main.c:42-46,87-97,115-124`（DM_* 开关、模块清单来源、preload 约定）
