@@ -606,6 +606,71 @@ def verify(skip_build):
         tail = '\n'.join((r.stdout + r.stderr).splitlines()[-25:])
         fail(f'host build failed:\n{tail}')
     else: say(f'  + host build OK ({game})')
+    # Host unit tests: the fs tests #include ../hle_fs.c and link romfs_arc.c, so a fork change that
+    # the test rules do not know about breaks them at link time and they stop running silently
+    # (PR #12 — they had been unbuildable). Cheap (seconds) and catches that class here.
+    say(f'  … host unit tests for {game}')
+    r = subprocess.run(['make', '-C', 'dm/host/tests', f'GAME={game}', 'run', '-j4'], cwd=REPO, capture_output=True, text=True)
+    if r.returncode:
+        tail = '\n'.join((r.stdout + r.stderr).splitlines()[-25:])
+        fail(f'host unit tests failed:\n{tail}')
+    else: say('  + host unit tests OK')
+    check_patcher_consistency()
+
+
+def check_patcher_consistency():
+    """Every carrier's patched form must equal the file in the tree, code line by code line.
+
+    A fork change made to a carrier's source but not to its patcher entry is invisible today (the
+    marker is present, so the patcher skips) and reappears the next time upstream touches that file
+    — PR #11 was exactly that: GetEntryType had been fixed to arc_rel in the source while the patcher
+    still inserted ROMFSARC_SYNTH_REL. Comparing the patcher's output against the working tree makes
+    the drift show up on the sync that introduces it rather than months later.
+
+    Comments and blank lines are ignored: a comment reworded in the tree is not drift, and demanding
+    a matching comment edit in the patcher would train people to ignore this check.
+    """
+    say('  … patcher consistency (patched upstream file vs the tree, comments ignored)')
+    def code(text):
+        out = []
+        for ln in text.splitlines():
+            s = ln.strip()
+            if not s or s.startswith(('#', '//', '/*', '*', '<!--')):
+                continue
+            # strip a trailing comment too: `code;  // why` is the same statement however the why
+            # is worded, and a reworded trailing comment must not read as drift
+            cut = ln.find('  //')
+            if cut < 0:
+                cut = ln.find('  #')
+            if cut > 0:
+                ln = ln[:cut]
+            out.append(ln.rstrip())
+        return out
+    drift = []
+    for path, patcher in PATCHERS.items():
+        src = REPO / path
+        if not src.exists():
+            continue
+        upstream = subprocess.run(['git', 'show', f'upstream/main:{path}'], cwd=REPO,
+                                  capture_output=True, text=True)
+        if upstream.returncode:
+            continue                      # a fork-only file has no upstream form to compare
+        try:
+            out = patcher(upstream.stdout)
+        except SyncProblem:
+            continue                      # an anchor miss is reported by apply_changes already
+        if out is None:
+            out = upstream.stdout
+        if code(out) != code(src.read_text(encoding='utf-8', errors='replace')):
+            drift.append(path)
+    if drift:
+        for d in drift:
+            say(f'  ! {d}: the patcher and the tree disagree')
+        fail('patcher drift: ' + ', '.join(drift) +
+             ' — the source was changed without its patcher entry (or the other way round); '
+             'a future sync would silently revert the change')
+    else:
+        say(f'  + {len(PATCHERS)} patchers agree with the tree')
 
 def apply_changes(a, changes):
     """Take every changed file from upstream, then re-apply the fork's patches to the carriers."""
