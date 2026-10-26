@@ -23,7 +23,7 @@ working tree, so CI can open an issue with the log instead.
 
 Usage: sync_upstream.py --old <upstream sha> --new <upstream sha> [--skip-build]
 """
-import argparse, json, os, pwd, subprocess, sys, shutil, tempfile
+import argparse, json, os, pwd, re, subprocess, sys, shutil, tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -832,6 +832,197 @@ def apply_changes(a, changes):
             fail(f'{path}: fork patch marker missing after sync: {MARKERS[path]!r}')
 
 
+def game_rows():
+    """Every profile in the tree, as the README table wants it: name, title ID, update, status.
+
+    Read from `dm/games/<title ID>/game.tsv`, which is the only authority: the table used to be
+    maintained by hand, so a sync that brought in new profiles (three did, with 467 commits) left
+    the README claiming 72 games while the tree had 75.
+
+    `build` holds the update's version and version number (`v131072 1.0.2 main=…`); `package` is
+    the version the profile needs. A profile with no build line needs no update at all.
+    """
+    rows = []
+    for d in sorted((REPO / 'dm/games').iterdir()):
+        if not d.is_dir() or not d.name.startswith('0100'):
+            continue
+        tsv = d / 'game.tsv'
+        if not tsv.is_file():
+            continue
+        fields: dict[str, str] = {}
+        for ln in tsv.read_text(encoding='utf-8', errors='replace').splitlines():
+            if not ln or ln.startswith('#') or '\t' not in ln:
+                continue
+            k, v = ln.split('\t', 1)
+            fields.setdefault(k.strip(), v.strip())
+        name = fields.get('name')
+        if not name:
+            continue
+        # `build` repeats once per version this profile knows (v0 the base game, then each
+        # update), and `package` names the one the profile is built for. Reading the first build
+        # line reported the base version for every game, which is how "无（v0）" became "1.0.0 (v0)"
+        # and Super Mario Bros. Wonder's 1.2.1 became 1.0.0.
+        builds = [ln.split('\t', 1)[1].strip()
+                  for ln in tsv.read_text(encoding='utf-8', errors='replace').splitlines()
+                  if ln.startswith('build\t')]
+        want = fields.get('package', 'v0').strip() or 'v0'
+        chosen = next((b for b in builds if b.split() and b.split()[0] == want), None)
+        parts = (chosen or '').split()
+        if len(parts) >= 2 and parts[0] != 'v0':
+            update = f'{parts[1]} ({parts[0]})'
+        else:
+            update = '无（v0）'
+        rows.append((d.name, name, update))
+    return rows
+
+
+#: The status a profile gets until someone writes something better. Kept as one string so the
+#: wording matches what the table already uses for unverified titles.
+STATUS_UNVERIFIED = 'Profile present; not verified on a phone'
+STATUS_UPSTREAM = 'Playable on an iPhone (upstream)'
+
+#: Rows whose status is this fork's own testing (build → install → play here). Matched by title ID
+#: so the text can change without the sync dropping the claim.
+VERIFIED_HERE = {
+    '0100000000010000': '**Verified here** — builds, installs and runs on an iPhone; '
+                        '304,243 files into 127 archive shards, byte-verified',
+    '0100F2C0115B6000': '**Verified here** — builds, installs and runs on an iPhone; '
+                        '33-file archive',
+    '01006F8002326000': '**Verified here** — builds, installs and runs smoothly on an iPhone; '
+                        '103,645 files into 72 archive shards',
+}
+
+
+def refresh_game_table():
+    """Rebuild the README's game table from `dm/games/`, keeping every hand-written status.
+
+    Two things must not be lost when this rewrites the table:
+    - a status someone wrote by hand (a verification, a caveat about a controller or touch
+      controls). The existing row's status column is carried over verbatim; only rows that did
+      not exist before get a default.
+    - the sort order, which is by title ID and is what makes the table readable.
+
+    The row count in the prose ("72 game profiles") and the "N verified" line are updated too,
+    because those are the numbers a reader trusts and the ones that went stale.
+    """
+    readme_path = REPO / 'README.md'
+    text = readme_path.read_text(encoding='utf-8')
+    rows = game_rows()
+    if not rows:
+        say('  ! no game profiles found; the table is left alone')
+        return
+
+    # existing statuses, by title ID
+    have: dict[str, str] = {}
+    for ln in text.splitlines():
+        m = re.match(r'\|\s*([^|]+?)\s*\|\s*`(0100[0-9A-F]{12})`\s*\|\s*([^|]*?)\s*\|\s*(.+?)\s*\|\s*$', ln)
+        if m:
+            have[m.group(2)] = m.group(4)
+
+    lines = ['| Game | Title ID | Update required | Status |', '|---|---|---|---|']
+    added = 0
+    for tid, name, update in rows:
+        if tid in have:
+            status = have[tid]
+        elif tid in VERIFIED_HERE:
+            status = VERIFIED_HERE[tid]
+        else:
+            status = STATUS_UNVERIFIED
+            added += 1
+        lines.append(f'| {name} | `{tid}` | {update} | {status} |')
+    table = '\n'.join(lines)
+
+    # replace the table in place: from its header row to the last row that starts with "| "
+    start = text.find('| Game | Title ID | Update required | Status |')
+    if start < 0:
+        say('  ! game table not found in README.md; profiles are in the tree but not listed')
+        return
+    end = start
+    for ln in text[start:].splitlines(keepends=True):
+        if ln.startswith('| ') or ln.startswith('|---'):
+            end += len(ln)
+        else:
+            break
+    new_text = text[:start] + table + '\n' + text[end:]
+
+    # the counts in the prose and in the table's own caption
+    n = len(rows)
+    verified = sum(1 for ln in table.splitlines() if '**Verified here**' in ln)
+    # Only the number changes; whatever emoji or wording precedes it is left exactly as written
+    # (the feature table uses 🧩, the hero caption uses 🎯). A lookahead keeps the match to the
+    # digits, so no part of the surrounding text is rewritten.
+    new_text = re.sub(r'\d+(?= game profiles\*\*)', str(n), new_text)
+    new_text = re.sub(r'\*\*\d+ verified end to end on this fork\*\*',
+                      f'**{verified} verified end to end on this fork**', new_text)
+
+    if new_text != text:
+        readme_path.write_text(new_text, encoding='utf-8')
+        say(f'  README table: {n} profiles' + (f' ({added} new)' if added else '') +
+            f', {verified} verified here')
+    else:
+        say(f'  README table: {n} profiles, unchanged')
+
+
+def refresh_game_table_zh():
+    """Add rows for profiles the Chinese README's table is missing, and nothing else.
+
+    The English table is rebuilt because its game names come straight from `game.tsv`. The
+    Chinese one cannot be: its names are translated by hand ("超级马力欧 奥德赛" for "Super Mario
+    Odyssey"), and so are its statuses. So this only appends rows for title IDs that are absent,
+    using the English name as a placeholder — visible, and better than a game that silently is
+    not listed — with the Chinese wording for "unverified" so it does not stand out as English
+    text in a Chinese table. A translator replaces the name later; the row is never regenerated
+    once it exists, so the translation is safe.
+
+    Sorting is by title ID, like the English table, so the insert position is computed rather
+    than appended at the end.
+    """
+    path = REPO / 'README.zh-CN.md'
+    if not path.is_file():
+        return
+    text = path.read_text(encoding='utf-8')
+    header = '| 游戏 | Title ID | 需要的更新包 | 状态 |'
+    start = text.find(header)
+    if start < 0:
+        say('  ! Chinese game table not found; skipped')
+        return
+    # the rows of the table, in order
+    block_start = start
+    block_end = start
+    for ln in text[start:].splitlines(keepends=True):
+        if ln.startswith('| ') or ln.startswith('|---'):
+            block_end += len(ln)
+        else:
+            break
+    block = text[block_start:block_end]
+    present = set(re.findall(r'`(0100[0-9A-F]{12})`', block))
+
+    missing = [r for r in game_rows() if r[0] not in present]
+    if not missing:
+        say(f'  README.zh-CN table: complete ({len(present)} profiles)')
+        return
+
+    lines = block.rstrip('\n').splitlines()
+    for tid, name, update in missing:
+        row = f'| {name} | `{tid}` | {update} | 有 profile，未在手机上验证 |'
+        # insert before the first row whose title ID sorts after this one
+        pos = len(lines)
+        for i, ln in enumerate(lines):
+            m = re.search(r'`(0100[0-9A-F]{12})`', ln)
+            if m and m.group(1) > tid:
+                pos = i
+                break
+        lines.insert(pos, row)
+    new_block = '\n'.join(lines) + '\n'
+    new_text = text[:block_start] + new_block + text[block_end:]
+    n = len(game_rows())
+    new_text = re.sub(r'\*\*(?:[^ *] )?(\d+)( game profiles\*\*)',
+                      lambda m: f'**{n}{m.group(2)}', new_text)
+    path.write_text(new_text, encoding='utf-8')
+    say(f'  README.zh-CN table: +{len(missing)} row(s) '
+        f'({", ".join(t for t, _, _ in missing)}) — names are English until translated')
+
+
 def refresh_badges():
     """Keep docs/badges/*.json in step with the tree, so the README badges need no hand edit.
 
@@ -880,6 +1071,8 @@ def main():
     try:
         apply_changes(a, changes)
         verify(a.skip_build)
+        refresh_game_table()
+        refresh_game_table_zh()
         refresh_badges()
     except SyncProblem: pass
     if problems:
