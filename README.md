@@ -52,8 +52,8 @@ follows upstream automatically. What it adds:
 - **🔄 Follows upstream automatically.** A daily GitHub Actions job re-applies the fork's features
   onto upstream's tree, verifies the result (script parse, archive reader test, a macOS host build)
   and pushes — or opens an issue with the log when a patch no longer fits.
-- **🎯 58 game profiles** with the required update version listed per game. Three are verified end
-  to end on this fork; twenty-nine are reported playable on an iPhone upstream.
+- **🎯 69 game profiles** with the required update version listed per game. Three are verified end
+  to end on this fork; 42 are reported playable on an iPhone upstream.
 
 ---
 
@@ -78,7 +78,7 @@ follows upstream automatically. What it adds:
 | 🖱️ | **One-click build** | Pick your files, press build. No command line, ever |
 | 📦 | **RomFS archiving** | 300,000 files → ~100 shards, so a 16 GB game installs |
 | 🔁 | **Resumable builds** | A stopped build continues; unchanged work is reused |
-| 🧩 | **58 game profiles** | Each with the exact update version it needs |
+| 🧩 | **69 game profiles** | Each with the exact update version it needs |
 | 📲 | **Install guide** | The three steps to the phone, with Reveal-in-Finder |
 | 🌏 | **Bilingual** | English / 简体中文, picked from the device language |
 | ⬇️ | **Self-installing** | Downloads the repository and updates itself |
@@ -422,7 +422,7 @@ The mount is recognised by its **directory**, not its name: titles differ (`rom`
 
 ## 🗂️ Games
 
-58 game profiles ship with this repository. A profile is what makes a build possible —
+69 game profiles ship with this repository. A profile is what makes a build possible —
 the game's build IDs, memory layout, shader tables and per-game switches — and this fork adds the
 RomFS archive layer on top, so a large game can be installed at all.
 
@@ -441,6 +441,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | Raging Loop | `010020400E1C2000` | 无（v0） | Profile present; not verified on a phone |
 | ANIMAL WELL | `010020D01AD24000` | 1.0.10 (v655360) | Playable on an iPhone (upstream) |
 | Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 1.2.2 (v262144) | Playable on an iPhone (upstream) |
+| Ghost Trick: Phantom Detective | `010029B018432000` | 无（v0） | Playable on an iPhone (upstream) |
 | Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 1.3.0 (v327680) | Playable on an iPhone (upstream) |
 | Celeste | `01002B30028F6000` | 1.4.1.1 (v589824) | Profile present; not verified on a phone |
 | Advance Wars 1+2: Re-Boot Camp | `0100300012F2A000` | 无（v0） | Playable on an iPhone (upstream) |
@@ -454,6 +455,8 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 (v327680) | Profile present; not verified on a phone |
 | Hades | `0100535012974000` | 1.0.38233 (v589824) | Playable on an iPhone (upstream) |
 | Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 (v327680) | Playable on an iPhone (upstream) |
+| NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 (v131072) | Playable on an iPhone (upstream) |
+| Persona 5 Royal | `01005CA01580E000` | 1.0.2 (v65536) | Playable on an iPhone (upstream) |
 | FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 (v131072) | Profile present; not verified on a phone |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 (v262144) | Profile present; not verified on a phone |
@@ -462,14 +465,22 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 (v262144) | Profile present; not verified on a phone |
 | Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 (v2228224) | **Verified here** — builds, installs and runs smoothly on an iPhone; 103,645 files into 72 archive shards |
 | AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | 1.0.2 (v131072) | Playable on an iPhone (upstream) |
+| ASTRAL CHAIN | `01007300020FA000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
+| Bayonetta | `010076F0049A2000` | 1.1 (v65536) | Playable on an iPhone (upstream) |
+| Bayonetta 2 | `01007960049A0000` | 1.2 (v131072) | Playable on an iPhone (upstream) |
+| Portal | `01007BB017812000` | 1.0.3 (v196608) | Playable on an iPhone (upstream) |
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 (v1114112) | Playable on an iPhone (upstream) |
 | BALL x PIT | `010086A022444000` | 1.293 (v393216) | Playable on an iPhone (upstream) |
 | AI: THE SOMNIUM FILES | `010089B00D09C000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
 | STEINS;GATE RE:BOOT | `01008BC024FDE000` | 1.0.3 (v131072) | Profile present; not verified on a phone |
+| The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 (v196608) | Playable on an iPhone (upstream) |
+| 13 Sentinels: Aegis Rim (Asia) | `01008D7016438000` | 无（v0） | Playable on an iPhone (upstream) |
+| Pokémon Shield | `01008DB008C2C000` | 1.3.2 (v458752) | Playable on an iPhone (upstream) |
 | Metroid Dread | `010093801237C000` | 2.1.0 (v327680) | Playable on an iPhone (upstream) |
 | Super Mario Galaxy | `010099C022B96000` | 1.3.1 (v327680) | Playable on an iPhone (upstream) |
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 (v393216) | Profile present; not verified on a phone |
 | Hades II | `0100A00019DE0000` | 无（v0） | **Verified here** — builds, installs and runs on an iPhone; 33-file archive |
+| OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 (v131072) | Playable on an iPhone (upstream) |
 | Cuphead | `0100A5C00D162000` | 1.3.7 (v655360) | Profile present; not verified on a phone |
 | Fire Emblem Engage | `0100A6301214E000` | 2.0.0 (v327680) | Playable on an iPhone (upstream) |
 | Absolum | `0100A83022A22000` | 1.1.1 (v393216) | Profile present; not verified on a phone |
