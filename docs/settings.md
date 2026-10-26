@@ -14,8 +14,6 @@ Each game comes with the settings it was tested with: its profile in this reposi
 
 When you change a setting and tap **Play**, the app keeps your choice, also when a later build of the app ships other defaults. A setting you leave at its default is not stored: it follows the defaults of the build you have, so a newer build's tested settings reach you without doing anything. **Reset to tested defaults** at the bottom forgets all launcher choices, so the game's defaults apply again. For testing, a line in `Documents/env.txt` overrides any setting ([Settings in a file](#settings-in-a-file)).
 
-On the Mac the same settings are under **Launch options** beside **Play** in the [Mac front end](../frontend/README.md#launch-options), without the iPhone's own Frame-rate counter and Touch feedback; they apply when the game is started from there.
-
 ## Game
 
 ### Frame rate

@@ -49,13 +49,14 @@ library manifest is stored at
 ## Launch options
 
 The button beside **Play** opens the game's launch options: the settings the iPhone
-launcher shows before a game starts ([docs/settings.md](../docs/settings.md)), as the
-NSP script packed them into the Mac app (`Contents/Resources/dm/launcher.json`, from
-`dm/games/settings.tsv`), without the iPhone's own frame-rate counter and touch
-feedback. **Play** starts the app with every setting in its environment. Only a
-choice that differs from the game's tested default is kept, in the library manifest;
-**Reset to tested defaults** forgets them. An app packed before the settings were has
-none to show: build it again. Starting the app from Finder uses its defaults.
+launcher shows before a game starts ([docs/settings.md](../docs/settings.md)), read
+from the list the engine packs into the Mac app (`Contents/Resources/dm/launcher.json`,
+written by `dm/games/settings.py` from `dm/games/settings.tsv`; the engine change that
+packs it is [seedds/nxnative#352](https://github.com/seedds/nxnative/pull/352), so a
+sync from upstream brings it). **Play** starts the app with every setting in its
+environment. Only a choice that differs from the game's tested default is kept, in the
+library manifest; **Reset to tested defaults** forgets them. An app without the list
+shows none. Starting the app from Finder uses its defaults.
 
 ## Artwork
 

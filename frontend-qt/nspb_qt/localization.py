@@ -47,7 +47,7 @@ TABLE: dict[str, tuple[str, str]] = {
     'launch.reset': ('恢复测试默认值', 'Reset to tested defaults'),
     'launch.done': ('完成', 'Done'),
     'launch.applied': ('下次从这里开始游戏时生效。', 'Applied the next time you press Play here.'),
-    'launch.none': ('这个版本没有启动选项。重新构建游戏后即可设置。', 'This build has no launch options yet. Build the game again to set them.'),
+    'launch.none': ('这个版本没有附带启动选项列表。', 'This build carries no list of launch options.'),
     'launch.section.Game': ('游戏', 'Game'),
     'launch.section.Controls': ('控制', 'Controls'),
     'launch.section.Performance': ('性能', 'Performance'),

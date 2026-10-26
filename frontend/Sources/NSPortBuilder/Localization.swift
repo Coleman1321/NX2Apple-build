@@ -61,7 +61,7 @@ enum L10n {
         "launch.reset": ("\u{6062}\u{590d}\u{6d4b}\u{8bd5}\u{9ed8}\u{8ba4}\u{503c}", "Reset to tested defaults"),
         "launch.done": ("\u{5b8c}\u{6210}", "Done"),
         "launch.applied": ("\u{4e0b}\u{6b21}\u{4ece}\u{8fd9}\u{91cc}\u{5f00}\u{59cb}\u{6e38}\u{620f}\u{65f6}\u{751f}\u{6548}\u{3002}", "Applied the next time you press Play here."),
-        "launch.none": ("\u{8fd9}\u{4e2a}\u{7248}\u{672c}\u{6ca1}\u{6709}\u{542f}\u{52a8}\u{9009}\u{9879}\u{3002}\u{91cd}\u{65b0}\u{6784}\u{5efa}\u{6e38}\u{620f}\u{540e}\u{5373}\u{53ef}\u{8bbe}\u{7f6e}\u{3002}", "This build has no launch options yet. Build the game again to set them."),
+        "launch.none": ("\u{8fd9}\u{4e2a}\u{7248}\u{672c}\u{6ca1}\u{6709}\u{9644}\u{5e26}\u{542f}\u{52a8}\u{9009}\u{9879}\u{5217}\u{8868}\u{3002}", "This build carries no list of launch options."),
         "launch.section.Game": ("\u{6e38}\u{620f}", "Game"),
         "launch.section.Controls": ("\u{63a7}\u{5236}", "Controls"),
         "launch.section.Performance": ("\u{6027}\u{80fd}", "Performance"),
