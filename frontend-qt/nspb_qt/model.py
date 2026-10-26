@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QThread, Signal, Slot
 
 from . import platform_util as pu
 from .i18n import Lang
@@ -88,6 +88,8 @@ class Model(QObject):
         self.out_dir = ''
         self.ipa_path = ''
         self.archive_path = ''
+        self.mac_app_path = ''
+        self.target = 'ios'   # 'ios' (an IPA) or 'mac-app' (a double-clickable Mac app; macOS only)
         self.repo_busy = False
         self.repo_behind: int | None = None
         self.repo_status = ''
@@ -98,8 +100,14 @@ class Model(QObject):
         # copying text out of the window. One file per run, overwritten at start; the path is shown
         # in the log's first line so it can be found.
         try:
-            base = (Path(os.environ['LOCALAPPDATA']) / 'NS Port Builder' / 'logs') if pu.IS_WIN \
-                else (Path.home() / 'Library' / 'Logs' / 'NS Port Builder')
+            # LOCALAPPDATA is set on every normal Windows session, but a stripped environment
+            # (a service, a scheduled task, this project's own test harness) may lack it: fall
+            # back to the home directory rather than failing to start over a log file.
+            if pu.IS_WIN:
+                root = Path(os.environ.get('LOCALAPPDATA') or (Path.home() / 'AppData' / 'Local'))
+                base = root / 'NS Port Builder' / 'logs'
+            else:
+                base = Path.home() / 'Library' / 'Logs' / 'NS Port Builder'
             base.mkdir(parents=True, exist_ok=True)
             self.log_path = base / 'last-run.log'
             self.log_path.write_text('', encoding='utf-8')
@@ -446,6 +454,123 @@ class Model(QObject):
 
     # ---- installing what is missing ----
 
+    def install_dep(self, dep: Dep) -> None:
+        """Run one dependency's fix on a thread, streaming its output to the log.
+
+        Two kinds of fix:
+        - a Windows toolchain row carries a '__win__:<what>' marker and is downloaded in-process
+          (nspb_qt.win.fetch), because there is no command line to run;
+        - everything else carries an argv list that is spawned.
+
+        `dep.installing` is the flag install_all_missing waits on, so every path must clear it —
+        including the error paths, or a sequential run would stall on a row that failed instantly.
+        """
+        if not dep.install:
+            return
+        if dep.install[0].startswith('__win__:'):
+            self._install_win(dep, dep.install[0].split(':', 1)[1])
+            return
+        dep.installing = True
+        self.depsChanged.emit()
+
+        def work() -> None:
+            ok = True
+            if dep.id == 'python':
+                ok = self._make_venv(self.python_path)
+            else:
+                self.log('$ ' + ' '.join(dep.install) + '\n')
+                try:
+                    p = subprocess.Popen(dep.install, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, text=True,
+                                         errors='replace', env=pu.child_env(),
+                                         **pu.no_window_kwargs())
+                    assert p.stdout is not None
+                    for line in p.stdout:
+                        self.log(line)
+                    p.wait()
+                    ok = p.returncode == 0
+                except OSError as e:
+                    self.log(f'{e}\n')
+                    ok = False
+            if not ok:
+                self.log(self.t('dep.install.fail', '-') + '\n')
+            dep.installing = False
+            self.depsChanged.emit()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _install_win(self, dep: Dep, what: str) -> None:
+        """Download and unpack a Windows toolchain piece, with progress in the log.
+
+        Every step logs before and after itself: the report that prompted this said only
+        '--- LLVM-MinGW ---' and then nothing, which gave no clue whether the download had
+        started, finished, or thrown.
+        """
+        dep.installing = True
+        self.depsChanged.emit()
+
+        def work() -> None:
+            ok = False
+            try:
+                from .win import fetch as wf, toolchain as wtc
+                self.log(self.t('dep.install.begin', dep.id) + '\n')
+                if what == 'llvm':
+                    self.log(self.t('dep.llvm.downloading') + '\n')
+                    path = wf.install_llvm(
+                        log=lambda s: self.log(str(s) + '\n'),
+                        progress=lambda d, t_: self.log(
+                            f'  {d // 1048576} MB' +
+                            (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
+                    self.log(self.t('dep.llvm.done', str(path)) + '\n')
+                    ok = True
+                elif what == 'ios_sdk':
+                    self.log(self.t('dep.iossdk.downloading') + '\n')
+                    from .win import sdk_fetch as sf
+                    path = sf.clone_sdk(log=lambda s: self.log(str(s) + '\n'))
+                    self.log(self.t('dep.iossdk.done', str(path)) + '\n')
+                    ok = True
+                else:
+                    self.log(f'unknown Windows install target: {what}\n')
+            except Exception as e:
+                # DownloadError, OSError, ImportError, a missing attribute: all reported with the
+                # type so a bug report names the failure without guessing.
+                import traceback
+                self.log(self.t('dep.install.fail', f'{type(e).__name__}: {e}') + '\n')
+                self.log(traceback.format_exc() + '\n')
+            dep.installing = False
+            self.depsChanged.emit()
+            self.check_deps()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _make_venv(self, base: str) -> bool:
+        """Create or reuse the app's venv and install the build packages into it."""
+        vpy = pu.venv_python()
+        if not Path(vpy).is_file():
+            vdir = pu.venv_dir()
+            vdir.parent.mkdir(parents=True, exist_ok=True)
+            self.log(f'$ {base} -m venv {vdir}\n')
+            if not pu._runs(base, ['-m', 'venv', str(vdir)]):
+                self.log('venv creation failed\n')
+                return False
+        ver = pu._ver_tuple(pu._python_version(vpy))
+        pkgs = ['lz4', 'capstone', 'fonttools', 'nsz']
+        if ver < (3, 14):
+            pkgs.insert(3, 'backports.zstd')
+        self.log(f'$ {vpy} -m pip install {" ".join(pkgs)}\n')
+        try:
+            p = subprocess.Popen([vpy, '-m', 'pip', 'install'] + pkgs, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, errors='replace',
+                                 env=pu.child_env(), **pu.no_window_kwargs())
+            assert p.stdout is not None
+            for line in p.stdout:
+                self.log(line)
+            p.wait()
+            return p.returncode == 0
+        except OSError as e:
+            self.log(f'{e}\n')
+            return False
+
     def install_all_missing(self) -> None:
         """Install every missing dependency, one at a time, in order.
 
@@ -476,13 +601,29 @@ class Model(QObject):
 
         threading.Thread(target=run_all, daemon=True).start()
 
+    @Slot(str)
+    def _emit_log(self, s: str) -> None:
+        """Main-thread half of log(): see log() for why the hop exists."""
+        self.logAppended.emit(s)
+
     def log(self, s: str) -> None:
         """Append to the window's log and to the log file.
 
         The file is what makes a bug report possible from a handheld, where copying text out of
         the window is painful: one path, one file, sent as-is.
+
+        The signal is emitted from worker threads (every installer and the build runner). A Qt
+        signal crossing threads is delivered through the receiver's event loop, and a connection
+        made to a plain Python callable has no receiver object to queue against — the emission is
+        then dropped. That is what made a real Windows run show only the stage header while the
+        log file received everything. QMetaObject.invokeMethod with QueuedConnection hands the
+        call to the main thread explicitly, which works regardless of how the slot is connected.
         """
-        self.logAppended.emit(s)
+        if QThread.currentThread() is self.thread():
+            self.logAppended.emit(s)
+        else:
+            QMetaObject.invokeMethod(self, '_emit_log', Qt.QueuedConnection,
+                                     Q_ARG(str, s))
         if getattr(self, 'log_path', None):
             try:
                 with open(self.log_path, 'a', encoding='utf-8', errors='replace') as f:
@@ -584,13 +725,23 @@ class Model(QObject):
             args += ['--work-dir', work_dir]
         else:
             self.log(self.t('msg.noWorkDir') + '\n')
-        if self.out_dir:
-            args += ['-o', str(Path(self.out_dir, f'{tid_hex}.ipa'))]
+        # A Mac app is a different output, not a different pipeline: --platform mac-app runs the
+        # same steps and then packs dm/mac/pack_app.py's result. Its -o names the .app, and the
+        # RomFS is inside it, so the archive step is skipped below.
+        mac_app = self.target == 'mac-app'
+        if mac_app:
+            args += ['--platform', 'mac-app']
+            self.mac_app_path = str(Path(self.out_dir or base_dir, f'{tid_hex}.app'))
+            args += ['-o', self.mac_app_path]
+        elif self.out_dir:
+            self.ipa_path = str(Path(self.out_dir, f'{tid_hex}.ipa'))
+            args += ['-o', self.ipa_path]
         self.effective_work_dir = work_dir if has_work_dir else str(Path(input_dir, f'{tid_hex}_build'))
 
         self.running = True
         self.runningChanged.emit(True)
         self.stages = []
+        self.ipa_path = self.archive_path = self.mac_app_path = ''
         self.log_tail = ''
         self.stagesChanged.emit()
         self.log(self.t('msg.running', py + ' ' + ' '.join(args)) + '\n')
@@ -634,7 +785,10 @@ class Model(QObject):
             self._flush_lines()
             self.running = False
             self.runningChanged.emit(False)
-            if ok:
+            if mac_app:
+                exists = bool(self.mac_app_path) and Path(self.mac_app_path).exists()
+                self.finished.emit(exists, self.t('target.macDone' if exists else 'target.missingApp'))
+            elif ok:
                 self.pack_archive()
             else:
                 if self.stages:

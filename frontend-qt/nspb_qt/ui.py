@@ -258,6 +258,13 @@ class MainWindow(QMainWindow):
         self.footer = QLabel('')
         self.footer.setObjectName('footer')
         row.addWidget(self.footer, 1)
+        # Output target. A Mac app only exists on macOS (dm/mac/pack_app.py), so the choice is
+        # hidden elsewhere rather than shown and rejected.
+        if not pu.IS_WIN:
+            self.target_btn = QPushButton(self.m.t('target.ios'))
+            self.target_btn.setToolTip(self.m.t('target.tip'))
+            self.target_btn.clicked.connect(self._toggle_target)
+            row.addWidget(self.target_btn)
         self.out_btn = QPushButton(self.m.t('build.outDir'))
         self.out_btn.clicked.connect(self._choose_out)
         row.addWidget(self.out_btn)
@@ -509,6 +516,13 @@ class MainWindow(QMainWindow):
         except OSError as e:
             self.footer.setText(self.m.t('log.exportFail', str(e)))
             self.footer.setStyleSheet(f'color: {RED};')
+
+    def _toggle_target(self) -> None:
+        """Switch between an iPhone IPA and a Mac app (macOS only)."""
+        self.m.target = 'mac-app' if self.m.target == 'ios' else 'ios'
+        self.target_btn.setText(self.m.t('target.mac' if self.m.target == 'mac-app' else 'target.ios'))
+        self.footer.setText(self.m.t('target.hint.mac' if self.m.target == 'mac-app' else 'target.hint.ios'))
+        self.footer.setStyleSheet('')
 
     def _choose_out(self) -> None:
         d = QFileDialog.getExistingDirectory(self, self.m.t('build.outDir'))
