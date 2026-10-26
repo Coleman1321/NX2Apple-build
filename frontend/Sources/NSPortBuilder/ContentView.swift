@@ -1257,10 +1257,10 @@ struct ContentView: View {
             header
             repository
             inputs
-            buildOptions
             dependencies
             if m.done { installGuide }
             stagesView
+            buildOptions
             logView
         }
         .padding(.horizontal, 22)
@@ -1387,27 +1387,28 @@ struct ContentView: View {
 
     // ---- build options ----
 
-    /// Output-specific switches. A Mac app runs on this Mac's GPU (which always has BC support),
-    /// so the compatibility option is only shown for an iPhone build.
+    /// Output-specific switches, sitting on the window background (no card, no heading): they are
+    /// one line of text next to their control, and a boxed card around a single toggle reads
+    /// heavier than the thing it configures. A Mac app runs on this Mac's GPU, which always has BC
+    /// support, so the compatibility option is only shown for an iPhone build.
     @ViewBuilder private var buildOptions: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
-                sectionHeader("slider.horizontal.3", m.t("opt.title"), note: m.t("opt.note"))
-                if m.target == "mac-app" {
-                    Text(m.t("opt.macNoBc"))
-                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
-                } else {
-                    Toggle(isOn: $m.bcOnCPU) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(m.t("opt.bc")).font(.system(size: 13))
-                            Text(m.t("opt.bc.note"))
-                                .font(.system(size: 11)).foregroundStyle(.secondary)
-                        }
-                    }
-                    .toggleStyle(.switch)
-                    .disabled(m.running)
+        if m.target == "mac-app" {
+            Text(m.t("opt.macNoBc"))
+                .font(.system(size: 11.5)).foregroundStyle(.secondary)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(m.t("opt.bc")).font(.system(size: 13))
+                    Text(m.t("opt.bc.note"))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }.padding(8)
+                Spacer(minLength: 12)
+                Toggle("", isOn: $m.bcOnCPU)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .disabled(m.running)
+            }
         }
     }
 
