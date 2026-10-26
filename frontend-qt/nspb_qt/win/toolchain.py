@@ -77,13 +77,24 @@ GIT_RELEASE_TAG = 'v2.56.0.windows.4'
 GIT_RELEASE_URL = f'https://github.com/git-for-windows/git/releases/download/{GIT_RELEASE_TAG}'
 
 
-def bundled_tools_dir() -> Path:
-    """Where the app keeps tools it downloaded for itself.
+def tools_dir() -> Path:
+    """Where the app installs the tools it downloads (LLVM, .NET, …).
 
-    A frozen build runs from a directory PyInstaller made; `sys._MEIPASS` is that directory
-    (`<app>/_internal` on Windows). A source run uses the frontend-qt folder. Either way this is
-    the same base that fetch.install_llvm unpacks into, which is what keeps the installer and the
-    detector looking at one place.
+    `%LOCALAPPDATA%\\NS Port Builder\\tools`, deliberately not inside the app folder: the app ships
+    as a zip a user re-extracts for every update, so a toolchain unpacked next to the exe is lost
+    the moment they upgrade — 182 MB of LLVM, downloaded again on a slow connection. This folder
+    is also writable without administrator rights, which `_internal` under Program Files is not.
+    """
+    return Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / \
+        'NS Port Builder' / 'tools'
+
+
+def bundled_tools_dir() -> Path:
+    """The old in-app tools folder, still read so an existing install keeps working.
+
+    Earlier builds unpacked LLVM into `_internal/.tools`; anyone who already downloaded it there
+    should not have to fetch it again, so this stays as a fallback candidate and is never
+    written to.
     """
     base = getattr(sys, '_MEIPASS', None)
     if base:
@@ -120,6 +131,41 @@ SDK_ACCEPTED = ('iPhoneOS26.0.sdk', 'iPhoneOS26.1.sdk', 'iPhoneOS26.2.sdk', 'iPh
 #: Commit of `xybp888/iOS-SDKs` the pinned SDK was read from. Informational: the SDK tree is
 #: verified by its own layout and a caller-supplied hash, not by trusting this number.
 SDK_PINNED_COMMIT = '17eb9152ba9779b27427016472758824a8fcd6a7'
+
+#: .NET SDK. `dm/tools/nx_extract` targets net10.0 and the shader translator's runtimeconfig is
+#: net10.0, so 10 is the floor; a newer major (11) can still build a net10.0 project as long as
+#: the 10 runtime is installed alongside, which the probe checks by asking for the SDK list.
+DOTNET_MAJOR = 10
+DOTNET_VERSION = '10.0.403'
+DOTNET_ASSET = {
+    'name': f'dotnet-sdk-{DOTNET_VERSION}-win-x64.zip',
+    'url': f'https://builds.dotnet.microsoft.com/dotnet/Sdk/{DOTNET_VERSION}/'
+           f'dotnet-sdk-{DOTNET_VERSION}-win-x64.zip',
+    # SHA-512, because that is what Microsoft's own release metadata publishes — taken from
+    # builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json for 10.0.403. Using
+    # their number rather than one we computed is the whole point: a self-computed hash only
+    # proves the file matches what we already downloaded.
+    'algo': 'sha512',
+    'sha256': '7a114c318fa7f1d9822991b534b2814d0e78386ceda816b371f5141acefe741d'
+              '87ccb606ede06cadac8f9ac5070e32b708a67bbd1619ff5e5a7858a27874ef48',
+    'size': 300745255,
+}
+
+#: Mirrors tried after the canonical URL, in order, when the direct download fails or crawls.
+#: GitHub release assets are the slow ones on mainland networks (a report measured 974 s for the
+#: 182 MiB LLVM archive); Microsoft's CDN is not, so it is absent here. A mirror only changes
+#: where the bytes come from — the pinned SHA-256 is what accepts them, so a mirror serving
+#: anything else is rejected exactly like a corrupted download.
+GITHUB_MIRRORS = ('https://ghfast.top/', 'https://gh-proxy.com/')
+
+
+def mirror_urls(url: str) -> list[str]:
+    """`url` plus the GitHub mirrors that can serve it (empty for non-GitHub URLs)."""
+    out = [url]
+    if 'github.com/' in url:
+        out += [m + url for m in GITHUB_MIRRORS]
+    return out
+
 
 #: Metal Developer Tools for Windows, which Apple ships as a separate download (free Apple ID).
 METAL_TOOLS_URL = 'https://developer.apple.com/download/all/?q=metal%20developer%20tools'
@@ -161,6 +207,19 @@ class Probe:
 
 
 # ---------------------------------------------------------------- configuration
+
+def no_window() -> dict:
+    """Subprocess kwargs that stop Windows flashing a console window.
+
+    Every child this app starts (git, clang, metal, the self-extractor) would otherwise pop a
+    black window: a GUI process has no console to inherit, so Windows creates one. Reported from
+    a handheld as "a command-line window appears and then nothing happens" — it was git's
+    console, and the app was still working behind it.
+    """
+    if sys.platform.startswith('win'):
+        return {'creationflags': subprocess.CREATE_NO_WINDOW}
+    return {}
+
 
 def config_path() -> Path:
     """`toolchain.json` in the app's data folder (shared with the venv location)."""
@@ -226,10 +285,12 @@ def llvm_dir() -> Path | None:
         if base:
             cands += sorted(glob.glob(os.path.join(base, 'Programs', 'LLVM')), reverse=True)
             cands += sorted(glob.glob(os.path.join(base, 'llvm-mingw*')), reverse=True)
-    # the app's own download location first: install_llvm() unpacks under
-    # <app>/_internal/.tools, and without this the freshly installed toolchain was invisible to
-    # the next dependency check (the report: "installed, then Check again changed nothing").
+    # the app's own download locations first: without these the freshly installed toolchain was
+    # invisible to the next dependency check (the report: "installed, then Check again changed
+    # nothing"). tools_dir() is where installs go now; bundled_tools_dir() is where older builds
+    # put them.
     cands.insert(0, bundled_tools_dir() / f'llvm-mingw-{LLVM_MINGW_VERSION}')
+    cands.insert(0, tools_dir() / f'llvm-mingw-{LLVM_MINGW_VERSION}')
     # a clang already on PATH, if it came from a toolchain with lld beside it
     if w := shutil.which('clang'):
         cands.append(Path(w).parent.parent)
@@ -320,13 +381,95 @@ def _lld_has_macho(exe: Path) -> bool:
 def llvm_version(clang: Path) -> str:
     """clang's version line, or '' when it does not run."""
     try:
-        r = subprocess.run([str(clang), '--version'], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([str(clang), '--version'], capture_output=True, text=True,
+                           timeout=60, **no_window())
     except (OSError, subprocess.SubprocessError):
         return ''
     if r.returncode != 0:
         return ''
     m = re.search(r'clang version (\d+\.\d+\.\d+)', r.stdout)
     return m.group(1) if m else (r.stdout.splitlines() or [''])[0].strip()
+
+
+# ---------------------------------------------------------------- .NET SDK
+
+def dotnet_dir() -> Path | None:
+    """The .NET install root (the folder holding `dotnet.exe`).
+
+    Same three levels as everything else: `toolchain.json`, `NSPB_DOTNET_DIR`, then the standard
+    locations plus the copy this app downloaded into its own tools folder. The app-managed copy
+    comes first among the fixed paths because a machine that has none anywhere else is exactly
+    the machine that ran the in-app installer.
+    """
+    cands: list[Path | str | None] = [setting('dotnet_dir')]
+    for own in (bundled_tools_dir() / f'dotnet-{DOTNET_VERSION}',
+                tools_dir() / f'dotnet-{DOTNET_VERSION}'):
+        if (own / 'dotnet.exe').is_file():
+            cands.insert(0, own)
+    cands.append(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'dotnet')
+    local = os.environ.get('LOCALAPPDATA')
+    if local:
+        cands.append(Path(local) / 'Microsoft' / 'dotnet')
+        cands.append(Path(local) / 'Programs' / 'dotnet')
+    for c in cands:
+        if c and (Path(c) / 'dotnet.exe').is_file():
+            return Path(c)
+    if w := shutil.which('dotnet'):
+        return Path(w).parent
+    return None
+
+
+def dotnet_sdks(root: Path) -> list[str]:
+    """The SDK versions `dotnet --list-sdks` reports, newest first. Empty when it will not run."""
+    try:
+        r = subprocess.run([str(root / 'dotnet.exe'), '--list-sdks'], capture_output=True,
+                           text=True, timeout=120, **no_window())
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if r.returncode != 0:
+        return []
+    out = []
+    for line in (r.stdout or '').splitlines():
+        m = re.match(r'(\d+)\.(\d+)\.(\d+)', line.strip())
+        if m:
+            out.append(m.group(0))
+    return sorted(out, key=lambda v: tuple(int(x) for x in v.split('.')), reverse=True)
+
+
+def probe_dotnet() -> Probe:
+    """`.NET SDK 10`, judged by running `dotnet --list-sdks`, not by finding the exe.
+
+    `nx_extract` targets net10.0 and the shader translator's runtimeconfig is net10.0, so a
+    machine with only SDK 8 or 9 builds nothing — and the failure would surface deep inside the
+    build as a NuGet error. This row exists because the dependency panel used to have no .NET
+    line at all on Windows (the panel's row came from a macOS-only branch), which is exactly the
+    bug the handheld report described: "the first dependency, .NET SDK 10, never appears in the
+    log".
+    """
+    root = dotnet_dir()
+    if not root:
+        return Probe('dotnet', f'.NET SDK {DOTNET_MAJOR}', 'missing',
+                     f'dotnet.exe not found (need SDK {DOTNET_MAJOR} for net10.0)',
+                     hint=f'downloaded in the app ({DOTNET_ASSET["name"]}, about 287 MB), '
+                          'or from dotnet.microsoft.com/download',
+                     pinned=DOTNET_VERSION,
+                     extra={'download': DOTNET_ASSET})
+    sdks = dotnet_sdks(root)
+    if not sdks:
+        return Probe('dotnet', f'.NET SDK {DOTNET_MAJOR}', 'wrong',
+                     f'{root / "dotnet.exe"} does not run (a partial install?)',
+                     hint='reinstall the SDK, or delete that folder and let the app fetch one',
+                     path=str(root), pinned=DOTNET_VERSION,
+                     extra={'download': DOTNET_ASSET})
+    major_ok = [v for v in sdks if int(v.split('.')[0]) >= DOTNET_MAJOR]
+    if major_ok:
+        return Probe('dotnet', f'.NET SDK {DOTNET_MAJOR}', 'ok', f'SDK {major_ok[0]}',
+                     path=str(root), version=major_ok[0], pinned=DOTNET_VERSION)
+    return Probe('dotnet', f'.NET SDK {DOTNET_MAJOR}', 'wrong',
+                 f'found SDK {sdks[0]} at {root}, but nx_extract targets net10.0',
+                 hint=f'install SDK {DOTNET_MAJOR} alongside it (the app can download one)',
+                 path=str(root), version=sdks[0], pinned=DOTNET_VERSION,
+                 extra={'download': DOTNET_ASSET})
 
 
 # ---------------------------------------------------------------- iPhoneOS SDK
@@ -490,7 +633,8 @@ def metal_version() -> str:
     if not m:
         return ''
     try:
-        r = subprocess.run([str(m), '--version'], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([str(m), '--version'], capture_output=True, text=True,
+                           timeout=60, **no_window())
     except (OSError, subprocess.SubprocessError):
         return ''
     text = (r.stdout or '') + (r.stderr or '')
@@ -560,7 +704,7 @@ def probe_compile(sdk: Path, clang: Path | None = None) -> tuple[bool, str]:
         cmd = [str(clang), '-target', f'arm64-apple-ios{IOS_DEPLOYMENT}', '-isysroot', str(sdk),
                '-fobjc-arc', '-c', str(c), '-o', str(o)]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, **no_window())
         except subprocess.TimeoutExpired:
             return False, 'clang timed out on the probe'
         except OSError as e:
@@ -602,7 +746,7 @@ def probe_metal(sdk: Path) -> tuple[bool, str]:
                           ([str(metallib), str(a), '-o', str(lib)], 'metallib')):
             try:
                 r = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
-                                   cwd=td)
+                                   cwd=td, **no_window())
             except subprocess.TimeoutExpired:
                 return False, f'{what} timed out'
             except OSError as e:
@@ -638,7 +782,8 @@ def probe_link(sdk: Path) -> tuple[bool, str]:
         env = dict(os.environ)
         env['PATH'] = str(lld.parent) + os.pathsep + env.get('PATH', '')
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env,
+                               **no_window())
         except subprocess.TimeoutExpired:
             return False, 'link timed out'
         except OSError as e:
@@ -700,6 +845,9 @@ def check_all(deep: bool = False) -> list[Probe]:
         out.append(Probe('toolchain_json', 'toolchain.json', 'wrong', cfg['_error'],
                          'fix the JSON, or delete the file to fall back to auto-detection',
                          pinned='', required=False))
+
+    # ---- .NET (the extractor and the shader translator both target net10.0)
+    out.append(probe_dotnet())
 
     # ---- LLVM
     root = llvm_dir()

@@ -172,6 +172,23 @@ class Model(QObject):
         threading.Thread(target=self._check_deps_worker, daemon=True).start()
 
     def _check_deps_worker(self) -> None:
+        """Build the dependency rows off the UI thread.
+
+        Any exception has to leave the panel in a finished state: an unhandled one killed this
+        thread while `deps_checked` stayed False, so the panel sat on "Checking…" forever and the
+        handheld report read "Check again does nothing". A failed check now says so.
+        """
+        try:
+            self._check_deps()
+        except Exception as e:                     # noqa: BLE001 - a check must never be fatal
+            import traceback
+            self.log(f'dependency check failed: {type(e).__name__}: {e}\n')
+            self.log(traceback.format_exc() + '\n')
+            self.deps = []
+            self.deps_checked = True
+            self.depsChanged.emit()
+
+    def _check_deps(self) -> None:
         deps: list[Dep] = []
 
         # Python + packages
@@ -187,11 +204,17 @@ class Model(QObject):
             deps.append(Dep('python', 'dep.python', 'dep.python.hint', DepState.OLD,
                             f'dep.python.old:{py_ver or "?"}:3.9'))
 
-        # .NET
-        dn, dn_ok = pu.find_dotnet()
-        deps.append(Dep('dotnet', 'dep.dotnet', 'dep.dotnet.hint',
-                        DepState.OK if dn_ok else DepState.MISSING,
-                        dn if dn_ok else 'dep.dotnet.missing'))
+        # .NET. On Windows the row comes from `_windows_deps()` instead: there the check has to be
+        # "SDK 10 or newer is installed" (nx_extract targets net10.0) and the fix is an in-app
+        # download, neither of which `find_dotnet` knows about. This generic row is what the
+        # Windows panel used to be missing entirely — the handheld report's first line,
+        # ".NET SDK 10 never appears in the log", came from exactly that gap.
+        dn = dn_ok = None
+        if not pu.IS_WIN:
+            dn, dn_ok = pu.find_dotnet()
+            deps.append(Dep('dotnet', 'dep.dotnet', 'dep.dotnet.hint',
+                            DepState.OK if dn_ok else DepState.MISSING,
+                            dn if dn_ok else 'dep.dotnet.missing'))
 
         # Xcode (macOS) or the cross toolchain (Windows)
         if pu.IS_WIN:
@@ -219,7 +242,10 @@ class Model(QObject):
 
         self.deps = deps
         self.python_path, self.python_ok, self.python_ver = py, py_ok, py_ver
-        self.dotnet_path, self.dotnet_ok = dn, dn_ok
+        if not pu.IS_WIN:
+            # On Windows `_windows_deps` already set these from the toolchain probe, which is
+            # where the app-installed SDK is visible; this branch is the macOS one.
+            self.dotnet_path, self.dotnet_ok = dn, dn_ok
         self.deps_checked = True
         self.depsChanged.emit()
 
@@ -248,6 +274,20 @@ class Model(QObject):
 
         def state(p) -> DepState:
             return DepState.OK if p.ok else (DepState.OLD if p.state == 'wrong' else DepState.MISSING)
+
+        # .NET first: it is what the extractor and the shader translator run on, and it is the
+        # row the Windows panel did not have at all before (a macOS-only branch produced it).
+        p = by_id.get('dotnet')
+        if p:
+            detail = p.detail if not p.ok else (p.version or p.path or 'ok')
+            out.append(Dep('dotnet', 'dep.dotnet', 'dep.dotnet.hint', state(p), detail,
+                           install=[] if p.ok else ['__win__:dotnet']))
+            # the build passes DOTNET_ROOT to its children; this is the only place that knows
+            # about the copy the app installed for itself
+            if p.path:
+                self.dotnet_path, self.dotnet_ok = str(Path(p.path) / 'dotnet.exe'), p.ok
+            else:
+                self.dotnet_path, self.dotnet_ok = 'dotnet', False
 
         # LLVM (+ the Mach-O linker, which comes from the same folder)
         p = by_id.get('llvm')
@@ -405,7 +445,9 @@ class Model(QObject):
         if not git or not self.repo_ok or not self.repo_is_git:
             return
         self.repo_busy = True
+        self.repo_status = self.t('repo.pulling')
         self.repoChanged.emit()
+        self.log(self.t('repo.pulling') + '\n')
 
         def work() -> None:
             out = ''
@@ -425,18 +467,46 @@ class Model(QObject):
         threading.Thread(target=work, daemon=True).start()
 
     def check_repo_updates(self) -> None:
-        """How far behind origin/main the checkout is (0 = current)."""
+        """How far behind origin/main the checkout is (0 = current).
+
+        `git fetch` over a slow link takes tens of seconds, and the button used to go grey with
+        nothing in the log until it finished — reported as "I click Check for updates, it greys
+        out, and nothing happens". So: say what is starting, stream git's own progress lines, and
+        end with a line either way. git writes progress to stderr with `--progress`, which is why
+        the fetch below asks for it explicitly (it is off by default when stderr is a pipe).
+        """
         git = self.git_binary()
         if not git or not self.repo_ok or not self.repo_is_git:
             return
         self.repo_busy = True
+        self.repo_status = self.t('repo.checking')
         self.repoChanged.emit()
+        self.log(self.t('repo.checking') + '\n')
+        self.log(f'$ git -C {self.repo_path} fetch --progress origin main\n')
 
         def work() -> None:
+            ok = False
             try:
-                subprocess.run([git, '-C', self.repo_path, 'fetch', 'origin', 'main'],
-                               capture_output=True, text=True, env=pu.child_env(),
-                               **pu.no_window_kwargs())
+                p = subprocess.Popen([git, '-C', self.repo_path, 'fetch', '--progress',
+                                      'origin', 'main'],
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, errors='replace', env=pu.child_env(),
+                                     **pu.no_window_kwargs())
+                assert p.stdout is not None
+                for line in p.stdout:
+                    # git rewrites a progress line with \r; the log is line-based
+                    if s := line.replace('\r', '\n').strip():
+                        self.log(s + '\n')
+                p.wait()
+                ok = p.returncode == 0
+            except OSError as e:
+                self.log(f'{e}\n')
+            if not ok:
+                self.repo_status = self.t('repo.netFail')
+                self.repo_busy = False
+                self.repoChanged.emit()
+                return
+            try:
                 r = subprocess.run([git, '-C', self.repo_path, 'rev-list', '--count',
                                     'HEAD..origin/main'],
                                    capture_output=True, text=True, env=pu.child_env(),
@@ -445,8 +515,11 @@ class Model(QObject):
                     self.repo_behind = int(r.stdout.strip() or 0)
                     self.repo_status = (self.t('repo.upToDate') if self.repo_behind == 0
                                         else self.t('repo.behind', self.repo_behind))
+                else:
+                    self.repo_status = self.t('repo.netFail')
             except (OSError, ValueError):
-                pass
+                self.repo_status = self.t('repo.netFail')
+            self.log(self.repo_status + '\n')
             self.repo_busy = False
             self.repoChanged.emit()
 
@@ -514,7 +587,16 @@ class Model(QObject):
             try:
                 from .win import fetch as wf, toolchain as wtc
                 self.log(self.t('dep.install.begin', dep.id) + '\n')
-                if what == 'llvm':
+                if what == 'dotnet':
+                    self.log(self.t('dep.dotnet.downloading') + '\n')
+                    path = wf.install_dotnet(
+                        log=lambda s: self.log(str(s) + '\n'),
+                        progress=lambda d, t_: self.log(
+                            f'  {d // 1048576} MB' +
+                            (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
+                    self.log(self.t('dep.dotnet.done', str(path)) + '\n')
+                    ok = True
+                elif what == 'llvm':
                     self.log(self.t('dep.llvm.downloading') + '\n')
                     path = wf.install_llvm(
                         log=lambda s: self.log(str(s) + '\n'),
@@ -578,6 +660,11 @@ class Model(QObject):
         started them all at once and their downloads interleaved in the log (reported from a
         handheld: LLVM and SDK lines mixed). Order also matters for correctness — the SDK is
         fetched with git, which the git row may be installing.
+
+        The list is snapshotted once, and the wait is on that same `Dep` object: `_install_win`
+        ends with `check_deps()`, which replaces `self.deps` with fresh objects, so re-reading
+        `self.deps` mid-run would wait on a `Dep` nobody is installing and every later row would
+        look finished instantly.
         """
         pending = [d for d in self.deps if not d.ok and d.install]
         if not pending or getattr(self, '_install_all_running', False):

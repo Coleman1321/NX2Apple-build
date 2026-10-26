@@ -201,6 +201,8 @@ enum L10n {
         "dep.dotnet": (".NET SDK 10", ".NET SDK 10"),
         "dep.dotnet.hint": ("dotnet-install.sh 装到 ~/.dotnet", "dotnet-install.sh into ~/.dotnet"),
         "dep.dotnet.missing": ("没找到带 SDK 10 的 dotnet", "no dotnet with SDK 10 found"),
+        "dep.dotnet.downloading": ("正在下载 .NET SDK 10…（约 287 MB，解压后约 900 MB）", "Downloading .NET SDK 10… (about 287 MB, about 900 MB unpacked)"),
+        "dep.dotnet.done": (".NET SDK 已安装：%@", ".NET SDK installed: %@"),
         "dep.python": ("Python + 包", "Python + packages"),
         "dep.python.hint": ("lz4 capstone fonttools backports.zstd", "lz4 capstone fonttools backports.zstd"),
         "dep.python.missing": ("%@ 缺包", "%@ is missing packages"),

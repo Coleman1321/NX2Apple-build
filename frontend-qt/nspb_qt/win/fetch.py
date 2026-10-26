@@ -35,75 +35,140 @@ class DownloadError(Exception):
     """A user-facing download failure with an actionable message."""
 
 
+def rank_by_speed(urls: list[str], log: Callable[[str], None],
+                  probe_bytes: int = 256 << 10, timeout: float = 8.0) -> list[str]:
+    """Order `urls` fastest-first by timing a small ranged request against each.
+
+    This exists because the failure that prompted it was not an error: the 182 MiB LLVM archive
+    downloaded from GitHub in 974 s (about 190 KB/s) and *succeeded*, so a fallback-on-failure
+    design never fired. Nothing was broken, it was just an hour of waiting — and on a handheld
+    that reads as a hang.
+
+    The clock starts at the first byte, not at the request: a TLS handshake to a proxy takes a
+    couple of seconds on its own, and timing it would make every source look equally slow (the
+    first version of this did exactly that and picked at random).
+
+    A source that errors or times out on the probe is kept at the end rather than dropped: the
+    probe is a smaller request than the real one and can fail on its own (a server that rejects
+    Range, a hiccup), so it still gets its turn if everything faster fails. The bytes are
+    discarded — only the speed is used.
+    """
+    if len(urls) < 2:
+        return urls
+    results: list[tuple[float, str]] = []
+    for u in urls:
+        try:
+            req = urllib.request.Request(u, headers={'User-Agent': 'NS-Port-Builder',
+                                                     'Range': f'bytes=0-{probe_bytes - 1}'})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                first = r.read(min(64 << 10, probe_bytes))
+                t_first = time.time()
+                rest = r.read(probe_bytes - len(first)) if len(first) < probe_bytes else b''
+                t_end = time.time()
+            got = len(first) + len(rest)
+            if not got:
+                raise OSError('empty response')
+            # Rate over the transfer only; when the whole probe arrived in the first read there
+            # is no transfer window, so that read's own duration is the measurement.
+            dt = (t_end - t_first) if rest else max(t_end - t_first, 1e-3)
+            results.append((dt, u))
+            log(f'  {u.split("//")[1].split("/")[0]}: '
+                f'{got / 1024 / max(dt, 1e-3):.0f} KB/s')
+        except Exception as e:                          # noqa: BLE001 - a probe never fails a run
+            results.append((float('inf'), u))
+            log(f'  {u.split("//")[1].split("/")[0]}: {type(e).__name__} '
+                f'(kept as a last resort)')
+    results.sort(key=lambda r: r[0])
+    return [u for _, u in results]
+
+
 def download(url: str, dest: Path, sha256: str, size: int | None = None,
              log: Callable[[str], None] | None = None,
-             progress: Callable[[int, int], None] | None = None) -> Path:
-    """Fetch `url` into `dest`, verifying length and SHA-256.
+             progress: Callable[[int, int], None] | None = None,
+             algo: str = 'sha256') -> Path:
+    """Fetch `url` into `dest`, verifying its digest.
 
     Downloads to a `.part` file and renames on success, so an interrupted download never looks
     like a usable archive on the next start.
+
+    `algo` exists because Microsoft publishes SHA-512 for the .NET archives (their
+    `releases.json` hashes are 128 hex characters, not 64) and we use their number rather than a
+    self-computed one: a hash this project computed itself would only prove the file is what we
+    already downloaded, not that it is what Microsoft published.
     """
     log = log or (lambda s: None)
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.is_file():
-        got = sha256_of(dest)
+        got = digest_of(dest, algo)
         if got == sha256.lower():
             log(f'cached: {dest.name} ({got[:16]}…)')
             return dest
         log(f'{dest.name} has the wrong hash ({got[:16]}…): downloading again')
         dest.unlink()
     part = dest.with_suffix(dest.suffix + '.part')
-    part.unlink(missing_ok=True)
-    log(f'downloading {url}')
-    h = hashlib.sha256()
-    total = 0
-    t0 = time.time()
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'NS-Port-Builder'})
-        with urllib.request.urlopen(req, timeout=120) as r, open(part, 'wb') as f:
-            expected = int(r.headers.get('Content-Length') or 0) or (size or 0)
-            while True:
-                chunk = r.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
-                h.update(chunk)
-                total += len(chunk)
-                if progress:
-                    progress(total, expected)
-                elif expected and total % (32 << 20) < (1 << 20):
-                    log(f'  {total / 2**20:.0f} / {expected / 2**20:.0f} MiB'
-                        f' ({100 * total / expected:.0f}%)')
-    except urllib.error.HTTPError as e:
+    errors: list[str] = []
+    urls = rank_by_speed(tc.mirror_urls(url), log)
+    for attempt, u in enumerate(urls):
         part.unlink(missing_ok=True)
-        raise DownloadError(f'HTTP {e.code} for {url}: the release may have moved; check '
-                            'github.com/mstorsjo/llvm-mingw/releases') from e
-    except (urllib.error.URLError, OSError) as e:
-        part.unlink(missing_ok=True)
-        raise DownloadError(f'cannot download {url}: {e}') from e
-    got = h.hexdigest()
-    if got != sha256.lower():
-        part.unlink(missing_ok=True)
-        raise DownloadError(
-            f'the downloaded {dest.name} does not match the pinned SHA-256:\n'
-            f'  expected {sha256.lower()}\n  got      {got}\n'
-            'The download was deleted. If this repeats, the release was replaced upstream: '
-            'set "llvm_dir" in toolchain.json to an existing install instead.')
-    # The length is a progress hint, not a check: SHA-256 above is the authority. A pinned size
-    # that is off by a byte (an estimate, or an asset re-uploaded without its hash changing in the
-    # code) must not fail a download whose content is provably right.
-    if size and total != size:
-        log(f'note: {dest.name} is {total} bytes, the pinned size says {size} — content verified '
-            f'by SHA-256, continuing')
-    part.replace(dest)
-    log(f'downloaded {dest.name} ({total / 2**20:.0f} MiB in {time.time() - t0:.0f} s, '
-        f'sha256 {got[:16]}…)')
-    return dest
+        if attempt:
+            log(f'trying another source: {u}')
+        else:
+            log(f'downloading {u}')
+        h = hashlib.new(algo)
+        total = 0
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(u, headers={'User-Agent': 'NS-Port-Builder'})
+            with urllib.request.urlopen(req, timeout=120) as r, open(part, 'wb') as f:
+                expected = int(r.headers.get('Content-Length') or 0) or (size or 0)
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    h.update(chunk)
+                    total += len(chunk)
+                    if progress:
+                        progress(total, expected)
+                    elif expected and total % (32 << 20) < (1 << 20):
+                        log(f'  {total / 2**20:.0f} / {expected / 2**20:.0f} MiB'
+                            f' ({100 * total / expected:.0f}%)')
+        except urllib.error.HTTPError as e:
+            part.unlink(missing_ok=True)
+            errors.append(f'HTTP {e.code} from {u}')
+            continue
+        except (urllib.error.URLError, OSError) as e:
+            part.unlink(missing_ok=True)
+            errors.append(f'{u}: {e}')
+            continue
+        got = h.hexdigest()
+        if got != sha256.lower():
+            # A mirror that serves different bytes is rejected exactly like a corrupted direct
+            # download: the hash is the only thing that says the toolchain is the one we tested.
+            part.unlink(missing_ok=True)
+            errors.append(f'{u}: {algo.upper()} {got[:16]}… does not match the pinned '
+                          f'{sha256[:16]}…')
+            continue
+        # The length is a progress hint, not a check: the digest above is the authority. A pinned
+        # size that is off by a byte (an estimate, or an asset re-uploaded without its hash
+        # changing in the code) must not fail a download whose content is provably right.
+        if size and total != size:
+            log(f'note: {dest.name} is {total} bytes, the pinned size says {size} — content '
+                f'verified by {algo.upper()}, continuing')
+        part.replace(dest)
+        log(f'downloaded {dest.name} ({total / 2**20:.0f} MiB in {time.time() - t0:.0f} s, '
+            f'{algo} {got[:16]}…)')
+        return dest
+    raise DownloadError(
+        f'could not download {dest.name}:\n  ' + '\n  '.join(errors) +
+        '\nNothing was kept. If this repeats, the release was replaced upstream: point '
+        '"llvm_dir" (or "ios_sdk") in toolchain.json at an existing install instead.')
 
 
-def sha256_of(path: Path, limit: int | None = None) -> str:
-    h = hashlib.sha256()
+def digest_of(path: Path, algo: str = 'sha256', limit: int | None = None) -> str:
+    """The hex digest of a file under `algo` (sha256 for our pins, sha512 for Microsoft's)."""
+    h = hashlib.new(algo)
     left = limit
     with open(path, 'rb') as f:
         while True:
@@ -117,6 +182,10 @@ def sha256_of(path: Path, limit: int | None = None) -> str:
             if left is not None:
                 left -= len(b)
     return h.hexdigest()
+
+
+def sha256_of(path: Path, limit: int | None = None) -> str:
+    return digest_of(path, 'sha256', limit)
 
 
 def _strip_root(member: str) -> str:
@@ -137,16 +206,16 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
     """
     log = log or (lambda s: None)
     asset = tc.download_asset(arch)
-    base = Path(dest or (Path(__file__).resolve().parents[2]))
-    target = base / '.tools' / f'llvm-mingw-{tc.LLVM_MINGW_VERSION}'
+    root = Path(dest) if dest else tc.tools_dir()
+    target = root / f'llvm-mingw-{tc.LLVM_MINGW_VERSION}'
     if (target / 'bin' / 'clang.exe').is_file():
         log(f'LLVM-MinGW already installed: {target}')
     else:
-        cache = base / '.tools' / 'downloads'
+        cache = root / 'downloads'
         zpath = download(asset['url'], cache / asset['name'], asset['sha256'], asset['size'],
                          log=log, progress=progress)
         log(f'unpacking {zpath.name} → {target} (about 1 GiB on disk)')
-        staging = base / '.tools' / f'.unpack-{tc.LLVM_MINGW_VERSION}'
+        staging = root / f'.unpack-{tc.LLVM_MINGW_VERSION}'
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True)
         try:
@@ -198,6 +267,64 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
     return target
 
 
+def install_dotnet(dest: Path | None = None,
+                   log: Callable[[str], None] | None = None,
+                   progress: Callable[[int, int], None] | None = None) -> Path:
+    """Download the .NET SDK zip and unpack it into the app's own tools folder.
+
+    A zip, not the .exe installer: the installer wants to write Program Files and therefore wants
+    administrator rights, and it puts the SDK where the app then has to find it. The zip is
+    self-contained — unpack it and `dotnet.exe` is the root — so this needs no elevation and no
+    registry, and `toolchain.dotnet_dir` looks in the folder it lands in.
+
+    Verified by SHA-256 from Microsoft's release metadata (`releases.json`, the same hash the
+    official installers use). The archive is about 287 MB; unpacked it is about 900 MB.
+    """
+    log = log or (lambda s: None)
+    asset = tc.DOTNET_ASSET
+    root = Path(dest) if dest else tc.tools_dir()
+    target = root / f'dotnet-{tc.DOTNET_VERSION}'
+    if (target / 'dotnet.exe').is_file():
+        log(f'.NET SDK already installed: {target}')
+        return target
+    cache = root / 'downloads'
+    zpath = download(asset['url'], cache / asset['name'], asset['sha256'], asset['size'],
+                     log=log, progress=progress, algo=asset.get('algo', 'sha256'))
+    log(f'unpacking {zpath.name} → {target} (about 900 MB on disk)')
+    staging = root / f'.unpack-dotnet-{tc.DOTNET_VERSION}'
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(zpath) as z:
+            bad = z.testzip()
+            if bad:
+                raise DownloadError(f'{zpath.name} is corrupt (first bad member: {bad})')
+            # No top-level folder in this zip: members are host/, sdk/, shared/ directly. Every
+            # path is taken as-is, which is what makes dotnet.exe land at the root.
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                out = staging / info.filename
+                # a zip member may try to escape the target (../ in the name)
+                if not str(out.resolve()).startswith(str(staging.resolve())):
+                    continue
+                out.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(info) as src, open(out, 'wb') as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+    except zipfile.BadZipFile as e:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise DownloadError(f'{zpath.name} is not a valid zip: {e}') from e
+    if not (staging / 'dotnet.exe').is_file():
+        shutil.rmtree(staging, ignore_errors=True)
+        raise DownloadError(f'{zpath.name} unpacked without dotnet.exe at its root: the release '
+                            'layout changed; install the SDK from dotnet.microsoft.com instead')
+    shutil.rmtree(target, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging.replace(target)
+    log(f'.NET SDK {tc.DOTNET_VERSION} installed: {target}')
+    return target
+
+
 def metal_tools_hint() -> str:
     return (f'Apple "Metal Developer Tools for Windows" {tc.METAL_TOOLS_VERSION}: '
             f'{tc.METAL_TOOLS_URL}')
@@ -243,7 +370,7 @@ def install_git(arch: str | None = None, dest: Path | None = None,
     # The self-extractor writes the tree directly into -o<dir>; -y answers any prompt, -Install
     # skips the integration step (no registry, no PATH changes).
     r = subprocess.run([str(zpath), f'-o{target}', '-y', '-Install'],
-                       capture_output=True, text=True, errors='replace')
+                       capture_output=True, text=True, errors='replace', **tc.no_window())
     if r.returncode != 0 or not exe.is_file():
         raise DownloadError(
             f'PortableGit unpacking failed (exit {r.returncode}). '

@@ -8,11 +8,15 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from .model import Model
+from .platform_util import hide_console_for_children
 from .style import STYLE
 from .ui import MainWindow
 
 
 def main() -> int:
+    # Before anything can spawn a child: on Windows every subprocess would otherwise open its own
+    # console window (see the docstring — this is the "black window, nothing happens" report).
+    hide_console_for_children()
     # High-DPI: let Qt scale with the screen. On a handheld (a small 720p/800p panel at
     # 125-150%) the default policy rounds the scale factor up and the window no longer fits;
     # PassThrough honours the system factor as-is and the font sizes below stay in points.

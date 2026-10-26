@@ -745,6 +745,347 @@ class FetchTest(unittest.TestCase):
         self.assertIn(tc.LLVM_MINGW_VERSION, a['url'])
         self.assertTrue(a['url'].endswith(a['name']))
 
+    def test_mirror_urls_cover_github_assets(self) -> None:
+        """A GitHub release asset gets the direct URL plus every mirror, in that order.
+
+        The handheld report measured 974 s for the 182 MiB LLVM archive from GitHub, so a
+        mainland connection needs the mirrors; the direct URL stays first for everyone else.
+        """
+        urls = tc.mirror_urls('https://github.com/mstorsjo/llvm-mingw/releases/download/x/y.zip')
+        self.assertEqual(urls[0],
+                         'https://github.com/mstorsjo/llvm-mingw/releases/download/x/y.zip')
+        self.assertEqual(len(urls), 1 + len(tc.GITHUB_MIRRORS))
+        for m, u in zip(tc.GITHUB_MIRRORS, urls[1:]):
+            self.assertEqual(u, m + urls[0])
+
+    def test_mirror_urls_leave_other_hosts_alone(self) -> None:
+        """Microsoft's CDN is fast on mainland networks; proxying it would only add a hop."""
+        self.assertEqual(tc.mirror_urls(tc.DOTNET_ASSET['url']), [tc.DOTNET_ASSET['url']])
+
+    def test_rank_by_speed_puts_the_fastest_first(self) -> None:
+        """The 974-second case: nothing failed, so only a speed probe can pick a better source."""
+        from nspb_qt.win import fetch
+        urls = ['https://slow/x.zip', 'https://fast/x.zip', 'https://dead/x.zip']
+
+        class Resp:
+            """First read delivers a slice, the second delivers the rest: a transfer window."""
+
+            def __init__(self, first, rest):
+                self.chunks = [first, rest]
+
+            def read(self, n):
+                return self.chunks.pop(0) if self.chunks else b''
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        # each URL: t_first, t_end. slow transfers in 3.0 s, fast in 0.2 s, dead raises.
+        clock = iter([0.0, 3.0,  10.0, 10.2])
+
+        def fake_urlopen(req, timeout=0):
+            if 'dead' in req.full_url:
+                raise OSError('no route')
+            return Resp(b'x' * 65536, b'y' * 65536)
+
+        with mock.patch('urllib.request.urlopen', fake_urlopen), \
+                mock.patch('time.time', side_effect=lambda: next(clock)):
+            out = fetch.rank_by_speed(urls, log=lambda s: None)
+        # fastest first, the unreachable one last rather than dropped
+        self.assertEqual(out, ['https://fast/x.zip', 'https://slow/x.zip', 'https://dead/x.zip'])
+
+    def test_rank_by_speed_times_the_transfer_not_the_handshake(self) -> None:
+        """A slow TLS setup must not make a fast source look slow.
+
+        The first version timed from the request, and every mirror's proxy handshake (2-3 s on a
+        real connection) dominated the 256 KB transfer, so it picked at random.
+        """
+        from nspb_qt.win import fetch
+
+        class Resp:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+
+            def read(self, n):
+                return self.chunks.pop(0) if self.chunks else b''
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        # both deliver in 0.1 s of transfer, but "slow" took 30 s to connect
+        clock = iter([30.0, 30.1,  31.0, 31.1])
+
+        def fake_urlopen(req, timeout=0):
+            return Resp([b'x' * 65536, b'y' * 65536])
+
+        with mock.patch('urllib.request.urlopen', fake_urlopen), \
+                mock.patch('time.time', side_effect=lambda: next(clock)):
+            out = fetch.rank_by_speed(['https://a/x', 'https://b/x'], log=lambda s: None)
+        self.assertEqual(len(out), 2)     # neither was penalised for its handshake
+
+    def test_rank_by_speed_keeps_a_single_url_untouched(self) -> None:
+        """No probe when there is nothing to choose between (a non-GitHub URL)."""
+        from nspb_qt.win import fetch
+        with mock.patch('urllib.request.urlopen', side_effect=AssertionError('probed')):
+            self.assertEqual(fetch.rank_by_speed(['https://only/x'], lambda s: None),
+                             ['https://only/x'])
+
+    def test_download_falls_through_to_a_mirror(self) -> None:
+        """The first URL failing must not end the download; the hash decides what is accepted."""
+        from nspb_qt.win import fetch
+        payload = b'toolchain bytes'
+        want = __import__('hashlib').sha256(payload).hexdigest()
+
+        class Resp:
+            headers = {'Content-Length': str(len(payload))}
+
+            def __init__(self):
+                self.left = payload
+
+            def read(self, n):
+                b, self.left = self.left, b''   # one read, then EOF: download() loops until b''
+                return b
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        seen = []
+
+        def fake_urlopen(req, timeout=0):
+            seen.append(req.full_url)
+            if len(seen) == 1:
+                raise OSError('connection reset')       # the direct URL fails
+            return Resp()
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch('urllib.request.urlopen', fake_urlopen), \
+                mock.patch.object(fetch, 'rank_by_speed', lambda u, log, **k: u):
+            out = fetch.download('https://github.com/a/b/releases/download/v/x.zip',
+                                 Path(td) / 'x.zip', want, log=lambda s: None)
+            self.assertEqual(out.read_bytes(), payload)
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(seen[1].startswith(tc.GITHUB_MIRRORS[0]))
+
+    def test_download_rejects_a_mirror_serving_other_bytes(self) -> None:
+        """A mirror is only a transport: bytes that do not match the pin are refused."""
+        from nspb_qt.win import fetch
+
+        class Resp:
+            headers = {}
+
+            def __init__(self, body):
+                self.body = body
+
+            def read(self, n):
+                b, self.body = self.body, b''
+                return b
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        calls = []
+
+        def fake_urlopen(req, timeout=0):
+            calls.append(req.full_url)
+            # the direct URL is unreachable, the first mirror serves the wrong bytes, the
+            # second mirror serves the right ones
+            if len(calls) == 1:
+                raise OSError('no route')
+            return Resp(b'wrong' if len(calls) == 2 else b'right')
+
+        want = __import__('hashlib').sha256(b'right').hexdigest()
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch('urllib.request.urlopen', fake_urlopen), \
+                mock.patch.object(fetch, 'rank_by_speed', lambda u, log, **k: u):
+            out = fetch.download('https://github.com/a/b/releases/download/v/x.zip',
+                                 Path(td) / 'x.zip', want, log=lambda s: None)
+            self.assertEqual(out.read_bytes(), b'right')
+        self.assertEqual(len(calls), 3)
+
+    def test_download_reports_every_failure(self) -> None:
+        """When nothing works the message names each attempt, not just the last one."""
+        from nspb_qt.win import fetch
+
+        def fake_urlopen(req, timeout=0):
+            raise OSError('unreachable')
+
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch('urllib.request.urlopen', fake_urlopen), \
+                mock.patch.object(fetch, 'rank_by_speed', lambda u, log, **k: u):
+            with self.assertRaises(fetch.DownloadError) as cm:
+                fetch.download('https://github.com/a/b/releases/download/v/x.zip',
+                               Path(td) / 'x.zip', '0' * 64, log=lambda s: None)
+        msg = str(cm.exception)
+        self.assertIn('unreachable', msg)
+        self.assertEqual(msg.count('github.com/a/b'), 1 + len(tc.GITHUB_MIRRORS))
+
+
+class DotnetTest(unittest.TestCase):
+    """The .NET row and its in-app installer.
+
+    The handheld report's first line was "the first dependency, .NET SDK 10, never appears in the
+    log": on Windows the panel built its rows from `_windows_deps`, which had no .NET entry, so
+    `install all` could not install it and nothing said so.
+    """
+
+    def test_dotnet_asset_is_pinned(self) -> None:
+        """Microsoft publishes SHA-512 in releases.json, so the pin carries that algorithm."""
+        a = tc.DOTNET_ASSET
+        algo = a.get('algo', 'sha256')
+        want = 128 if algo == 'sha512' else 64
+        self.assertEqual(len(a['sha256']), want, algo)
+        self.assertTrue(all(c in '0123456789abcdef' for c in a['sha256']))
+        self.assertGreater(a['size'], 200_000_000)
+        self.assertIn(tc.DOTNET_VERSION, a['url'])
+        self.assertTrue(a['url'].endswith(a['name']))
+
+    def test_dotnet_version_satisfies_the_extractor_target(self) -> None:
+        """`nx_extract` targets net10.0; a lower major builds nothing, so the pin must be >= 10."""
+        repo = QT.parent
+        csproj = (repo / 'dm/tools/nx_extract/nx_extract.csproj').read_text(encoding='utf-8')
+        self.assertIn(f'net{tc.DOTNET_MAJOR}.0', csproj)
+
+    def test_probe_reports_missing_when_no_dotnet_anywhere(self) -> None:
+        with mock.patch.object(tc, 'dotnet_dir', return_value=None):
+            p = tc.probe_dotnet()
+        self.assertEqual(p.state, 'missing')
+        self.assertEqual(p.id, 'dotnet')
+        self.assertIn('download', p.extra)
+
+    def test_probe_rejects_an_old_sdk(self) -> None:
+        """SDK 8 alone is `wrong`, not `ok`: the failure would otherwise appear mid-build."""
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(tc, 'dotnet_dir', return_value=Path(td)), \
+                mock.patch.object(tc, 'dotnet_sdks', return_value=['8.0.404']):
+            p = tc.probe_dotnet()
+        self.assertEqual(p.state, 'wrong')
+        self.assertIn('net10.0', p.detail)
+
+    def test_probe_accepts_sdk_10_and_newer(self) -> None:
+        for sdks in (['10.0.403'], ['11.0.100', '10.0.403']):
+            with tempfile.TemporaryDirectory() as td, \
+                    mock.patch.object(tc, 'dotnet_dir', return_value=Path(td)), \
+                    mock.patch.object(tc, 'dotnet_sdks', return_value=sdks):
+                p = tc.probe_dotnet()
+            self.assertEqual(p.state, 'ok', sdks)
+            self.assertEqual(p.version, sdks[0])
+
+    def test_tools_dir_is_outside_the_app_folder(self) -> None:
+        """Tools must survive an app update (the app is re-extracted from a zip).
+
+        This was a real bug: LLVM unpacked into `_internal/.tools`, so every update threw away
+        182 MB of toolchain. `bundled_tools_dir()` stays as a read-only fallback for people who
+        already have it there.
+        """
+        with mock.patch.dict(os.environ, {'LOCALAPPDATA': '/tmp/fake-local'}):
+            self.assertEqual(tc.tools_dir(), Path('/tmp/fake-local/NS Port Builder/tools'))
+        self.assertNotEqual(tc.tools_dir(), tc.bundled_tools_dir())
+
+    def test_llvm_dir_finds_the_app_installed_copy(self) -> None:
+        """The install-then-check-again path: the detector has to look where the installer wrote."""
+        with tempfile.TemporaryDirectory() as td:
+            tools = Path(td) / 'tools'
+            llvm = tools / f'llvm-mingw-{tc.LLVM_MINGW_VERSION}'
+            (llvm / 'bin').mkdir(parents=True)
+            (llvm / 'bin/clang.exe').write_bytes(b'stub')
+            with mock.patch.object(tc, 'tools_dir', return_value=tools), \
+                    mock.patch.object(tc, 'setting', return_value=None), \
+                    mock.patch.dict(os.environ, {}, clear=False), \
+                    mock.patch('shutil.which', return_value=None):
+                os.environ.pop('NSPB_LLVM_DIR', None)
+                self.assertEqual(tc.llvm_dir(), llvm)
+
+    def test_install_dotnet_rejects_an_archive_without_dotnet_exe(self) -> None:
+        """A changed release layout stops with a message instead of leaving a broken folder."""
+        from nspb_qt.win import fetch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            z = root / 'downloads' / tc.DOTNET_ASSET['name']
+            z.parent.mkdir(parents=True)
+            with zipfile.ZipFile(z, 'w') as zf:
+                zf.writestr('somewhere/else.txt', 'no dotnet here')
+            with mock.patch.object(fetch, 'download', return_value=z):
+                with self.assertRaises(fetch.DownloadError) as cm:
+                    fetch.install_dotnet(dest=root, log=lambda s: None)
+            self.assertIn('dotnet.exe', str(cm.exception))
+            self.assertFalse((root / f'dotnet-{tc.DOTNET_VERSION}').exists())
+
+    def test_install_dotnet_unpacks_at_the_root(self) -> None:
+        """The SDK zip has no top-level folder: dotnet.exe ends up at the install root."""
+        from nspb_qt.win import fetch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            z = root / 'downloads' / tc.DOTNET_ASSET['name']
+            z.parent.mkdir(parents=True)
+            with zipfile.ZipFile(z, 'w') as zf:
+                zf.writestr('dotnet.exe', b'MZ')
+                zf.writestr('sdk/10.0.403/dotnet.dll', b'x')
+            with mock.patch.object(fetch, 'download', return_value=z):
+                out = fetch.install_dotnet(dest=root, log=lambda s: None)
+            self.assertEqual(out, root / f'dotnet-{tc.DOTNET_VERSION}')
+            self.assertTrue((out / 'dotnet.exe').is_file())
+            self.assertTrue((out / 'sdk/10.0.403/dotnet.dll').is_file())
+
+
+class ConsoleWindowTest(unittest.TestCase):
+    """No child of this app may open its own console window on Windows.
+
+    The handheld report: "after the last log line a command-line window appears, shows nothing,
+    and the install progress stops" — it was a git child's console. The fix patches
+    `subprocess.Popen` once at start-up, so the repository's own scripts (which this front end
+    does not own) inherit the invisible console too.
+    """
+
+    def test_no_window_kwargs_are_empty_off_windows(self) -> None:
+        from nspb_qt import platform_util as pu
+        if not pu.IS_WIN:
+            self.assertEqual(pu.no_window_kwargs(), {})
+
+    def test_patch_adds_creationflags_and_keeps_explicit_ones(self) -> None:
+        from nspb_qt import platform_util as pu
+        seen = []
+
+        class FakePopen:
+            def __init__(self, args, *a, **k):
+                seen.append(k)
+
+        original = subprocess.Popen.__init__
+        subprocess.Popen.__init__ = FakePopen.__init__
+        try:
+            with mock.patch.object(pu, 'IS_WIN', True), \
+                    mock.patch.object(subprocess, 'CREATE_NO_WINDOW', 0x08000000, create=True):
+                pu.hide_console_for_children()
+                subprocess.Popen(['x'])
+                subprocess.Popen(['x'], creationflags=0x00000008)   # DETACHED_PROCESS
+        finally:
+            subprocess.Popen.__init__ = original
+        self.assertEqual(seen[0].get('creationflags'), 0x08000000)
+        self.assertEqual(seen[1].get('creationflags'), 0x00000008)   # caller's intent kept
+
+    def test_patch_is_a_no_op_off_windows(self) -> None:
+        from nspb_qt import platform_util as pu
+        before = subprocess.Popen.__init__
+        with mock.patch.object(pu, 'IS_WIN', False):
+            pu.hide_console_for_children()
+        self.assertIs(subprocess.Popen.__init__, before)
+
+    def test_win_modules_call_the_helper(self) -> None:
+        """The direct calls (probes, git, the self-extractor) pass it explicitly."""
+        for name in ('toolchain.py', 'fetch.py', 'sdk_fetch.py'):
+            src = (QT / 'nspb_qt/win' / name).read_text(encoding='utf-8')
+            self.assertIn('no_window()', src, name)
+
 
 class ConstantParityTest(unittest.TestCase):
     """`toolchain.py` duplicates the package constants so it can be loaded standalone from the

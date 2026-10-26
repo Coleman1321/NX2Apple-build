@@ -204,6 +204,7 @@ Newest first. The fork follows upstream daily, so its game list and host fixes a
 
 | Date | Version | What changed |
 |---|---|---|
+| 2026-10-26 | v0.4.6 | **Windows app fixed against real hardware reports**: the missing .NET SDK row (it never appeared, so nothing could install it), no more black console windows stealing the foreground, download mirrors chosen by a speed probe (a 974 s LLVM download on a mainland connection), tools installed outside the app folder so updates stop deleting them, and repository checks that say what git is doing |
 | 2026-10-26 | v0.4.5 | **Mac app output** (a double-clickable .app from the same build); **A15/A16 and earlier devices** via CPU BC decode, as an app switch; per-game data folders (`Documents/games/<id>/`) so an external drive works; NRO header no longer scanned as code; the nightly sync can no longer fail silently |
 | 2026-10-26 | v0.4.4 | **Fixes a build failure that hit every app build in v0.4.3** (`work` read before it was assigned); 72 games (+3) |
 | 2026-10-26 | v0.4.3 | NSZ/XCZ dumps work out of the box; a fresh Xcode now reports its missing iOS SDK; three environment traps closed |

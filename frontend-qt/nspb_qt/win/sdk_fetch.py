@@ -64,12 +64,12 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
     work = dest / f'.clone-{version}'
     shutil.rmtree(work, ignore_errors=True)
 
-    def run(args: list[str], what: str) -> None:
+    def run(args: list[str], what: str, repo: str = tc.SDK_REPO) -> None:
         log(f'$ git {" ".join(args)}')
         try:
             p = subprocess.Popen([git] + args, cwd=str(dest), stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, errors='replace',
-                                 bufsize=1)
+                                 bufsize=1, **tc.no_window())
         except OSError as e:
             raise SdkError(f'cannot start git: {e}') from e
         assert p.stdout is not None
@@ -81,12 +81,28 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
         if p.returncode:
             raise SdkError(f'git {what} failed (exit {p.returncode}); check the network and retry')
 
-    run(['clone', '--filter=blob:none', '--sparse', '--depth', '1',
-         tc.SDK_REPO, str(work)], 'clone')
+    # The clone goes through the same mirror list as the file downloads: the repository is on
+    # GitHub, and a mainland connection that took 974 s for a 182 MB release asset is not going to
+    # enjoy a shallow clone either. The mirrors are git-protocol proxies, so the SHA of the
+    # checkout is unchanged — and the SDK is verified by its own layout afterwards.
+    clone_args = ['clone', '--filter=blob:none', '--sparse', '--depth', '1']
+    last: Exception | None = None
+    for i, repo in enumerate(tc.mirror_urls(tc.SDK_REPO)):
+        if i:
+            log(f'retrying through a mirror: {repo}')
+            shutil.rmtree(work, ignore_errors=True)
+        try:
+            run(clone_args + [repo, str(work)], 'clone', repo)
+            last = None
+            break
+        except SdkError as e:
+            last = e
+    if last is not None:
+        raise last
     # narrow the working tree to the one SDK before checking anything out
     try:
         subprocess.run([git, 'sparse-checkout', 'set', version], cwd=str(work),
-                       check=True, capture_output=True, text=True)
+                       check=True, capture_output=True, text=True, **tc.no_window())
     except subprocess.CalledProcessError as e:
         raise SdkError(f'git sparse-checkout failed: {(e.stderr or "").strip()[-400:]}') from e
     src = work / version
@@ -107,7 +123,7 @@ def available_versions(log: Callable[[str], None] | None = None) -> list[str]:
         return []
     try:
         r = subprocess.run([git, 'ls-remote', '--heads', tc.SDK_REPO], capture_output=True,
-                           text=True, timeout=120)
+                           text=True, timeout=120, **tc.no_window())
     except (OSError, subprocess.SubprocessError):
         return []
     return [] if r.returncode else list(tc.SDK_ACCEPTED)

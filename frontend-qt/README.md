@@ -45,11 +45,13 @@ wherever `NSPB_REPO` points, and the repository group lets you pick it by hand.
 
 ## What is not there yet
 
-- **The Windows build path has not run on a real Windows machine.** Everything below is written
-  and unit-tested on macOS (69 tests in `tests/test_win.py`), but the compile, link, `Metal`
-  compile and the final IPA have not been exercised against a genuine LLVM-MinGW + iPhoneOS SDK
-  + Metal Developer Tools install. See [Windows build → Open risks](#open-risks).
-- No self-update, no repository download/update buttons (the SwiftUI app has both).
+- **The Windows build path has run on a real Windows machine** — a handheld PC, which is where the
+  bug reports came from — through repository download, git auto-install and the LLVM / SDK / .NET
+  downloads. The compile, link, `Metal` compile and the final IPA on Windows have still not been
+  exercised end to end against a genuine LLVM-MinGW + iPhoneOS SDK + Metal Developer Tools
+  install. See [Windows build → Open risks](#open-risks).
+- No self-update. Repository download and update buttons do exist (`Download repository`,
+  `Check for updates`, `Pull updates`), and they log what git is doing.
 - No per-stage progress bar, no cancel-with-cleanup (cancel terminates the child).
 
 ## Layout
@@ -98,7 +100,15 @@ The upstream file is never edited, so the daily sync cannot conflict with this w
 
 ## What you need to install
 
-Run this first; it lists what is missing and where to get it:
+The app installs everything it can itself: the Dependencies panel has an **Install** button per
+row and **Install all missing**, and the rows it can fetch are .NET SDK, LLVM-MinGW and the
+iPhoneOS SDK. What it cannot fetch is Apple's Metal Developer Tools (an Apple ID login) and the
+optional Vulkan/GL tools.
+
+Everything it downloads goes to `%LOCALAPPDATA%\NS Port Builder\tools`, outside the app folder, so
+updating the app (re-extracting its zip) does not throw the 182 MB LLVM archive away.
+
+Run this first if you prefer the command line; it lists what is missing and where to get it:
 
 ```bat
 python -m nspb_qt.win.doctor
@@ -106,7 +116,10 @@ python -m nspb_qt.win.doctor
 
 1. **Python 3.10+**, then `pip install PySide6 lz4 capstone fonttools pillow`
    (and `backports.zstd` before Python 3.14).
-2. **.NET SDK 10** — <https://dotnet.microsoft.com/download/dotnet/10.0> (SDK, x64).
+2. **.NET SDK 10** — the app downloads it (the zip, not the installer: no administrator rights,
+   about 287 MB), or get it from <https://dotnet.microsoft.com/download/dotnet/10.0> (SDK, x64).
+   `nx_extract` targets `net10.0`, so SDK 8 or 9 alone is not enough; the dependency row says so
+   rather than failing halfway through a build.
 3. **LLVM-MinGW 20261020** — the app's Dependencies panel downloads and verifies it, or:
 
    ```bat
@@ -118,7 +131,9 @@ python -m nspb_qt.win.doctor
    | archive | SHA-256 |
    |---|---|
    | `llvm-mingw-20261020-ucrt-x86_64.zip` | `fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd` |
-   | `llvm-mingw-20261020-ucrt-aarch64.zip` | `8f24fedd0b75c674c6c83dec2d76a7ac31a690120212843a17e465ef49854f69` |
+
+   Only the x86-64 archive is published by this app; a Windows-on-ARM machine runs it under
+   emulation (the dependency panel says so in a `host architecture` row).
 
    The official `LLVM-*-win64.msi` from llvm.org works too (same clang, same LLD).
 
@@ -147,11 +162,38 @@ If auto-detection picks the wrong folder, set it in
 {
   "llvm_dir": "D:\\tools\\llvm-mingw-20261020-ucrt-x86_64",
   "ios_sdk": "D:\\SDKs\\iPhoneOS26.0.sdk",
+  "dotnet_dir": "C:\\Program Files\\dotnet",
   "metal_dir": "C:\\Program Files\\Metal Developer Tools",
   "spirv_cross_dir": "C:\\VulkanSDK\\1.4.321.0\\Bin",
   "zstd_dir": "C:\\tools\\zstd"
 }
 ```
+
+Each key also has an environment variable (`NSPB_LLVM_DIR`, `NSPB_IOS_SDK`, `NSPB_DOTNET_DIR`,
+`NSPB_METAL_DIR`, …), which wins over the file.
+
+## Downloads, mirrors, and no console windows
+
+Three things about how the app fetches its tools are worth knowing, because each of them was a
+bug report from a handheld PC on a mainland connection:
+
+**Mirrors.** GitHub release assets are the slow ones. Every download tries the direct URL plus
+two mirrors (`ghfast.top`, `gh-proxy.com`), and picks between them by timing a 256 KB ranged
+request — the report that prompted this was a 974-second download that *succeeded*, so failing
+over on errors alone would never have helped. The pinned SHA-256 is the only thing that decides
+what gets unpacked: a mirror serving different bytes is rejected exactly like a corrupted
+download. Microsoft's CDN (the .NET SDK) is not mirrored; it is fast enough on its own.
+
+**Where tools land.** `%LOCALAPPDATA%\NS Port Builder\tools`. Not inside the app folder: the app
+ships as a zip that gets re-extracted for every update, which would take 182 MB of LLVM with it.
+Older builds used `<app>\_internal\.tools` and that path is still read, so an existing install
+keeps working.
+
+**No console windows.** The app is a windowed process, so every child it started — git, clang,
+lld, the PortableGit self-extractor, and the repository's own Python scripts — used to get its
+own black console window. On a handheld that read as "a command line appears, shows nothing, and
+the install stops". `platform_util.hide_console_for_children()` patches `subprocess.Popen` once at
+start-up, so children of children inherit an invisible console too.
 
 ## Verify each step
 

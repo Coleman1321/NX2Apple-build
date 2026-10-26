@@ -161,8 +161,12 @@ def patch(mod: ModuleType, repo: Path, *, j: int | None = None) -> None:
         """The .NET build, but on Windows the output is `nx_extract.exe`."""
         import tempfile
         nx = work / 'tools/nx_extract/nx_extract'
+        # An absolute path: `dotnet` by name relies on PATH, and a toolchain this app downloaded
+        # lives in its own folder (the shim's PATH has it, but not every caller goes through it).
+        dn = tc.dotnet_dir()
+        dotnet = str(dn / 'dotnet.exe') if dn else 'dotnet'
         with tempfile.TemporaryDirectory(prefix='nx_extract_') as td:
-            mod.run(['dotnet', 'build', repo_ / 'dm/tools/nx_extract', '-c', 'Release',
+            mod.run([dotnet, 'build', repo_ / 'dm/tools/nx_extract', '-c', 'Release',
                      '-o', td, '-v', 'quiet', '-nologo'],
                     logs / 'nx_extract_build.log', env=env)
             exe = Path(td) / 'nx_extract.exe'
@@ -270,9 +274,12 @@ def patch(mod: ModuleType, repo: Path, *, j: int | None = None) -> None:
     for name in ('spirv-cross', 'zstd', 'glslangValidator'):
         if p := tc.find_exe(name):
             extra.append(str(p.parent))
-    pf = os.environ.get('ProgramFiles')
-    if pf:
-        extra.append(str(Path(pf) / 'dotnet'))
+    # The .NET root, wherever it actually is: `Program Files` is only one of the places
+    # `dotnet_dir()` accepts, and the copy the app installs for itself is the one that matters on
+    # a machine with no system SDK. Without this, `dotnet build` (called by name in
+    # build_nx_extract) would not find it.
+    if dn := tc.dotnet_dir():
+        extra.append(str(dn))
     mod.TOOL_PATHS = extra
 
     # ---------------------------------------------------------------- the app build

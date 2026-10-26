@@ -225,3 +225,32 @@ def no_window_kwargs() -> dict:
     if IS_WIN:
         return {'creationflags': subprocess.CREATE_NO_WINDOW}
     return {}
+
+
+def hide_console_for_children() -> None:
+    """Stop *every* child this process starts from opening a console window (Windows only).
+
+    Called once at start-up. Per-call `creationflags` cannot be added everywhere: the build runs
+    the repository's own Python scripts as children, and those scripts start clang, git, lld and
+    zip themselves — dozens of call sites in files this front end does not own. A windowed app has
+    no console, so each of those children got a fresh black window, and on a handheld the report
+    was "a command-line window appears, shows nothing, and the install stops moving" — the window
+    was git's, and it was stealing the foreground while the download ran behind it.
+
+    A child created with CREATE_NO_WINDOW still gets a console, just no window, and its own
+    children inherit that invisible console — which is why patching at the boundary is enough to
+    cover the whole tree.
+
+    A caller that passes its own `creationflags` keeps them: DETACHED_PROCESS and
+    CREATE_NEW_CONSOLE mean something, and silently overriding them would break that intent.
+    """
+    if not IS_WIN:
+        return
+    original = subprocess.Popen.__init__
+
+    def patched(self, args, *a, **k):        # noqa: ANN001 - mirrors Popen.__init__
+        if not k.get('creationflags') and not k.get('startupinfo'):
+            k['creationflags'] = subprocess.CREATE_NO_WINDOW
+        original(self, args, *a, **k)
+
+    subprocess.Popen.__init__ = patched       # type: ignore[method-assign]
