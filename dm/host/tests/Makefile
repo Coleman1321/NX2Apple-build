@@ -5,7 +5,7 @@ PYTHON ?= python3
 # tests that use the game profile need GAME=<base game title ID> (there is no default game); GINC only expands when used, so tests without the profile build as before
 GINC = $(if $(strip $(GAME)),-I../gen/$(GAME) -I../../games/$(GAME),$(error GAME is not set: make GAME=<base game title ID>: $(shell python3 ../../games/game.py list | awk -F'\t' '{printf "%s (%s)  ", $$1, $$3}')))
 GAME_H = ../gen/$(GAME)/game_profile.h
-run: $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_commit_list $(B)/t_thread_leak $(B)/t_fs_case $(B)/t_audio $(B)/t_audio_spsc $(B)/t_swkbd $(B)/t_altstack $(B)/t_condvar $(B)/t_condvar_old $(B)/t_pctl $(B)/t_time $(B)/t_shared_font $(B)/t_vorbis $(B)/t_vorbis_divides $(B)/t_hid $(B)/t_haptics $(B)/t_haptics_apple
+run: $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_commit_list $(B)/t_thread_leak $(B)/t_fs_case $(B)/t_audio $(B)/t_audio_spsc $(B)/t_swkbd $(B)/t_altstack $(B)/t_condvar $(B)/t_condvar_old $(B)/t_pctl $(B)/t_time $(B)/t_shared_font $(B)/t_vorbis $(B)/t_vorbis_divides $(B)/t_hid $(B)/t_haptics $(B)/t_haptics_apple $(B)/t_touchpad_geometry
 	$(B)/t_heap_size
 	$(B)/t_touch
 	$(B)/t_gesture
@@ -32,6 +32,7 @@ run: $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_
 	$(B)/t_hid
 	$(B)/t_haptics
 	$(B)/t_haptics_apple
+	$(B)/t_touchpad_geometry
 	$(B)/t_nro
 run: $(B)/t_nro
 run: $(B)/t_system_event
@@ -90,6 +91,8 @@ $(B)/t_hid_tsan: t_hid.c ../hle_hid.c ../hle_haptics.c ../hle_haptics.h ../pad_s
 	clang -O1 -g -fsanitize=thread -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_hid.c ../hle_haptics.c
 $(B)/t_haptics: t_haptics.c ../hle_haptics.c ../hle_haptics.h ../dm_input.h | $(B)
 	clang -O1 -g -Wall -Werror -I.. -o $@ t_haptics.c ../hle_haptics.c
+$(B)/t_touchpad_geometry: t_touchpad_geometry.c ../touchpad_geometry.h ../dm_input.h | $(B)
+	clang -O1 -Wall -I.. $(GINC) -o $@ t_touchpad_geometry.c
 $(B)/t_haptics_apple: t_haptics_apple.m ../haptics_apple.m ../haptics_apple.h ../hle_haptics.c ../hle_haptics.h | $(B)
 	clang -O1 -g -fobjc-arc -Wall -Werror -I.. -o $@ t_haptics_apple.m ../hle_haptics.c -framework Cocoa -framework GameController -framework CoreHaptics
 $(B)/t_time: t_time.c ../hle_time.c ../hle.h ../dm.h $(GAME_H) | $(B)

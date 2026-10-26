@@ -12,6 +12,7 @@
 #include "dm.h"
 #include "dm_input.h"
 #include "front.h"
+#include "touchpad_geometry.h"   // the virtual pad iOS draws, so the preview matches it
 #include "hle.h"
 #include "pad_slots.h"
 #include "haptics_apple.h"
@@ -187,6 +188,87 @@ static void pads_start(void) {
 
 // Mouse as a single-point touchscreen (front.h dm_touch_set): left button down / drag = finger 0, release = lifted. The content view takes the clicks,
 // not a window-wide event monitor, so clicks on the title bar, the window buttons and the resize edges still reach AppKit.
+// Touch preview (DM_TOUCH_PREVIEW=1): the virtual pad iOS draws, over the picture, with the
+// control under the mouse highlighted. Geometry comes from touchpad_geometry.h — the same header
+// the iPhone controls use — so tuning the layout here is tuning it there. The safe-area insets are
+// zero because a Mac window has no notch; an iPhone reports its own.
+@interface DmTouchPreview : NSView
+@property (nonatomic) NSPoint hover;
+@property (nonatomic) BOOL tracking;
+@end
+@implementation DmTouchPreview
+- (BOOL)isFlipped { return YES; }   // top-left origin, as the geometry header expects
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    for (NSTrackingArea *a in self.trackingAreas) [self removeTrackingArea:a];
+    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:self.bounds
+        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+        owner:self userInfo:nil]];
+}
+- (void)mouseMoved:(NSEvent *)e { self.hover = [self convertPoint:e.locationInWindow fromView:nil]; self.tracking = NO; [self setNeedsDisplay:YES]; }
+- (void)mouseEntered:(NSEvent *)e { [self mouseMoved:e]; }
+- (void)mouseExited:(NSEvent *)e { (void)e; self.tracking = NO; [self setNeedsDisplay:YES]; }
+- (void)mouseDown:(NSEvent *)e { self.hover = [self convertPoint:e.locationInWindow fromView:nil]; self.tracking = YES; [self setNeedsDisplay:YES]; }
+- (void)mouseUp:(NSEvent *)e { (void)e; self.tracking = NO; [self setNeedsDisplay:YES]; }
+- (void)drawRect:(NSRect)dirty {
+    (void)dirty;
+    float w = self.bounds.size.width, h = self.bounds.size.height;
+    if (w < 1 || h < 1) return;
+    float u = dm_touchpad_u(h);
+    float hx = self.hover.x, hy = self.hover.y;
+    [[NSColor colorWithWhite:1 alpha:0.22] setStroke];
+    NSBezierPath *ring = [NSBezierPath bezierPath];
+    // left stick, right stick, d-pad: circles with the highlight when the hover is inside
+    struct { dm_touchpad_point c; float r; } circles[3] = {
+        { dm_touchpad_stick_home(w, h, 0, 0, 0, 0), DM_TP_STICK_R * u },
+        { { w - DM_TP_STICK_X * u, h - DM_TP_PAD_Y * u }, DM_TP_RSTICK_R * u },
+        { dm_touchpad_dpad_center(w, h, 0, 0, 0, 0), DM_TP_DPAD_R * u },
+    };
+    for (int i = 0; i < 3; i++) {
+        [ring removeAllPoints];
+        [ring appendBezierPathWithOvalInRect:NSMakeRect(circles[i].c.x - circles[i].r, circles[i].c.y - circles[i].r, circles[i].r * 2, circles[i].r * 2)];
+        float dx = hx - circles[i].c.x, dy = hy - circles[i].c.y;
+        BOOL in = dx * dx + dy * dy <= circles[i].r * circles[i].r;
+        BOOL hot = in && self.tracking;
+        NSColor *stroke = hot ? [NSColor colorWithRed:0.2 green:0.8 blue:0.35 alpha:0.85] : [NSColor colorWithWhite:1 alpha:0.22];
+        [stroke setStroke];
+        [ring setLineWidth:hot ? 3.0 : 1.5];
+        [ring stroke];
+    }
+    // the four face buttons, highlighted as a set (that is how the iOS pad reports them)
+    uint64_t held = self.tracking ? dm_touchpad_face_buttons(hx, hy, w - DM_TP_FACE_X * u, h - DM_TP_PAD_Y * u, DM_TP_FACE_GAP * u, DM_TP_FACE_R * u) : 0;
+    static const char *names[4] = { "A", "B", "X", "Y" };
+    for (int b = 0; b < 4; b++) {
+        dm_touchpad_point c = dm_touchpad_face_button(w, h, 0, 0, 0, 0, b);
+        BOOL on = (held >> b) & 1;
+        NSColor *fill = on ? [NSColor colorWithRed:0.2 green:0.8 blue:0.35 alpha:0.9] : [NSColor colorWithWhite:1 alpha:0.30];
+        [fill setFill];
+        NSBezierPath *p = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(c.x - DM_TP_FACE_R * u, c.y - DM_TP_FACE_R * u, DM_TP_FACE_R * 2 * u, DM_TP_FACE_R * 2 * u)];
+        [p fill];
+        NSDictionary *attrs = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:(11 * u > 9 ? 11 * u : 9)],
+                                 NSForegroundColorAttributeName: [NSColor colorWithWhite:0 alpha:0.75] };
+        NSSize s = [@(names[b]) sizeWithAttributes:attrs];
+        [@(names[b]) drawAtPoint:NSMakePoint(c.x - s.width / 2, c.y - s.height / 2) withAttributes:attrs];
+    }
+    // shoulders
+    dm_touchpad_point zl = { DM_TP_ZL_X * u, DM_TP_ZL_Y * u };
+    dm_touchpad_point l = { DM_TP_L_X * u, DM_TP_L_Y * u };
+    dm_touchpad_point r = dm_touchpad_right_shoulder(w, h, 0, 0, 0, 0, 0);
+    dm_touchpad_point zr = dm_touchpad_right_shoulder(w, h, 0, 0, 0, 0, 1);
+    dm_touchpad_point sh[4] = { zl, l, r, zr };
+    for (int i = 0; i < 4; i++) {
+        float rad = DM_TP_ZL_R * u;
+        float dx = hx - sh[i].x, dy = hy - sh[i].y;
+        BOOL in = self.tracking && dx * dx + dy * dy <= rad * rad;
+        NSColor *stroke = in ? [NSColor colorWithRed:0.2 green:0.8 blue:0.35 alpha:0.85] : [NSColor colorWithWhite:1 alpha:0.22];
+        [stroke setStroke];
+        NSBezierPath *p = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(sh[i].x - rad, sh[i].y - rad, rad * 2, rad * 2)];
+        [p setLineWidth:in ? 3.0 : 1.5];
+        [p stroke];
+    }
+}
+@end
+
 @interface DmGameView : NSView @end
 @implementation DmGameView
 - (void)mouseDown:(NSEvent *)e { [self mouseDragged:e]; }
@@ -245,6 +327,16 @@ void front_run(void (*guest)(void)) {
         g_layer.contentsScale = win.backingScaleFactor;
         if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: Metal performance HUD on (DM_METAL_HUD)"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
         v.layer = g_layer; [(DmGameView *)v fitDrawable];
+        if (getenv("DM_TOUCH_PREVIEW") && atoi(getenv("DM_TOUCH_PREVIEW"))) {
+            // Over the picture, click-through to the game: the preview only draws, it never takes
+            // the mouse away from the single-point touchscreen below it.
+            DmTouchPreview *tp = [[DmTouchPreview alloc] initWithFrame:v.bounds];
+            tp.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+            tp.wantsLayer = YES;
+            tp.layer.backgroundColor = NSColor.clearColor.CGColor;
+            [v addSubview:tp];
+            LOG("front end: touch preview on (DM_TOUCH_PREVIEW=1) — the virtual pad iOS draws, with the control under the mouse highlighted");
+        }
         [win center];
         [win makeKeyAndOrderFront:nil];
         g_screen_fps = (int)(win.screen ?: NSScreen.mainScreen).maximumFramesPerSecond;

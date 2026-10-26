@@ -88,6 +88,9 @@ class Model(QObject):
         self.out_dir = ''
         self.ipa_path = ''
         self.archive_path = ''
+        self.repo_busy = False
+        self.repo_behind: int | None = None
+        self.repo_status = ''
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._line_buf = ''
@@ -209,6 +212,127 @@ class Model(QObject):
     @property
     def all_deps_ok(self) -> bool:
         return self.deps_checked and all(d.ok for d in self.deps)
+
+
+    # ---- repository download and updates (the SwiftUI app has these; parity matters) ----
+
+    REPO_URL = 'https://github.com/LNPANDY/NX2Apple.git'
+
+    def git_binary(self) -> str | None:
+        return pu._which('git', [r'C:\Program Files\Git\cmd\git.exe',
+                                 r'C:\Program Files\Git\bin\git.exe'] if pu.IS_WIN else [])
+
+    def clone_repo(self, dest: str | None = None) -> None:
+        """Shallow-clone the project into ~/NX2Apple (or `dest`) and select it.
+
+        Shallow on purpose: a quarter of the bytes and a third of the time of a full clone, and
+        fetch/pull keep working on it. Runs on a thread with its progress in the log.
+        """
+        git = self.git_binary()
+        if not git:
+            self.repoChanged.emit()
+            self.logAppended.emit(self.t('repo.gitMissing') + '\n')
+            return
+        target = dest or str(Path.home() / 'NX2Apple')
+        if Path(target).exists():
+            if self.is_repo(target):
+                self.repo_path = target
+                self.repoChanged.emit()
+            else:
+                self.logAppended.emit(self.t('repo.destBusy', target) + '\n')
+            return
+        self.repo_busy = True
+        self.repoChanged.emit()
+        self.logAppended.emit(f'$ git clone --depth 1 {self.REPO_URL} {target}\n')
+
+        def work() -> None:
+            ok = False
+            try:
+                p = subprocess.Popen([git, 'clone', '--depth', '1', '--single-branch', '--progress',
+                                      self.REPO_URL, target],
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                     errors='replace', env=pu.child_env(), **pu.no_window_kwargs())
+                assert p.stdout is not None
+                for line in p.stdout:
+                    self.logAppended.emit(line.replace('\r', '\n'))
+                p.wait()
+                ok = p.returncode == 0
+            except OSError as e:
+                self.logAppended.emit(f'{e}\n')
+            self.repo_busy = False
+            if ok and self.is_repo(target):
+                self.repo_path = target
+            elif not ok:
+                shutil.rmtree(target, ignore_errors=True)   # a failed clone leaves a stub
+            self.repoChanged.emit()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def pull_repo(self) -> None:
+        """Fast-forward the checkout to origin/main. The build's own files live outside the
+        repository, so this never disturbs a previous build."""
+        git = self.git_binary()
+        if not git or not self.repo_ok or not self.repo_is_git:
+            return
+        self.repo_busy = True
+        self.repoChanged.emit()
+
+        def work() -> None:
+            out = ''
+            try:
+                r = subprocess.run([git, '-C', self.repo_path, 'pull', '--ff-only', 'origin', 'main'],
+                                   capture_output=True, text=True, env=pu.child_env(),
+                                   **pu.no_window_kwargs())
+                out = (r.stdout or '') + (r.stderr or '')
+                self.repo_status = self.t('repo.pulled') if r.returncode == 0 else self.t('repo.pullFail')
+            except OSError as e:
+                out, self.repo_status = str(e), self.t('repo.pullFail')
+            self.repo_busy = False
+            if out:
+                self.logAppended.emit(out + '\n')
+            self.repoChanged.emit()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def check_repo_updates(self) -> None:
+        """How far behind origin/main the checkout is (0 = current)."""
+        git = self.git_binary()
+        if not git or not self.repo_ok or not self.repo_is_git:
+            return
+        self.repo_busy = True
+        self.repoChanged.emit()
+
+        def work() -> None:
+            try:
+                subprocess.run([git, '-C', self.repo_path, 'fetch', 'origin', 'main'],
+                               capture_output=True, text=True, env=pu.child_env(),
+                               **pu.no_window_kwargs())
+                r = subprocess.run([git, '-C', self.repo_path, 'rev-list', '--count',
+                                    'HEAD..origin/main'],
+                                   capture_output=True, text=True, env=pu.child_env(),
+                                   **pu.no_window_kwargs())
+                if r.returncode == 0:
+                    self.repo_behind = int(r.stdout.strip() or 0)
+                    self.repo_status = (self.t('repo.upToDate') if self.repo_behind == 0
+                                        else self.t('repo.behind', self.repo_behind))
+            except (OSError, ValueError):
+                pass
+            self.repo_busy = False
+            self.repoChanged.emit()
+
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---- installing what is missing ----
+
+    def install_all_missing(self) -> None:
+        """Walk the dependency rows and run each one's install command in turn.
+
+        Sequential on purpose: the installers compete for the same package manager and the
+        output is far easier to follow one tool at a time.
+        """
+        for d in list(self.deps):
+            if not d.ok and d.install:
+                self.install_dep(d)
 
     def install_dep(self, dep: Dep) -> None:
         """Run a dependency's fix on a thread, streaming its output to the log."""

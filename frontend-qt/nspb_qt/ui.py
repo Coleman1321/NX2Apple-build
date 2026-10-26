@@ -24,7 +24,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.m = model
         self.setWindowTitle('NS Port Builder')
-        self.resize(1000, 980)
+        # Size to the screen, not to a fixed 1000x980: on a handheld's 1280x800 panel a fixed
+        # height puts the footer below the screen edge and the window cannot be shrunk enough to
+        # reach it. Fit within 90% of the available area and let the scroll area do the rest.
+        avail = self.screen().availableGeometry() if self.screen() else None
+        if avail is not None:
+            self.resize(min(1000, int(avail.width() * 0.92)), min(980, int(avail.height() * 0.90)))
+        else:
+            self.resize(1000, 980)
+        self.setMinimumSize(560, 400)
         self._mono = QFontDatabase.systemFont(QFontDatabase.FixedFont)
 
         root = QWidget()
@@ -128,6 +136,19 @@ class MainWindow(QMainWindow):
         self.choose_btn.clicked.connect(self._choose_repo)
         row.addWidget(self.choose_btn)
         lay.addLayout(row)
+        # A machine without a clone gets Download; a clone gets Check/Pull. Same as the macOS app.
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self.download_btn = QPushButton(self.m.t('repo.download'))
+        self.download_btn.clicked.connect(lambda: self.m.clone_repo())
+        self.check_btn = QPushButton(self.m.t('repo.check'))
+        self.check_btn.clicked.connect(self.m.check_repo_updates)
+        self.pull_btn = QPushButton(self.m.t('repo.pull'))
+        self.pull_btn.clicked.connect(self.m.pull_repo)
+        for b in (self.download_btn, self.check_btn, self.pull_btn):
+            actions.addWidget(b)
+        actions.addStretch(1)
+        lay.addLayout(actions)
         self.repo_status = QLabel('')
         self.repo_status.setObjectName('note')
         lay.addWidget(self.repo_status)
@@ -176,6 +197,9 @@ class MainWindow(QMainWindow):
         self.deps_summary = QLabel('')
         head.addWidget(self.deps_summary)
         head.addStretch(1)
+        self.install_all_btn = QPushButton(self.m.t('dep.installAll'))
+        self.install_all_btn.clicked.connect(self.m.install_all_missing)
+        head.addWidget(self.install_all_btn)
         recheck = QPushButton(self.m.t('dep.recheck'))
         recheck.clicked.connect(self.m.check_deps)
         head.addWidget(recheck)
@@ -239,10 +263,18 @@ class MainWindow(QMainWindow):
             else (self.m.repo_path or self.m.t('repo.notFound')))
         if self.m.repo_ok:
             self.repo_dot.setStyleSheet(f'color: {GREEN};')
-            self.repo_status.setText(self.m.t('repo.ok') if self.m.repo_is_git else self.m.t('repo.noGit'))
+            self.repo_status.setText(self.m.repo_status or
+                                     (self.m.t('repo.ok') if self.m.repo_is_git else self.m.t('repo.noGit')))
         else:
             self.repo_dot.setStyleSheet(f'color: {RED};')
-            self.repo_status.setText(self.m.t('repo.firstHint'))
+            self.repo_status.setText(self.m.repo_status or self.m.t('repo.firstHint'))
+        # Download when there is no usable checkout; Check/Pull when there is a git one.
+        self.download_btn.setVisible(not self.m.repo_ok)
+        self.check_btn.setVisible(self.m.repo_ok and self.m.repo_is_git)
+        self.pull_btn.setVisible(self.m.repo_ok and self.m.repo_is_git)
+        busy = self.m.repo_busy or self.m.running
+        for b in (self.download_btn, self.check_btn, self.pull_btn, self.choose_btn):
+            b.setEnabled(not busy)
         self._refresh_inputs()
         self._refresh_deps()
 
@@ -322,6 +354,10 @@ class MainWindow(QMainWindow):
         else:
             self.deps_summary.setText(self.m.t('dep.checking'))
             self.deps_summary.setStyleSheet(f'color: {MUTED};')
+        missing_installable = [d for d in self.m.deps if not d.ok and d.install]
+        self.install_all_btn.setVisible(bool(missing_installable))
+        self.install_all_btn.setEnabled(bool(missing_installable) and
+                                        not any(d.installing for d in self.m.deps))
         self._refresh_running()
 
     def _refresh_stages(self) -> None:

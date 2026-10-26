@@ -127,6 +127,7 @@ enum L10n {
         "dep.checking": ("检测中…", "Checking…"),
         "dep.allReady": ("全部就绪", "All ready"),
         "dep.missing": ("缺 %d 项", "%d missing"),
+        "dep.installAll": ("一键安装全部缺失项", "Install all missing"),
         "dep.recheck": ("重新检测", "Check again"),
         "dep.install": ("安装", "Install"),
         "dep.installing": ("安装中…", "Installing…"),
