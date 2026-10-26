@@ -20,6 +20,7 @@
 #include "nvn_mtl.h"
 #include "nvn_obj.h"
 #include "../tex/nvn_fmt_mtl.h"
+#include "../tex/nvn_bcdec.h"   // BC on the CPU for GPUs without BC support (profile tex_bc_cpu)
 #include "../tex/nvn_deswizzle.h"
 #include "../tex/nvn_deswizzle_gpu.h"
 #include "nvn_builtin.h"
@@ -79,6 +80,8 @@ static int g_warm_started;
 static void warm_claim(void);
 
 static id<MTLDevice> g_dev;
+static int g_bc_gpu = 1;   // the device advertises BC texture compression (set where the device is made)
+static int g_bc_cpu;       // decode BC on the CPU: no GPU support and the profile allows it
 static NSMutableArray *g_l3_gpu_leaks;
 static int g_nvn_deswz_gpu;
 static id<MTLCommandQueue> g_q;
@@ -342,6 +345,14 @@ void mtl_init(void) {
     g_dev = MTLCreateSystemDefaultDevice();
     if (!g_dev) MDIE("no Metal device");
     if (!g_dev.hasUnifiedMemory) MDIE("needs a unified-memory device (zero-copy memory pools)");
+    // BC-compressed textures need GPU support (iOS 16.4+, and on the Apple side only A19 and later
+    // advertise it — earlier GPUs report NO and a BC texture created with a BC Metal format comes
+    // back nil, so every such texture would silently be missing). When the device has no support
+    // and the profile asks for it (tex_bc_cpu), those textures are decompressed on the CPU into the
+    // uncompressed format nvn_bc_unpacked names, and the whole config still works on A15/A16.
+    g_bc_gpu = [g_dev supportsBCTextureCompression];
+    g_bc_cpu = !g_bc_gpu && DM_GAME_TEX_BC_CPU;
+    if (g_bc_cpu) MLOG("BC textures: this GPU has no BC support, decoding them on the CPU (profile tex_bc_cpu)");
     g_q = [g_dev newCommandQueue];
     // A device without Metal 4 (the paravirtualized GPU of a virtual Mac, such as GitHub's macos-26 runner: no residency set, no MTL4CommandQueue) cannot run the NVN layer. The GL and
     // Vulkan layers draw on classic queues of their own and need only the device (mtl_device_classic): there the classic part starts and presents are dropped, which is all a
@@ -1681,7 +1692,12 @@ static int pkg_edges_clean(NvPkg *pk, const tex_t *t) {   // the covered pages w
 }
 static MTLTextureDescriptor *tex_desc(const tex_t *t, int packaged) {
     uint32_t pf = 0; uint8_t swz[4];
-    if (!nvn_fmt_to_mtl(t->d.format, &pf, swz) || !pf) { RED_ONCE(0, "texture format %#x has no Metal equivalent (first case)", t->d.format); return nil; }
+    // A BC format on a GPU without BC support: create the texture in the uncompressed format the
+    // decoder produces, and let the upload path fill it through nvn_bc_decode (below). Without
+    // this the Metal format is a BC one the device cannot allocate, and every such texture is nil.
+    uint32_t bc_unpacked = 0; int bc_bpp = 0;
+    if (g_bc_cpu && nvn_bc_unpacked(t->d.format, &bc_unpacked, &bc_bpp)) pf = bc_unpacked;
+    if (!pf && (!nvn_fmt_to_mtl(t->d.format, &pf, swz) || !pf)) { RED_ONCE(0, "texture format %#x has no Metal equivalent (first case)", t->d.format); return nil; }
     // Metal's limits: 16384 in 2D, 2048 in 3D, 2048 array layers; beyond them Metal aborts the process on an assertion, so they are caught here with a red line
     if (t->d.width > 16384 || t->d.height > 16384 || t->d.depth > 2048 || t->d.levels > 15) { RED_ONCE(71, "texture size exceeds Metal limits: %u×%u×%u levels %u format %#x target %d (first case ser=%llu)", t->d.width, t->d.height, t->d.depth, t->d.levels, t->d.format, t->d.target, (unsigned long long)t->serial); return nil; }
     MTLTextureDescriptor *d = [MTLTextureDescriptor new];

@@ -31,11 +31,15 @@ VENDORED = ('dm', 'scripts', 'docs', 'AGENTS.md', 'ref')
 # The fork's own files, inside vendored paths: upstream deletes and rewrites must not touch them.
 OURS = {'dm/host/romfs_arc.c', 'dm/host/romfs_arc.h', 'dm/tools/romfs_arc.py',
         'dm/host/tests/t_romfs_arc.c', 'docs/ROMFS_ARCHIVE.md',
-        'dm/games/0100A00019DE0000/game.fork.tsv'}
+        'dm/games/0100A00019DE0000/game.fork.tsv',
+        # BC decode for GPUs without BC support (from d2r-mobile's bcdec line; tex_bc_cpu profiles)
+        'dm/third_party/bcdec/bcdec.h', 'dm/third_party/bcdec/LICENSE',
+        'dm/gfx/tex/nvn_bcdec.c', 'dm/gfx/tex/nvn_bcdec.h',
+        'dm/gfx/tex/tests/t_bcdec.c'}
 # Vendored files that carry fork patches: taken fresh from upstream, then patched below.
 PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/host/tests/Makefile', 'dm/ios/tools/build_ipa.sh',
            'scripts/build_ipa_from_nsp.py', 'dm/gfx/tools/shader_split.py',
-           'dm/ios/Sources/main.m', 'dm/gfx/nvn/nvn_mtl.m')
+           'dm/ios/Sources/main.m', 'dm/gfx/nvn/nvn_mtl.m', 'dm/games/game.py')
 
 def git(*a):
     r = subprocess.run(['git', *a], cwd=REPO, capture_output=True, text=True)
@@ -498,6 +502,32 @@ def patch_nvn_mtl(t):
     # ported our mtl_finish_gpu half with their own comment (b87a0cc, plus their up_flush self-publish
     # for waiters on any thread); the markers accept either comment, ours or theirs.
     P = [
+        # BC decode on GPUs without BC support (profile tex_bc_cpu; nvn_bcdec.c is an OURS file)
+        ('bc cpu globals', ['g_bc_cpu;'], [(
+            'static id<MTLDevice> g_dev;',
+            '''static id<MTLDevice> g_dev;
+static int g_bc_gpu = 1;   // the device advertises BC texture compression (set where the device is made)
+static int g_bc_cpu;       // decode BC on the CPU: no GPU support and the profile allows it''')]),
+        ('bc cpu include', ['nvn_bcdec.h'], [(
+            '#include "../tex/nvn_fmt_mtl.h"',
+            '#include "../tex/nvn_fmt_mtl.h"\n#include "../tex/nvn_bcdec.h"   // BC on the CPU for GPUs without BC support (profile tex_bc_cpu)')]),
+        ('bc cpu detect', ['supportsBCTextureCompression'], [(
+            '''    g_dev = MTLCreateSystemDefaultDevice();
+    if (!g_dev) MDIE("no Metal device");
+    if (!g_dev.hasUnifiedMemory) MDIE("needs a unified-memory device (zero-copy memory pools)");''',
+            '''    g_dev = MTLCreateSystemDefaultDevice();
+    if (!g_dev) MDIE("no Metal device");
+    if (!g_dev.hasUnifiedMemory) MDIE("needs a unified-memory device (zero-copy memory pools)");
+    g_bc_gpu = [g_dev supportsBCTextureCompression];
+    g_bc_cpu = !g_bc_gpu && DM_GAME_TEX_BC_CPU;
+    if (g_bc_cpu) MLOG("BC textures: this GPU has no BC support, decoding them on the CPU (profile tex_bc_cpu)");''')]),
+        ('bc cpu unpack', ['nvn_bc_unpacked'], [(
+            '''    uint32_t pf = 0; uint8_t swz[4];
+    if (!nvn_fmt_to_mtl(t->d.format, &pf, swz) || !pf) {''',
+            '''    uint32_t pf = 0; uint8_t swz[4];
+    uint32_t bc_unpacked = 0; int bc_bpp = 0;
+    if (g_bc_cpu && nvn_bc_unpacked(t->d.format, &bc_unpacked, &bc_bpp)) pf = bc_unpacked;
+    if (!pf && (!nvn_fmt_to_mtl(t->d.format, &pf, swz) || !pf)) {''')]),
         ('up_begin publish', ['the iOS save-load freeze of NX2Apple issue #4', "Little Nightmares II's first render passes"], [(
             '''    unsigned slot = g_up_seq++ % 3;
     up_wait_zero(&g_up_alloc_busy[slot]);''',
