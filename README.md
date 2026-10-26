@@ -58,7 +58,7 @@ follows upstream automatically. What it adds:
 - **🔄 Follows upstream automatically.** A daily GitHub Actions job re-applies the fork's features
   onto upstream's tree, verifies the result (script parse, archive reader test, a macOS host build)
   and pushes — or opens an issue with the log when a patch no longer fits.
-- **🎯 72 game profiles** with the required update version listed per game. Three are verified end
+- **🎯 75 game profiles** with the required update version listed per game. Three are verified end
   to end on this fork; 45 are reported playable on an iPhone upstream.
 
 ---
@@ -84,7 +84,7 @@ follows upstream automatically. What it adds:
 | 🖱️ | **One-click build** | Pick your files, press build. No command line, ever |
 | 📦 | **RomFS archiving** | 300,000 files → ~100 shards, so a 16 GB game installs |
 | 🔁 | **Resumable builds** | A stopped build continues; unchanged work is reused |
-| 🧩 | **72 game profiles** | Each with the exact update version it needs |
+| 🧩 | **75 game profiles** | Each with the exact update version it needs |
 | 📲 | **Install guide** | The three steps to the phone, with Reveal-in-Finder |
 | 🌏 | **Bilingual** | English / 简体中文, picked from the device language |
 | ⬇️ | **Self-installing** | Downloads the repository and updates itself |
@@ -204,6 +204,7 @@ Newest first. The fork follows upstream daily, so its game list and host fixes a
 
 | Date | Version | What changed |
 |---|---|---|
+| 2026-10-27 | v0.4.7 | **Sync**: 75 game profiles (+3: Octopath Traveler, Donkey Kong Country Returns HD, Donkey Kong Country: Tropical Freeze); Mac audio buffers stay near 5 ms across output changes; a shared SyncWait budget for event and feedback waits; new shader-regression and pack/IPA tests |
 | 2026-10-26 | v0.4.6 | **Windows app fixed against real hardware reports**: the missing .NET SDK row (it never appeared, so nothing could install it), no more black console windows stealing the foreground, download mirrors chosen by a speed probe (a 974 s LLVM download on a mainland connection), tools installed outside the app folder so updates stop deleting them, and repository checks that say what git is doing |
 | 2026-10-26 | v0.4.5 | **Mac app output** (a double-clickable .app from the same build); **A15/A16 and earlier devices** via CPU BC decode, as an app switch; per-game data folders (`Documents/games/<id>/`) so an external drive works; NRO header no longer scanned as code; the nightly sync can no longer fail silently |
 | 2026-10-26 | v0.4.4 | **Fixes a build failure that hit every app build in v0.4.3** (`work` read before it was assigned); 72 games (+3) |
@@ -431,7 +432,7 @@ The mount is recognised by its **directory**, not its name: titles differ (`rom`
 
 ## 🗂️ Games
 
-72 game profiles ship with this repository. A profile is what makes a build possible —
+75 game profiles ship with this repository. A profile is what makes a build possible —
 the game's build IDs, memory layout, shader tables and per-game switches — and this fork adds the
 RomFS archive layer on top, so a large game can be installed at all.
 
@@ -466,6 +467,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | Hades | `0100535012974000` | 1.0.38233 (v589824) | Playable on an iPhone (upstream) |
 | Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 (v327680) | Playable on an iPhone (upstream) |
 | NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 (v131072) | Playable on an iPhone (upstream) |
+| OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 (v327680) | Profile present; not verified on a phone |
 | Persona 5 Royal | `01005CA01580E000` | 1.0.2 (v65536) | Playable on an iPhone (upstream) |
 | FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 (v131072) | Profile present; not verified on a phone |
@@ -491,6 +493,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | Metroid Dread | `010093801237C000` | 2.1.0 (v327680) | Playable on an iPhone (upstream) |
 | Super Mario Galaxy | `010099C022B96000` | 1.3.1 (v327680) | Playable on an iPhone (upstream) |
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 (v393216) | Profile present; not verified on a phone |
+| Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 (v65536) | Profile present; not verified on a phone |
 | Hades II | `0100A00019DE0000` | 1.0.137848 (v1) | **Verified here** — builds, installs and runs on an iPhone; 33-file archive |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 (v131072) | Playable on an iPhone (upstream) |
 | Cuphead | `0100A5C00D162000` | 1.3.7 (v655360) | Profile present; not verified on a phone |
@@ -502,6 +505,7 @@ update layers over it). "无（v0）" = the base game alone is enough.
 | Pikmin 4 | `0100B7C00933A000` | 1.1.1 (v262144) | Playable on an iPhone (upstream) |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 (v65536) | Playable on an iPhone (upstream) |
 | Catherine: Full Body | `0100BF00112C0000` | 1.0.1a (v131072) | Profile present; not verified on a phone |
+| Donkey Kong Country: Tropical Freeze | `0100C1F0051B6000` | 1.0.2 (v131072) | Profile present; not verified on a phone |
 | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `0100C2A01A730000` | 1.1.3 (v851968) | Playable on an iPhone with a controller (upstream) |
 | Balatro | `0100CD801CE5E000` | 1.1.3 (v851968) | Playable on an iPhone (upstream) |
 | Rhythm Heaven Groove | `0100D9F01D474000` | 无（v0） | Profile present; not verified on a phone |
