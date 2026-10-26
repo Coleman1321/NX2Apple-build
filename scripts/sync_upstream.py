@@ -306,13 +306,15 @@ def patch_nsp(t):
         "    ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')",
         "    ap.add_argument('--work-dir', help='where the build folder goes (default: <NSP folder>/<title ID>_build); the extracted files, shader cache and temporary files all live there')\n"
         "    ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')")]))
-    P.append(('work-dir paths', 'args.work_dir', [(
-        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/\n"
-        "    if shadowed and not (args.out or OUT_IPA): out_ipa = out_ipa.with_name(out_ipa.stem + '-provisional.ipa')   # never over the IPA of the game's real profile\n"
+    # Two separate one-line anchors: upstream inserts lines between them whenever it adds a check
+    # (ffcd910 put a mac_pack check right above `work`), which broke the old three-line anchor and
+    # stopped the daily sync for two days (issue #13). `work` and that out_ipa line each appear once.
+    P.append(('work-dir work', 'args.work_dir', [(
         "    work = nsp_dir / f'{g.id}_build'",
-        "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere\n"
-        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/\n"
-        "    if shadowed and not (args.out or OUT_IPA): out_ipa = out_ipa.with_name(out_ipa.stem + '-provisional.ipa')   # never over the IPA of the game's real profile")]))
+        "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere")]))
+    P.append(('work-dir out_ipa', 'work.parent / g.get', [(
+        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/",
+        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/")]))
     P.append(('DOTNET_ROOT', 'list-runtimes', [(
         "    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)",
         """    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)
