@@ -240,6 +240,18 @@ class Model(QObject):
                 deps.append(Dep('tool:' + tool, key, key + '.hint',
                                 DepState.OK if found else DepState.MISSING, found or ''))
 
+        # Carry the in-flight flag across the rebuild. `check_deps` runs on a timer, at the end of
+        # every install, and whenever the user presses "Check again" — and each of those replaces
+        # every Dep object. Without this, a row being installed came back as a fresh `installing
+        # = False` row, so the panel showed an Install button for a download that was still
+        # running and pressing it started a second one (the report: "I installed LLVM and the SDK
+        # several times"). Two downloads into one folder is also how a half-unpacked toolchain
+        # appears on disk.
+        running = {d.id for d in self.deps if d.installing}
+        for d in deps:
+            if d.id in running:
+                d.installing = True
+
         self.deps = deps
         self.python_path, self.python_ok, self.python_ver = py, py_ok, py_ver
         if not pu.IS_WIN:
@@ -539,6 +551,13 @@ class Model(QObject):
         including the error paths, or a sequential run would stall on a row that failed instantly.
         """
         if not dep.install:
+            return
+        if dep.installing:
+            # A second click while this row is already downloading. The button is disabled while
+            # it runs, but a rebuild of the panel (check_deps) used to hand out a fresh row, and
+            # two writers into one staging folder produce a broken toolchain.
+            self.log(self.t('dep.install.begin', dep.id) + ' — ' +
+                     self.t('dep.installing') + '\n')
             return
         if dep.install[0].startswith('__win__:'):
             self._install_win(dep, dep.install[0].split(':', 1)[1])
