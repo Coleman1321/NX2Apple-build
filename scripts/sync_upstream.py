@@ -33,8 +33,8 @@ OURS = {'dm/host/romfs_arc.c', 'dm/host/romfs_arc.h', 'dm/tools/romfs_arc.py',
         'dm/host/tests/t_romfs_arc.c', 'docs/ROMFS_ARCHIVE.md',
         'dm/games/0100A00019DE0000/game.fork.tsv'}
 # Vendored files that carry fork patches: taken fresh from upstream, then patched below.
-PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/ios/tools/build_ipa.sh',
-           'scripts/build_ipa_from_nsp.py', 'dm/gfx/tools/shader_split.py',
+PATCHED = ('dm/host/hle_fs.c', 'dm/host/Makefile', 'dm/host/tests/Makefile',
+           'dm/ios/tools/build_ipa.sh', 'scripts/build_ipa_from_nsp.py', 'dm/gfx/tools/shader_split.py',
            'dm/ios/Sources/main.m', 'dm/gfx/nvn/nvn_mtl.m')
 
 def git(*a):
@@ -262,6 +262,32 @@ def patch_makefile(t):
     if old not in t: fail('dm/host/Makefile: SRC anchor missing (upstream changed the source list)')
     return done('Makefile SRC', t.replace(old, 'SRC=main.c loader.c hle.c romfs_arc.c ', 1))
 
+TESTS_MK = 'dm/host/tests/Makefile'
+FS_TESTS = ('t_fs', 't_fs_commit_list', 't_fs_case')
+def patch_tests_makefile(t):
+    # These three tests #include ../hle_fs.c, and the fork's hle_fs.c calls romfsarc_* (patch_hle_fs),
+    # so without romfs_arc.c `make -C dm/host/tests run` stops at t_fs with undefined symbols
+    # (_romfsarc_open, _g_arc_base, ...). The rule heads repeat the same dependency list, so each
+    # rule is found by its own target and patched on its own lines.
+    lines = t.split('\n')
+    changed = []
+    for name in FS_TESTS:
+        heads = [i for i, ln in enumerate(lines) if ln.startswith(f'$(B)/{name}:')]
+        if len(heads) != 1: fail(f'{TESTS_MK}: expected one rule for {name}, found {len(heads)}')
+        i = heads[0]
+        if i + 1 >= len(lines) or not lines[i + 1].startswith('\tclang '):
+            fail(f'{TESTS_MK}: {name}: the line after the rule head is not a one-line clang recipe')
+        dep, cmd = lines[i], lines[i + 1]
+        if cmd.endswith('\\'): fail(f'{TESTS_MK}: {name}: the recipe continues over several lines (patch by hand)')
+        if '../romfs_arc.c' not in dep:
+            if ' ../hle_fs.c ' not in dep: fail(f'{TESTS_MK}: {name} no longer lists ../hle_fs.c')
+            dep = dep.replace(' ../hle_fs.c ', ' ../hle_fs.c ../romfs_arc.c ../romfs_arc.h ', 1)
+        if '../romfs_arc.c' not in cmd: cmd = cmd.rstrip() + ' ../romfs_arc.c'
+        if (dep, cmd) != (lines[i], lines[i + 1]):
+            lines[i], lines[i + 1] = dep, cmd; changed.append(name)
+    if not changed: return skip('tests Makefile romfs_arc.c (already patched)')
+    return done(f'tests Makefile romfs_arc.c ({", ".join(changed)})', '\n'.join(lines))
+
 ENT = '''# The unsigned IPA: an unsigned binary has no signature for a sideloader to read entitlements from,
 # so the request would be lost (AltStore reads the signature it replaces). Sign ad-hoc with the
 # entitlement first; the sideloader strips this signature and carries the entitlement over.
@@ -488,6 +514,7 @@ def patch_hades2(t):
 MARKERS = {
     'dm/host/hle_fs.c': 'romfsarc',
     'dm/host/Makefile': 'romfs_arc.c',
+    'dm/host/tests/Makefile': '../romfs_arc.c',
     'dm/ios/tools/build_ipa.sh': 'DM_FULL_ROMFS',
     'scripts/build_ipa_from_nsp.py': '--work-dir',
     'dm/gfx/tools/shader_split.py': "ue_inline_shaders(d, f'/{rel}#{label}', out)",
@@ -498,6 +525,7 @@ MARKERS = {
 PATCHERS = {
     'dm/host/hle_fs.c': patch_hle_fs,
     'dm/host/Makefile': patch_makefile,
+    'dm/host/tests/Makefile': patch_tests_makefile,
     'dm/ios/tools/build_ipa.sh': patch_build_ipa,
     'scripts/build_ipa_from_nsp.py': patch_nsp,
     'dm/gfx/tools/shader_split.py': patch_shader_split,

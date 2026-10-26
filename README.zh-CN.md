@@ -398,6 +398,7 @@ DM_OPMODE=0            # 掌机模式：720p 渲染而不是底座的 1080p
 | `docs/ROMFS_ARCHIVE.md` | 新增 —— 格式与设计说明 |
 | `dm/host/hle_fs.c` | 挂载并路由归档路径 |
 | `dm/host/Makefile` | 编译 `romfs_arc.c` |
+| `dm/host/tests/Makefile` | `t_fs`、`t_fs_commit_list`、`t_fs_case` 链接 `romfs_arc.c`（这几个测试直接包含 `hle_fs.c`） |
 | `dm/ios/Sources/main.m` | `romfs_locate` 接受 `romfs.idx` |
 | `dm/ios/tools/build_ipa.sh` | 默认瘦身包（`DM_FULL_ROMFS=1` = 上游完整包） |
 | `scripts/build_ipa_from_nsp.py` | `--work-dir`（构建目录可离开 NSP 所在文件夹）；自动推导 `DOTNET_ROOT`（framework-dependent 的 `nx_extract` 在裸 shell 里缺它无法启动） |

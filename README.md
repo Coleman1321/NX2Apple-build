@@ -412,6 +412,7 @@ past the end would return the next file's bytes).
 | `docs/ROMFS_ARCHIVE.md` | new — format and design notes |
 | `dm/host/hle_fs.c` | mount and route archive-backed paths |
 | `dm/host/Makefile` | build `romfs_arc.c` |
+| `dm/host/tests/Makefile` | link `romfs_arc.c` into `t_fs`, `t_fs_commit_list` and `t_fs_case` (they include `hle_fs.c`) |
 | `dm/ios/Sources/main.m` | `romfs_locate` accepts `romfs.idx` |
 | `dm/ios/tools/build_ipa.sh` | slim by default (`DM_FULL_ROMFS=1` = upstream full package) |
 | `scripts/build_ipa_from_nsp.py` | `--work-dir` (build folder away from the NSPs); derives `DOTNET_ROOT` (a framework-dependent `nx_extract` will not start from a plain shell without it) |
