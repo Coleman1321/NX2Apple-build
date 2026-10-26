@@ -350,23 +350,30 @@ def patch_nsp(t):
         "    ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')",
         "    ap.add_argument('--work-dir', help='where the build folder goes (default: <NSP folder>/<title ID>_build); the extracted files, shader cache and temporary files all live there')\n"
         "    ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')")]))
-    # Two separate one-line anchors: upstream inserts lines between them whenever it adds a check
-    # (ffcd910 put a mac_pack check right above `work`), which broke the old three-line anchor and
-    # stopped the daily sync for two days (issue #13). `work` and that out_ipa line each appear once.
-    # One replacement for both lines: `out_ipa` reads `work`, so patching them separately let the
-    # out_ipa patch land above the work patch (issue: PR #15, an UnboundLocalError on every build
-    # without -o). The anchor covers upstream's three-line block and puts work first.
-    P.append(('work-dir paths', 'args.work_dir', [(
-        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/\n"
-        "    if shadowed and not (args.out or OUT_IPA): out_ipa = out_ipa.with_name(out_ipa.stem + '-provisional.ipa')   # never over the IPA of the game's real profile\n"
-        "    if mac_pack and (args.out or OUT_IPA) and out_ipa.suffix != '.app': raise BuildError(f'the Mac app (-o / OUT_IPA) must end in .app: {out_ipa}')\n"
-        "    work = nsp_dir / f'{g.id}_build'",
-        "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere\n"
-        "    # out_ipa reads `work`, so `work` must be assigned first (upstream's order had them the other\n"
-        "    # way round; the --work-dir patch moved `work` up here and this line had to follow it).\n"
-        "    out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/\n"
-        "    if shadowed and not (args.out or OUT_IPA): out_ipa = out_ipa.with_name(out_ipa.stem + '-provisional.ipa')   # never over the IPA of the game's real profile\n"
-        "    if mac_pack and (args.out or OUT_IPA) and out_ipa.suffix != '.app': raise BuildError(f'the Mac app (-o / OUT_IPA) must end in .app: {out_ipa}')")]))
+    # `out_ipa` reads `work`, so `work` must be assigned first: patched separately, they once landed
+    # in the wrong order (PR #15, an UnboundLocalError on every build without -o). One replacement per
+    # shape of upstream's block keeps them in order.
+    #   - before #278: one out_ipa line, the two checks, then `work`;
+    #   - after #278: out_ipa under `if want_ios:` (8 spaces) and an out_app block, `work` still last.
+    # The 8-space anchor is used only in the second shape, because the 4-space string also occurs
+    # inside it.
+    work_line = "    work = Path(os.path.expanduser(args.work_dir)).resolve() if args.work_dir else nsp_dir / f'{g.id}_build'   # the folder holding the NSPs by default; --work-dir puts the build elsewhere"
+    oipa_old = "out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else nsp_dir / g.get('ipa')   # by default in the NSP folder, next to the NSPs and <id>_build/"
+    oipa_new = "out_ipa = Path(os.path.expanduser(args.out or OUT_IPA)).resolve() if (args.out or OUT_IPA) else work.parent / g.get('ipa')   # by default next to the NSPs and <id>_build/"
+    shadowed_line = "    if shadowed and not (args.out or OUT_IPA): out_ipa = out_ipa.with_name(out_ipa.stem + '-provisional.ipa')   # never over the IPA of the game's real profile"
+    macpack_line = "    if mac_pack and (args.out or OUT_IPA) and out_ipa.suffix != '.app': raise BuildError(f'the Mac app (-o / OUT_IPA) must end in .app: {out_ipa}')"
+    if "\n    out_ipa = None\n    if want_ios:\n" in t:   # the shape after upstream #278
+        P.append(('work-dir paths', 'args.work_dir', [
+            ("    work = nsp_dir / f'{g.id}_build'\n", ""),
+            ("\n    out_ipa = None\n    if want_ios:\n", "\n" + work_line + "\n    out_ipa = None\n    if want_ios:\n"),
+            ("\n        " + oipa_old, "\n        " + oipa_new)]))
+    else:
+        P.append(('work-dir paths', 'args.work_dir', [(
+            "    " + oipa_old + "\n" + shadowed_line + "\n" + macpack_line + "\n    work = nsp_dir / f'{g.id}_build'",
+            work_line + "\n"
+            "    # out_ipa reads `work`, so `work` must be assigned first (upstream's order had them the other\n"
+            "    # way round; the --work-dir patch moved `work` up here and this line had to follow it).\n"
+            "    " + oipa_new + "\n" + shadowed_line + "\n" + macpack_line)]))
     P.append(('DOTNET_ROOT', 'list-runtimes', [(
         "    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)",
         """    env.setdefault('USER', getpass.getuser())   # xcodegen fails without USER (Couldn't find current username)
