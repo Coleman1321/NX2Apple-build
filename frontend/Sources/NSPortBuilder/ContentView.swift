@@ -72,6 +72,9 @@ final class BuildModel: ObservableObject {
         Slot(id: "dlc", kind: .dlc, title: "data.dlc", optional: true),
         Slot(id: "keys", kind: .keys, title: "data.keys", optional: false),
     ]
+    @Published var buildTarget: BuildTarget = .ios
+    @Published var completedTarget: BuildTarget = .ios
+    @Published var macAppPath = ""
     @Published var outDir = ""
     @Published var stages: [Stage] = []
     @Published var running = false
@@ -521,7 +524,14 @@ final class BuildModel: ObservableObject {
     // MARK: Build
 
     func startBuild() {
+        guard !running else { return }
+        let target = buildTarget
         running = true; done = false; doneNote = ""; stages = []; logTail = ""; lineBuf = ""
+        ipaPath = ""; archivePath = ""; macAppPath = ""
+        completedTarget = target
+        if target == .macApp && !FileManager.default.fileExists(atPath: repoPath + "/dm/mac/pack_app.py") {
+            fail(t("target.updateRepo")); return
+        }
         guard repoOK else {
             fail(repoPath.isEmpty ? t("msg.repoInvalidEmpty") : String(format: t("msg.repoInvalid"), shortPath(repoPath)))
             return
@@ -576,9 +586,12 @@ final class BuildModel: ObservableObject {
             }
         }
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
-                    "--progress", "lines"]
+                    "--progress", "lines", "--platform", target.rawValue]
         if hasWorkDir { args += ["--work-dir", workDir] }
-        if !outDir.isEmpty { args += ["-o", outDir + "/" + tidHex + ".ipa"] }
+        if let output = target.outputPath(directory: outDir, baseDirectory: baseDir, titleID: tidHex) {
+            args += ["-o", output]
+            if target == .macApp { macAppPath = output } else { ipaPath = output }
+        }
         // The archive step packs whatever folder the build reported; without --work-dir that is the
         // script's default, which is the same workDir unless a separate output folder was chosen.
         effectiveWorkDir = hasWorkDir ? workDir : (inputDir as NSString).appendingPathComponent(tidHex + "_build")
@@ -608,7 +621,13 @@ final class BuildModel: ObservableObject {
                 self.flushLines()
                 if status.terminationStatus == 0 {
                     self.markAllDone()
-                    self.packArchive(workDir: self.effectiveWorkDir)   // keeps running=true until the archive is done
+                    if target == .macApp {
+                        self.cleanupStaging()
+                        let exists = FileManager.default.fileExists(atPath: self.macAppPath + "/Contents/Info.plist")
+                        self.finishBuild(ok: exists, note: self.t(exists ? "target.macDone" : "target.missingApp"))
+                    } else {
+                        self.packArchive(workDir: self.effectiveWorkDir)
+                    }
                 } else {
                     if let i = self.stages.lastIndex(where: { $0.state == .running }) {
                         self.stages[i].state = .failed
@@ -704,6 +723,7 @@ final class BuildModel: ObservableObject {
 
     private func handle(_ line: String) {
         append(line + "\n")
+        if let path = BuildTarget.ipaPath(from: line) { ipaPath = path }
         guard let s = Self.parseStage(line) else { return }
         if let i = stages.firstIndex(where: { $0.id == s.k }) {
             if !s.name.isEmpty { stages[i].name = s.name }
@@ -1044,8 +1064,9 @@ final class BuildModel: ObservableObject {
         // Xcode.app alone is not enough: since Xcode 15 the iOS platform ships as a separate
         // download, so a fresh install has xcodebuild but no iOS SDK and the build dies deep in
         // xcodebuild. Ask for the SDK version itself — that is the check that matches the name.
-        let xcodePresent = FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
-            && FileManager.default.isExecutableFile(atPath: "/usr/bin/xcodebuild")
+        let xcodePresent = runOK("/usr/bin/xcodebuild", ["-version"])
+        let macSDK = xcodePresent && runOK("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-version"])
+        out.append(Dep(id: "xcodeMac", name: "target.xcode", hint: "target.xcodeHint", present: macSDK, installCmd: []))
         let iosSDK = xcodePresent && runOK("/usr/bin/xcrun", ["--sdk", "iphoneos", "--show-sdk-version"])
         out.append(Dep(id: "xcode", name: "dep.xcode", hint: "dep.xcode.hint",
                        present: iosSDK,
@@ -1156,7 +1177,8 @@ final class BuildModel: ObservableObject {
         return p.terminationStatus == 0
     }
 
-    var allDepsPresent: Bool { depsChecked && deps.allSatisfy { $0.present } }
+    var requiredDeps: [Dep] { deps.filter { buildTarget.requires(dependency: $0.id) } }
+    var allDepsPresent: Bool { depsChecked && requiredDeps.allSatisfy { $0.present } }
 
     /// Home shown as ~ (shorter in a one-line row, and it keeps the account name out of
     /// screenshots).
@@ -1208,7 +1230,19 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             repository
-            inputs
+            inputs.disabled(m.running)
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker(m.t("target.title"), selection: $m.buildTarget) {
+                        Text(m.t("target.ios")).tag(BuildTarget.ios)
+                        Text(m.t("target.mac")).tag(BuildTarget.macApp)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(m.running)
+                    Text(m.t(m.buildTarget == .macApp ? "target.macHint" : "target.iosHint"))
+                        .font(.callout).foregroundStyle(.secondary)
+                }.padding(8)
+            }
             dependencies
             if m.done { installGuide }
             stagesView
@@ -1398,7 +1432,7 @@ struct ContentView: View {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                                 Text(m.t("dep.allReady")).font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
                             } else {
-                                Text(String(format: m.t("dep.missing"), m.deps.filter { !$0.present }.count))
+                                Text(String(format: m.t("dep.missing"), m.requiredDeps.filter { !$0.present }.count))
                                     .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
                             }
                         }
@@ -1411,7 +1445,7 @@ struct ContentView: View {
                 }
                 if m.depsOpen {
                 VStack(spacing: 7) {
-                    ForEach(m.deps, id: \.id) { d in
+                    ForEach(m.requiredDeps, id: \.id) { d in
                         HStack(spacing: 10) {
                             if d.installing {
                                 ProgressView().controlSize(.small).frame(width: 20)
@@ -1452,6 +1486,12 @@ struct ContentView: View {
     private var installGuide: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
+                if m.completedTarget == .macApp {
+                    sectionHeader("desktopcomputer", m.t("target.macDone"))
+                    Text(m.t("target.openHint"))
+                    Text(m.macAppPath).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                    Button(m.t("install.reveal")) { reveal(m.macAppPath) }
+                } else {
                 sectionHeader("iphone.gen3", m.t("install.title"))
                 guideRow(m.t("install.step1"))
                 guideRow(m.t("install.step2"))
@@ -1469,6 +1509,7 @@ struct ContentView: View {
                         .help(m.archivePath)
                     Spacer(minLength: 8)
                     Button(m.t("install.reveal")) { reveal(m.archivePath) }.controlSize(.small)
+                }
                 }
             }.padding(8)
         }
@@ -1578,7 +1619,7 @@ struct ContentView: View {
             Button(m.t("btn.outDir")) {
                 let d = NSOpenPanel(); d.canChooseDirectories = true; d.canChooseFiles = false
                 if d.runModal() == .OK, let u = d.url { m.outDir = u.path }
-            }
+            }.disabled(m.running)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 12)

@@ -6,11 +6,12 @@ the other: rounded cards on a dark background, a coloured dot per row, monospace
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
+    QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
         self._build_header()
         self._build_repository()
         self._build_inputs()
+        self._build_target()
         self._build_deps()
         self._build_progress()
         self._build_log()
@@ -196,6 +198,29 @@ class MainWindow(QMainWindow):
         row.addWidget(pick)
         lay.addLayout(row)
 
+    def _build_target(self) -> None:
+        box, lay = self._card(self.m.t('target.title'))
+        self.target_box = box
+        self.target_picker = QComboBox()
+        self.target_picker.addItem(self.m.t('target.ios'), 'ios')
+        if pu.IS_MAC:
+            self.target_picker.addItem(self.m.t('target.mac'), 'mac-app')
+        self.target_picker.currentIndexChanged.connect(self._target_changed)
+        lay.addWidget(self.target_picker)
+        self.target_hint = QLabel(self.m.t('target.iosHint'))
+        self.target_hint.setWordWrap(True)
+        lay.addWidget(self.target_hint)
+        self.reveal_app = QPushButton(self.m.t('install.reveal'))
+        self.reveal_app.clicked.connect(lambda: subprocess.Popen(['/usr/bin/open', '-R', self.m.mac_app_path]))
+        self.reveal_app.hide()
+        lay.addWidget(self.reveal_app)
+
+    def _target_changed(self) -> None:
+        self.m.build_target = self.target_picker.currentData()
+        self.target_hint.setText(self.m.t('target.macHint' if self.m.build_target == 'mac-app' else 'target.iosHint'))
+        self._refresh_deps()
+        self._refresh_running()
+
     def _build_deps(self) -> None:
         box, lay = self._card(self.m.t('dep.title'))
         self.deps_box = box
@@ -327,7 +352,7 @@ class MainWindow(QMainWindow):
             item = self.deps_container.takeAt(0)
             if w := item.widget():
                 w.deleteLater()
-        for d in self.m.deps:
+        for d in self.m.required_deps:
             row = QWidget()
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 0, 0, 0)
@@ -370,16 +395,16 @@ class MainWindow(QMainWindow):
                 self.deps_summary.setText('●  ' + self.m.t('dep.allReady'))
                 self.deps_summary.setStyleSheet(f'color: {GREEN}; font-weight: 600;')
             else:
-                n = sum(1 for d in self.m.deps if not d.ok)
+                n = sum(1 for d in self.m.required_deps if not d.ok)
                 self.deps_summary.setText(self.m.t('dep.missing', n))
                 self.deps_summary.setStyleSheet(f'color: {RED}; font-weight: 600;')
         else:
             self.deps_summary.setText(self.m.t('dep.checking'))
             self.deps_summary.setStyleSheet(f'color: {MUTED};')
-        missing_installable = [d for d in self.m.deps if not d.ok and d.install]
+        missing_installable = [d for d in self.m.required_deps if not d.ok and d.install]
         self.install_all_btn.setVisible(bool(missing_installable))
         self.install_all_btn.setEnabled(bool(missing_installable) and
-                                        not any(d.installing for d in self.m.deps))
+                                        not any(d.installing for d in self.m.required_deps))
         self._refresh_running()
 
     def _refresh_stages(self) -> None:
@@ -420,6 +445,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_running(self) -> None:
         running = self.m.running
+        self.target_picker.setEnabled(not running)
+        self.data_box.setEnabled(not running)
         self.build_btn.setText(self.m.t('build.cancel') if running else self.m.t('build.start'))
         self.build_btn.setObjectName('danger' if running else 'primary')
         self.build_btn.style().unpolish(self.build_btn)
@@ -439,6 +466,10 @@ class MainWindow(QMainWindow):
     def _on_finished(self, ok: bool, note: str) -> None:
         if ok:
             msg = note or self.m.t('msg.done')
+            if self.m.mac_app_path:
+                msg += '   ' + self.m.t('target.macAt', self.m.mac_app_path)
+                self.target_hint.setText(self.m.t('target.openHint'))
+                self.reveal_app.show()
             if self.m.ipa_path:
                 msg += '   ' + self.m.t('msg.ipaAt', self.m.ipa_path)
             if self.m.archive_path:
@@ -460,6 +491,7 @@ class MainWindow(QMainWindow):
         if self.m.running:
             self.m.cancel_build()
         else:
+            self.reveal_app.hide()
             self.footer.setText('')
             self.footer.setStyleSheet('')
             self.m.start_build()

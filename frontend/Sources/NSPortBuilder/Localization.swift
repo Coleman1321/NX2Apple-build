@@ -32,9 +32,21 @@ enum Lang: String {
 enum L10n {
     /// key: (Chinese, English)
     static let table: [String: (zh: String, en: String)] = [
+        "target.title": ("Build for", "Build for"),
+        "target.ios": ("iPhone / iPad (.ipa)", "iPhone / iPad (.ipa)"),
+        "target.mac": ("Mac (.app)", "Mac (.app)"),
+        "target.iosHint": ("Build an IPA and a separate RomFS archive for sideloading.", "Build an IPA and a separate RomFS archive for sideloading."),
+        "target.macHint": ("Build a self-contained game app for an Apple silicon Mac.", "Build a self-contained game app for an Apple silicon Mac."),
+        "target.macDone": ("Mac app ready", "Mac app ready"),
+        "target.missingApp": ("The build finished but the Mac app was not found.", "The build finished but the Mac app was not found."),
+        "target.openHint": ("Reveal the app in Finder, then double-click to play. You can move it to Applications. Game data and shaders are included; saves stay in ~/Library/Application Support/nxnative/.", "Reveal the app in Finder, then double-click to play. You can move it to Applications. Game data and shaders are included; saves stay in ~/Library/Application Support/nxnative/."),
+        "target.updateRepo": ("Update the repository to a version with macOS app packaging.", "Update the repository to a version with macOS app packaging."),
+        "target.xcode": ("Xcode + macOS SDK", "Xcode + macOS SDK"),
+        "target.xcodeHint": ("The selected Xcode must include the macOS SDK.", "The selected Xcode must include the macOS SDK."),
+        "target.macAt": ("Mac app: %@", "Mac app: %@"),
         // ---- title ----
         "app.subtitle": ("Switch 游戏 → iPhone IPA · 归档分片 · 大内存",
-                         "Switch games → iPhone IPA · archive shards · large memory"),
+                         "Switch games → iPhone, iPad and Mac"),
 
         // ---- repository ----
         "repo.title": ("项目仓库", "Project repository"),

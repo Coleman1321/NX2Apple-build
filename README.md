@@ -2,7 +2,7 @@
 
 # 🎮 NX2Apple
 
-**Your Switch games, running on your iPhone.**
+**Your Switch games, running on your iPhone, iPad or Mac.**
 
 **Not an emulator. No terminal. A macOS app does the whole build in a few clicks.**
 
@@ -93,7 +93,15 @@ follows upstream automatically. What it adds:
 2. **Let it fetch the project** — the repository group has a **Download repository** button (a
    shallow clone into `~/NX2Apple`). Slow GitHub? The panel shows the manual ZIP route.
 3. **Pick your game files** — base game, update, DLC and `prod.keys`, separately or as one folder.
-4. **Press build**, then follow the three install steps it prints.
+4. **Choose the output** — **iPhone / iPad (.ipa)** for sideloading, or **Mac (.app)** to play on an Apple silicon Mac.
+5. **Press build**. For iOS, follow the three installation steps. For Mac, use **Reveal in Finder** and double-click the generated app.
+
+Mac packaging uses nxnative's `--platform mac-app` pipeline. The GUI writes `<title ID>.app`
+beside the base game, or in the chosen output folder. The app includes the game data, DLC and
+Mac shaders and can be moved to Applications. It is signed ad-hoc; saves live in
+`~/Library/Application Support/nxnative/<title ID>/`. Mac builds need Xcode's macOS SDK and
+Metal toolchain, but do not need the iOS SDK or XcodeGen. The game's runtime requirements
+and known limitations still apply; see [Mac app details](docs/development.md#a-mac-app).
 
 > Requirements: an Apple Silicon Mac on macOS 13+, Xcode with the iOS SDK, Python 3.9+, .NET SDK 10.
 > The app's dependency panel detects each of these and installs what it can. Your own game files and

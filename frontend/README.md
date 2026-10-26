@@ -1,6 +1,6 @@
 # NS Port Builder
 
-A macOS front end that walks a new user through building a playable IPA from
+A macOS front end that walks a new user through building a playable iOS IPA or macOS app from
 their own Switch game files — the GUI counterpart of the repository's scripts.
 
 <details>
@@ -33,6 +33,24 @@ their own Switch game files — the GUI counterpart of the repository's scripts.
   can be copied into the game app's `Documents/` unchanged. When the build
   finishes the window shows the three installation steps and a Reveal-in-Finder
   button for the IPA and the folder (see the [archive docs](../docs/ROMFS_ARCHIVE.md)).
+
+## Build a Mac game app
+
+Choose **Mac (.app)** in **Build for**, then build with the same game inputs and keys.
+The GUI calls the existing nxnative `--platform mac-app` pipeline and writes
+`<title ID>.app` beside the base game or in the selected output folder. It finishes
+with a Reveal-in-Finder button; double-click the app to play or move it to Applications.
+Game data, DLC and Mac shaders are included, so no separate RomFS archive is produced.
+The app uses ad-hoc signing. Saves are kept in
+`~/Library/Application Support/nxnative/<title ID>/`, and logs in
+`~/Library/Logs/nxnative/<title ID>.log`.
+
+The dependency panel follows the selected target: Mac builds require Xcode with the
+macOS SDK and Metal toolchain, without requiring the iOS SDK or XcodeGen. Target and
+input selection are locked while a build runs. iOS remains the default.
+
+See [upstream packaging details](../docs/development.md#a-mac-app) for runtime
+requirements, signing and command-line options.
 
 ## Run
 
@@ -69,8 +87,7 @@ pair; a missing translation shows up as the raw key rather than a blank control,
 
 ## Notes
 
-- The repo path is currently hardcoded in `ContentView.swift`
-  (`BuildModel.repo`) — point it at your checkout of this repository.
+- The app discovers the checkout automatically; the repository panel can select another copy.
 - It shells out to the same scripts the command line uses, so every option and
   limitation of the command line applies.
 - Needs about 6 GB of free space beyond the NSPs for the extraction; the shader

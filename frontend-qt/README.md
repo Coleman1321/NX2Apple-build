@@ -19,6 +19,15 @@ written once and runs everywhere Python and Qt do.
 The strings are **generated** from the SwiftUI table (`gen_localization.py`), so the two front
 ends cannot drift apart: edit `Localization.swift`, run the generator.
 
+## Mac game apps
+
+On macOS, **Build for → Mac (.app)** uses nxnative's existing macOS packaging pipeline.
+It produces `<title ID>.app` beside the base game or in the selected output folder,
+with game data, DLC and shaders included. Reveal it in Finder and double-click to play.
+The iOS SDK, XcodeGen and separate RomFS archive are not required for this target.
+Windows exposes only iOS output; Mac app packaging requires macOS and Xcode.
+See the [native frontend guide](../frontend/README.md#build-a-mac-game-app) for details.
+
 ## Run it
 
 ```bash

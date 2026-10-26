@@ -85,6 +85,8 @@ class Model(QObject):
         self.update_path = ''
         self.dlc_paths: list[str] = []
         self.keys_path = ''
+        self.build_target = 'ios'
+        self.mac_app_path = ''
         self.out_dir = ''
         self.ipa_path = ''
         self.archive_path = ''
@@ -189,7 +191,10 @@ class Model(QObject):
         if pu.IS_WIN:
             deps.extend(self._windows_deps())
         else:
-            xc = pu.xcode_ok()
+            xc = pu._runs('/usr/bin/xcodebuild', ['-version'])
+            mac_sdk = xc and pu._runs('/usr/bin/xcrun', ['--sdk', 'macosx', '--show-sdk-version'])
+            deps.append(Dep('xcodeMac', 'target.xcode', 'target.xcodeHint',
+                            DepState.OK if mac_sdk else DepState.MISSING))
             sdk = xc and pu.ios_sdk_ok()
             deps.append(Dep('xcode', 'dep.xcode', 'dep.xcode.hint',
                             DepState.OK if sdk else DepState.MISSING,
@@ -217,9 +222,14 @@ class Model(QObject):
 
     @property
     def all_deps_ok(self) -> bool:
-        return self.deps_checked and all(d.ok for d in self.deps)
+        return self.deps_checked and all(d.ok for d in self.required_deps)
 
     # ---- Windows toolchain rows
+
+    @property
+    def required_deps(self) -> list[Dep]:
+        excluded = {'xcode', 'tool:xcodegen'} if self.build_target == 'mac-app' else {'xcodeMac'}
+        return [d for d in self.deps if d.id not in excluded]
 
     def _windows_deps(self) -> list[Dep]:
         """The Windows cross toolchain, in the order it matters.
@@ -454,7 +464,7 @@ class Model(QObject):
         handheld: LLVM and SDK lines mixed). Order also matters for correctness — the SDK is
         fetched with git, which the git row may be installing.
         """
-        pending = [d for d in self.deps if not d.ok and d.install]
+        pending = [d for d in self.required_deps if not d.ok and d.install]
         if not pending or getattr(self, '_install_all_running', False):
             return
         self._install_all_running = True
@@ -528,6 +538,14 @@ class Model(QObject):
         if not self.repo_ok:
             self.finished.emit(False, self.t('msg.repoInvalidEmpty'))
             return
+        target = self.build_target
+        if target == 'mac-app' and not pu.IS_MAC:
+            self.finished.emit(False, 'Mac app packaging requires macOS.')
+            return
+        if target == 'mac-app' and not Path(self.repo_path, 'dm/mac/pack_app.py').is_file():
+            self.finished.emit(False, self.t('target.updateRepo'))
+            return
+        self.ipa_path = self.archive_path = self.mac_app_path = ''
         py = self.python_path or ('python' if pu.IS_WIN else '/usr/bin/python3')
         base_dir = str(Path(self.base_path).parent)
         all_files = [self.base_path, self.update_path] + self.dlc_paths
@@ -578,14 +596,18 @@ class Model(QObject):
         else:
             entry = [str(Path(self.repo_path, 'scripts', 'build_ipa_from_nsp.py'))]
             cwd = self.repo_path
-        args = entry + [input_dir, '-k', self.keys_path, '--progress', 'lines']
+        args = entry + [input_dir, '-k', self.keys_path, '--progress', 'lines', '--platform', target]
         has_work_dir = self.supports_work_dir()
         if has_work_dir:
             args += ['--work-dir', work_dir]
         else:
             self.log(self.t('msg.noWorkDir') + '\n')
-        if self.out_dir:
-            args += ['-o', str(Path(self.out_dir, f'{tid_hex}.ipa'))]
+        if target == 'mac-app':
+            self.mac_app_path = str(Path(self.out_dir or base_dir, f'{tid_hex}.app'))
+            args += ['-o', self.mac_app_path]
+        elif self.out_dir:
+            self.ipa_path = str(Path(self.out_dir, f'{tid_hex}.ipa'))
+            args += ['-o', self.ipa_path]
         self.effective_work_dir = work_dir if has_work_dir else str(Path(input_dir, f'{tid_hex}_build'))
 
         self.running = True
@@ -634,7 +656,13 @@ class Model(QObject):
             self._flush_lines()
             self.running = False
             self.runningChanged.emit(False)
-            if ok:
+            if ok and target == 'mac-app':
+                exists = Path(self.mac_app_path, 'Contents/Info.plist').is_file()
+                for stage in self.stages:
+                    stage.state = 'done' if exists else 'failed'
+                self.stagesChanged.emit()
+                self.finished.emit(exists, self.t('target.macDone' if exists else 'target.missingApp'))
+            elif ok:
                 self.pack_archive()
             else:
                 if self.stages:
@@ -657,8 +685,8 @@ class Model(QObject):
         """Feed one line of the build's output: stage lines move the stage list, everything
         else goes to the log (which is what the window shows)."""
         self.log(line + '\n')
-        if line.startswith('output IPA:'):
-            self.ipa_path = line.split(':', 1)[1].strip()
+        if 'output IPA: ' in line:
+            self.ipa_path = line.split('output IPA: ', 1)[1].strip()
         low = line.lower()
         for st in self.stages:
             if st.state == 'running':
