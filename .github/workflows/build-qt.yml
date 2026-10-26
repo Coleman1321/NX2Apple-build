@@ -39,7 +39,11 @@ jobs:
       - name: Install PySide6 and PyInstaller
         run: |
           python -m pip install --upgrade pip
-          python -m pip install PySide6 pyinstaller
+          # PySide6-Essentials only: no Addons, no Pdf, no WebEngine. The umbrella 'PySide6'
+          # package installs all of them (WebEngine alone is 250 MB) and PyInstaller's Qt hooks
+          # then copy every installed module regardless of --exclude-module — measured: a full
+          # install produced a 591 MB bundle with the same exclusions in place.
+          python -m pip install PySide6-Essentials pyinstaller
 
       - name: Generate the localisation table
         run: python frontend-qt/gen_localization.py
