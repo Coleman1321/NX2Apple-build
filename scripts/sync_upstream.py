@@ -296,6 +296,21 @@ def patch_tests_makefile(t):
     for name, old, new in P:
         if old not in t: fail(f'{TESTS_MK}: {name} link line missing (upstream changed the test rules)')
         t = t.replace(old, new, 1)
+    # the touch-pad geometry test (dm/host/touchpad_geometry.h): header-only, so it needs its own
+    # rule and a place in the run list
+    if 't_touchpad_geometry' not in t:
+        run_old = '$(B)/t_haptics $(B)/t_haptics_apple\n'
+        if run_old not in t: fail(f'{TESTS_MK}: run list anchor missing')
+        t = t.replace(run_old, '$(B)/t_haptics $(B)/t_haptics_apple $(B)/t_touchpad_geometry\n', 1)
+        body_old = '\t$(B)/t_haptics_apple\n'
+        if body_old not in t: fail(f'{TESTS_MK}: run body anchor missing')
+        t = t.replace(body_old, body_old + '\t$(B)/t_touchpad_geometry\n', 1)
+        rule_anchor = '$(B)/t_haptics_apple: t_haptics_apple.m'
+        if rule_anchor not in t: fail(f'{TESTS_MK}: t_haptics_apple rule missing')
+        t = t.replace(rule_anchor,
+                      '$(B)/t_touchpad_geometry: t_touchpad_geometry.c ../touchpad_geometry.h ../dm_input.h | $(B)\n'
+                      '\tclang -O1 -Wall -I.. $(GINC) -o $@ t_touchpad_geometry.c\n' + rule_anchor, 1)
+        done('tests/Makefile touchpad test')
     # the prerequisites too, so a change to the reader rebuilds them
     for name in ('t_fs', 't_fs_commit_list', 't_fs_case'):
         dep_old = f'$(B)/{name}:'
