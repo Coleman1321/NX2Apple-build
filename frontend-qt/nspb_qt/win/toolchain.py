@@ -151,6 +151,19 @@ DOTNET_ASSET = {
     'size': 300745255,
 }
 
+#: Python for Windows, for machines with no usable interpreter at all (the report's handheld:
+#: `python3 --version` fails, so the dependency row could only say "too old" and pip-install into
+#: a python that is not there). The per-user installer: `/quiet InstallAllUsers=0 TargetDir=…`
+#: needs no administrator rights and lands in the app's own tools folder. SHA-256 taken from the
+#: downloaded artifact (python.org publishes it on the release page as well).
+PYTHON_VERSION = '3.12.10'
+PYTHON_ASSET = {
+    'name': f'python-{PYTHON_VERSION}-amd64.exe',
+    'url': f'https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-amd64.exe',
+    'sha256': '67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb',
+    'size': 26964224,
+}
+
 #: Mirrors tried after the canonical URL, in order, when the direct download fails or crawls.
 #: GitHub release assets are the slow ones on mainland networks (a report measured 974 s for the
 #: 182 MiB LLVM archive); Microsoft's CDN is not, so it is absent here. A mirror only changes
@@ -395,6 +408,32 @@ def llvm_version(clang: Path) -> str:
     text = (r.stdout or '') + (r.stderr or '')
     m = re.search(r'clang version (\d+\.\d+\.\d+)', text)
     return m.group(1) if m else (text.splitlines() or [''])[0].strip()
+
+
+# ---------------------------------------------------------------- Python
+
+def python_dir() -> Path | None:
+    """The interpreter this app installed for itself, if it is there and runs.
+
+    `find_python` on the front-end side prefers it for the same reason it prefers the app's own
+    git: a machine with no system Python is exactly the machine that ran the in-app installer,
+    and after installing, the interpreter has to be found again without the user editing PATH.
+    """
+    for root in (tools_dir() / f'python-{PYTHON_VERSION}',
+                 bundled_tools_dir() / f'python-{PYTHON_VERSION}'):
+        exe = root / 'python.exe'
+        if exe.is_file() and _runs_quiet(exe):
+            return root
+    return None
+
+
+def _runs_quiet(exe: Path) -> bool:
+    try:
+        r = subprocess.run([str(exe), '-c', 'print(1)'], capture_output=True, text=True,
+                           timeout=60, **no_window())
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and (r.stdout or '').strip() == '1'
 
 
 # ---------------------------------------------------------------- .NET SDK

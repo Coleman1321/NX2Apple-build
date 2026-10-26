@@ -209,12 +209,13 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
     asset = tc.download_asset(arch)
     root = Path(dest) if dest else tc.tools_dir()
     target = root / f'llvm-mingw-{tc.LLVM_MINGW_VERSION}'
-    if (target / 'bin' / 'clang.exe').is_file():
-        log(f'LLVM-MinGW already installed: {target}')
-    else:
-        cache = root / 'downloads'
-        zpath = download(asset['url'], cache / asset['name'], asset['sha256'], asset['size'],
-                         log=log, progress=progress)
+    cache = root / 'downloads'
+    zpath = cache / asset['name']
+
+    def unpack():
+        """Unpack the (cached) archive into `target`, replacing whatever is there."""
+        if not zpath.is_file():
+            raise DownloadError(f'{zpath.name} is not in the download cache: download it first')
         log(f'unpacking {zpath.name} → {target} (about 1 GiB on disk)')
         staging = root / f'.unpack-{tc.LLVM_MINGW_VERSION}'
         shutil.rmtree(staging, ignore_errors=True)
@@ -257,7 +258,33 @@ def install_llvm(arch: str | None = None, dest: Path | None = None,
         shutil.rmtree(target, ignore_errors=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         staging.replace(target)
-        log(f'LLVM-MinGW {tc.LLVM_MINGW_VERSION} installed: {target}')
+        log(f'LLVM-MinGW {tc.LLVM_MINGW_VERSION} unpacked: {target}')
+
+    def clang_runs() -> bool:
+        """Whether the installed clang.exe actually executes (not a half-written unpack)."""
+        return bool(tc.llvm_version(target / 'bin' / 'clang.exe'))
+
+    if (target / 'bin' / 'clang.exe').is_file():
+        if clang_runs():
+            log(f'LLVM-MinGW already installed: {target}')
+        else:
+            # File existence is not installation. An unpack killed mid-way (the app closed during
+            # the slow 1 GiB extraction — the report's "install never finishes") leaves a target
+            # folder whose clang.exe exists but cannot run, and from then on every check said
+            # "does not run (a partial or 32-bit install?)" while every install said "already
+            # installed". The archive is cached, so the repair is a re-unpack, not a re-download.
+            log(f'{target} holds an unusable clang.exe — the unpack did not finish; unpacking '
+                f'again from the cached archive')
+            unpack()
+            if not clang_runs():
+                raise DownloadError(
+                    f'LLVM-MinGW was unpacked but {target / "bin" / "clang.exe"} still does not '
+                    'run. Delete that folder and install again; if it keeps failing, the archive '
+                    'or this machine\'s emulator is at fault — send the log.')
+    else:
+        zpath = download(asset['url'], zpath, asset['sha256'], asset['size'],
+                         log=log, progress=progress)
+        unpack()
     # make the Mach-O linker available in this brand-new folder
     old = {k: os.environ.get(k) for k in ('NSPB_LLVM_DIR',)}
     os.environ['NSPB_LLVM_DIR'] = str(target)
@@ -335,6 +362,49 @@ def install_dotnet(dest: Path | None = None,
     target.parent.mkdir(parents=True, exist_ok=True)
     staging.replace(target)
     log(f'.NET SDK {tc.DOTNET_VERSION} installed: {target}')
+    return target
+
+
+def install_python(dest: Path | None = None,
+                   log: Callable[[str], None] | None = None,
+                   progress: Callable[[int, int], None] | None = None) -> Path:
+    r"""Install CPython per-user into the app's tools folder, silently, no administrator rights.
+
+    For a machine whose dependency row reads "Python too old" because there is no interpreter at
+    all (the handheld: `python3 --version` fails). The python.org installer supports exactly
+    this: `/quiet InstallAllUsers=0 TargetDir=…` installs without elevation into the folder we
+    name, which keeps it inside `%LOCALAPPDATA%\NS Port Builder\tools` — writable, and it
+    survives app updates like every other tool the app fetches.
+
+    `Include_pip=1` matters: the interpreter alone is not enough, the build needs lz4, capstone,
+    fonttools and nsz, and the front end installs those into a venv made from this interpreter.
+    The bootstrapper blocks until the install finishes, so the caller can probe the result.
+    """
+    log = log or (lambda s: None)
+    asset = tc.PYTHON_ASSET
+    root = Path(dest) if dest else tc.tools_dir()
+    target = root / f'python-{tc.PYTHON_VERSION}'
+    if tc._runs_quiet(target / 'python.exe'):
+        log(f'Python {tc.PYTHON_VERSION} already installed: {target}')
+        return target
+    cache = root / 'downloads'
+    exe = download(asset['url'], cache / asset['name'], asset['sha256'], asset['size'],
+                   log=log, progress=progress)
+    log(f'installing Python {tc.PYTHON_VERSION} → {target} (per-user, no administrator rights)')
+    cmd = [str(exe), '/quiet', '/norestart', 'InstallAllUsers=0',
+           f'TargetDir={target}', 'Include_pip=1', 'Include_launcher=0',
+           'AssociateFiles=0', 'Shortcuts=0', 'PrependPath=0', 'Include_doc=0']
+    r = subprocess.run(cmd, capture_output=True, text=True, errors='replace',
+                       timeout=900, **tc.no_window())
+    if r.returncode != 0 or not tc._runs_quiet(target / 'python.exe'):
+        log(f'installer exit {r.returncode}: {(r.stdout or r.stderr or "")[:300]}')
+        raise DownloadError(
+            f'Python {tc.PYTHON_VERSION} did not install (exit {r.returncode}). '
+            f'Install it by hand from python.org, or point "python_dir" in toolchain.json at an '
+            f'existing interpreter.')
+    ver = subprocess.run([str(target / 'python.exe'), '--version'], capture_output=True,
+                         text=True, timeout=60, **tc.no_window())
+    log(f'Python installed: {(ver.stdout or ver.stderr or "").strip()} at {target}')
     return target
 
 

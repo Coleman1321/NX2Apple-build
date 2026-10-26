@@ -189,21 +189,36 @@ class Model(QObject):
             self.deps_checked = True
             self.depsChanged.emit()
 
+    def _python_row(self, py: str, py_ok: bool, py_ver: str) -> Dep:
+        """The interpreter row: fine, missing packages, missing interpreter, or too old.
+
+        "Too old" is wrong when the machine has no interpreter at all — the report's handheld
+        fails `python3 --version`, and the old two-placeholder string rendered with one argument
+        put a literal %@ on screen. A missing interpreter is its own state, and on Windows its
+        fix is the in-app installer.
+        """
+        if py_ok:
+            return Dep('python', 'dep.python', 'dep.python.hint', DepState.OK, py)
+        if py_ver and pu._ver_tuple(py_ver) >= (3, 9):
+            return Dep('python', 'dep.python', 'dep.python.hint', DepState.MISSING,
+                       f'dep.python.missing:{py} ({py_ver})',
+                       install=[py, '-m', 'pip', 'install', 'lz4', 'capstone', 'fonttools',
+                                'backports.zstd', 'nsz'])
+        if pu.IS_WIN:
+            return Dep('python', 'dep.python', 'dep.python.hint', DepState.MISSING,
+                       f'dep.python.none:{py or "python3"}',
+                       install=['__win__:python'])
+        return Dep('python', 'dep.python', 'dep.python.hint', DepState.OLD,
+                   f'dep.python.old:{py_ver or "?"}')
+
     def _check_deps(self) -> None:
         deps: list[Dep] = []
 
-        # Python + packages
+        # Python + packages. The Windows refinement (the interpreter the app installed for
+        # itself) happens in `_windows_deps`, which is the only place allowed to load the
+        # Windows-only modules.
         py, py_ok, py_ver = pu.find_python()
-        if py_ok:
-            deps.append(Dep('python', 'dep.python', 'dep.python.hint', DepState.OK, py))
-        elif py_ver and pu._ver_tuple(py_ver) >= (3, 9):
-            deps.append(Dep('python', 'dep.python', 'dep.python.hint', DepState.MISSING,
-                            f'dep.python.missing:{py} ({py_ver})',
-                            install=[py, '-m', 'pip', 'install', 'lz4', 'capstone', 'fonttools',
-                                     'backports.zstd', 'nsz']))
-        else:
-            deps.append(Dep('python', 'dep.python', 'dep.python.hint', DepState.OLD,
-                            f'dep.python.old:{py_ver or "?"}:3.9'))
+        deps.append(self._python_row(py, py_ok, py_ver))
 
         # .NET. On Windows the row comes from `_windows_deps()` instead: there the check has to be
         # "SDK 10 or newer is installed" (nx_extract targets net10.0) and the fix is an in-app
@@ -219,7 +234,7 @@ class Model(QObject):
 
         # Xcode (macOS) or the cross toolchain (Windows)
         if pu.IS_WIN:
-            deps.extend(self._windows_deps())
+            deps.extend(self._windows_deps(deps))
         else:
             xc = pu.xcode_ok()
             sdk = xc and pu.ios_sdk_ok()
@@ -278,7 +293,7 @@ class Model(QObject):
 
     # ---- Windows toolchain rows
 
-    def _windows_deps(self) -> list[Dep]:
+    def _windows_deps(self, deps: list[Dep]) -> list[Dep]:
         """The Windows cross toolchain, in the order it matters.
 
         The checks come from `nspb_qt.win.toolchain`, which runs the real compilers for the
@@ -293,6 +308,17 @@ class Model(QObject):
 
         out: list[Dep] = []
         probes = wtc.check_all(deep=True)
+
+        # Re-do the Python row now that the toolchain can speak: the interpreter this app
+        # installed for itself is not on PATH and not in Program Files, so the row built before
+        # this point reported "no usable Python" on the very machine that had just installed one
+        # (and after such an install, this is what makes the row go green).
+        own = wtc.python_dir()
+        if own:
+            py2, ok2, ver2 = pu.find_python([str(own / 'python.exe')])
+            if py2 != (self.deps[0].detail if self.deps else None):
+                deps[0] = self._python_row(py2, ok2, ver2)
+            self.python_path, self.python_ok, self.python_ver = py2, ok2, ver2
         by_id = {p.id: p for p in probes}
 
         def state(p) -> DepState:
@@ -634,6 +660,13 @@ class Model(QObject):
                         unpack_progress=progress_logger(self.t('dep.phase.unpack')))
                     self.log(self.t('dep.dotnet.done', str(path)) + '\n')
                     ok = True
+                elif what == 'python':
+                    self.log(self.t('dep.python.downloading') + '\n')
+                    path = wf.install_python(
+                        log=lambda s: self.log(str(s) + '\n'),
+                        progress=progress_logger(self.t('dep.phase.download')))
+                    self.log(self.t('dep.python.done', str(path)) + '\n')
+                    ok = True
                 elif what == 'llvm':
                     self.log(self.t('dep.llvm.downloading') + '\n')
                     path = wf.install_llvm(
@@ -718,19 +751,27 @@ class Model(QObject):
         handheld: LLVM and SDK lines mixed). Order also matters for correctness — the SDK is
         fetched with git, which the git row may be installing.
 
-        The list is snapshotted once, and the wait is on that same `Dep` object: `_install_win`
-        ends with `check_deps()`, which replaces `self.deps` with fresh objects, so re-reading
-        `self.deps` mid-run would wait on a `Dep` nobody is installing and every later row would
-        look finished instantly.
+        The plan (which ids, in which order) is snapshotted once, but **the row object is
+        re-resolved by id at every step**. `_install_win` ends with `check_deps()`, which
+        replaces every `Dep` in `self.deps`, and the panel renders those new objects: installing
+        on a snapshot is invisible to the UI, so a row showed Install (enabled!) while its
+        download ran, and nothing ever looked busy — the report's "the SDK is a cross but its
+        Install is grey" is this state machine crossed with itself. Waiting is also on the live
+        object, for the same reason. A Python install changes the very row it runs from (once
+        the interpreter is there the row's fix becomes "pip install the packages"), which only
+        works when the row is re-read.
         """
-        pending = [d for d in self.deps if not d.ok and d.install]
+        pending = [d.id for d in self.deps if not d.ok and d.install]
         if not pending or getattr(self, '_install_all_running', False):
             return
         self._install_all_running = True
 
         def run_all() -> None:
             try:
-                for d in pending:
+                for dep_id in pending:
+                    d = next((r for r in self.deps if r.id == dep_id), None)
+                    if d is None or d.ok or not d.install:
+                        continue      # gone, or an earlier step fixed it
                     self.log(f'--- {self.t(d.title_key)} ---\n')
                     self.install_dep(d)
                     waited = 0.0

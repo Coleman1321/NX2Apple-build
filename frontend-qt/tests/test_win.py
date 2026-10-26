@@ -1078,6 +1078,98 @@ class ProgressStepTest(unittest.TestCase):
             self.assertGreaterEqual(total, 6000)
 
 
+class PythonInstallTest(unittest.TestCase):
+    """The interpreter row and the in-app Python installer.
+
+    The report's handheld had no usable interpreter at all, and the row could only answer "too
+    old" — then pip-install into a python that was not there. Now the row says what is true and
+    the fix is a per-user silent install into the app's own tools folder.
+    """
+
+    def test_python_asset_is_pinned(self) -> None:
+        a = tc.PYTHON_ASSET
+        self.assertEqual(len(a['sha256']), 64)
+        self.assertTrue(all(c in '0123456789abcdef' for c in a['sha256']))
+        self.assertIn(tc.PYTHON_VERSION, a['url'])
+        self.assertTrue(a['url'].startswith('https://www.python.org/ftp/python/'))
+        self.assertGreater(a['size'], 20_000_000)
+
+    def test_installer_command_is_per_user_and_silent(self) -> None:
+        """No administrator rights, no PATH changes, lands in the app's own folder."""
+        from nspb_qt.win import fetch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seen = []
+
+            def fake_run(cmd, **k):
+                seen.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0, '', '')
+
+            exe = root / 'downloads' / tc.PYTHON_ASSET['name']
+            exe.parent.mkdir(parents=True)
+            exe.write_bytes(b'MZ')
+            # first _runs_quiet (the "already installed" check) says no, the one after the
+            # installer says yes: that is the exact sequence install_python goes through
+            with mock.patch.object(fetch, 'download', return_value=exe), \
+                    mock.patch.object(fetch.subprocess, 'run', side_effect=fake_run), \
+                    mock.patch.object(tc, '_runs_quiet', side_effect=[False, True]):
+                out = fetch.install_python(dest=root, log=lambda s: None)
+            cmd = seen[0]
+            self.assertIn('/quiet', cmd)
+            self.assertIn('InstallAllUsers=0', cmd)
+            self.assertIn('Include_pip=1', cmd)
+            self.assertIn('PrependPath=0', cmd)
+            self.assertTrue(any(str(c).startswith('TargetDir=') and str(root) in str(c)
+                                for c in cmd), cmd)
+            self.assertEqual(out, root / f'python-{tc.PYTHON_VERSION}')
+
+    def test_install_python_reports_installer_failure(self) -> None:
+        from nspb_qt.win import fetch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            exe = root / 'downloads' / tc.PYTHON_ASSET['name']
+            exe.parent.mkdir(parents=True)
+            exe.write_bytes(b'MZ')
+            with mock.patch.object(fetch, 'download', return_value=exe), \
+                    mock.patch.object(fetch, 'subprocess') as msub, \
+                    mock.patch.object(tc, '_runs_quiet', return_value=False):
+                msub.run.return_value = subprocess.CompletedProcess([], 1, 'boom', '')
+                with self.assertRaises(fetch.DownloadError) as cm:
+                    fetch.install_python(dest=root, log=lambda s: None)
+            self.assertIn('did not install', str(cm.exception))
+
+    def test_find_python_prefers_the_app_managed_interpreter(self) -> None:
+        """A machine with no system Python must still find the copy the app installed.
+
+        Every probe is mocked so the test does not depend on what this Mac has: the candidate
+        order is the subject, not any real interpreter.
+        """
+        from nspb_qt import platform_util as pu
+        with tempfile.TemporaryDirectory() as td:
+            fake = Path(td) / 'python-3.12.10'
+            fake.mkdir(parents=True)
+            (fake / 'python.exe').write_bytes(b'MZ')
+            with mock.patch.object(pu, 'venv_python', return_value=str(Path(td) / 'no-venv')), \
+                    mock.patch.object(pu, '_python_version', return_value='3.12.10'), \
+                    mock.patch.object(pu, '_runs', return_value=False):
+                py, ok, _ver = pu.find_python([str(fake / 'python.exe')])
+            self.assertEqual(py, str(fake / 'python.exe'))
+            self.assertFalse(ok)      # the packages are not installed in it (yet)
+
+
+class SdkLongPathsTest(unittest.TestCase):
+    """The SDK clone carries core.longpaths: a swiftinterface in the SDK tree tops Windows'
+    260-character MAX_PATH and the sparse checkout died with "Filename too long"."""
+
+    def test_clone_args_carry_longpaths(self) -> None:
+        import inspect
+        from nspb_qt.win import sdk_fetch
+        src = inspect.getsource(sdk_fetch.clone_sdk)
+        self.assertIn("core.longpaths=true", src)
+        # the sparse-checkout step needs it too: -c applies to one command only
+        self.assertIn("'sparse-checkout', 'set'", src)
+
+
 class DotnetTest(unittest.TestCase):
     """The .NET row and its in-app installer.
 

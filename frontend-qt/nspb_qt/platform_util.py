@@ -28,12 +28,15 @@ def _which(name: str, extra: list[str] | None = None) -> str | None:
     return None
 
 
-def find_python() -> tuple[str, bool, str]:
+def find_python(extra_candidates: list[str] | None = None) -> tuple[str, bool, str]:
     """The interpreter to build with: (path, has_packages, version_or_empty).
 
     The build scripts need lz4, capstone, fontTools, zstd and (for compressed dumps) nsz. A
     system interpreter rarely has them, so the venv the app manages is checked first, then
-    every python on the machine.
+    every python on the machine. `extra_candidates` puts paths ahead of the system probes
+    without this module knowing about Windows specifics: the caller passes the interpreter the
+    app installed for itself (toolchain.python_dir), which a machine with no system Python is
+    exactly the one that has to be found again.
     """
     probe = (
         "import lz4, capstone, fontTools\n"
@@ -42,7 +45,7 @@ def find_python() -> tuple[str, bool, str]:
         "except ImportError:\n"
         "    from backports import zstd\n"
     )
-    cands: list[str] = [venv_python()]
+    cands: list[str] = [venv_python()] + [c for c in (extra_candidates or []) if c]
     if IS_WIN:
         cands += [
             os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python312\python.exe'),

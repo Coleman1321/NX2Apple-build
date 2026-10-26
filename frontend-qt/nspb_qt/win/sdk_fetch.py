@@ -112,7 +112,12 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
     # GitHub, and a mainland connection that took 974 s for a 182 MB release asset is not going to
     # enjoy a shallow clone either. The mirrors are git-protocol proxies, so the SHA of the
     # checkout is unchanged — and the SDK is verified by its own layout afterwards.
-    clone_args = ['clone', '--filter=blob:none', '--sparse', '--depth', '1']
+    # -c core.longpaths=true: the SDK trees carry paths past Windows' 260-character MAX_PATH
+    # (a swiftinterface inside System/Cryptexes/… tops it), and without this the sparse checkout
+    # dies with "Filename too long" — the report's third attempt at the SDK. The config is
+    # clone-scoped, so the user's own git is untouched.
+    clone_args = ['-c', 'core.longpaths=true', 'clone', '--filter=blob:none', '--sparse',
+                  '--depth', '1']
     last: Exception | None = None
     for i, repo in enumerate(tc.mirror_urls(tc.SDK_REPO)):
         if i:
@@ -132,10 +137,12 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
     if last is not None:
         rmtree(work)
         raise last
-    # narrow the working tree to the one SDK before checking anything out
+    # narrow the working tree to the one SDK before checking anything out (same long-paths
+    # config: -c applies to one command only, so this call carries it too)
     try:
-        subprocess.run([git, 'sparse-checkout', 'set', version], cwd=str(work),
-                       check=True, capture_output=True, text=True, **tc.no_window())
+        subprocess.run([git, '-c', 'core.longpaths=true', 'sparse-checkout', 'set', version],
+                       cwd=str(work), check=True, capture_output=True, text=True,
+                       encoding='utf-8', errors='replace', **tc.no_window())
     except subprocess.CalledProcessError as e:
         raise SdkError(f'git sparse-checkout failed: {(e.stderr or "").strip()[-400:]}') from e
     src = work / version

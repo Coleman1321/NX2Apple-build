@@ -212,8 +212,13 @@ enum L10n {
         "dep.python.missing": ("%@ 缺包", "%@ is missing packages"),
         "dep.install.begin": ("开始安装 %@…", "Installing %@…"),
         "dep.install.fail": ("安装失败：%@（详情见日志）", "Install failed: %@ (see the log)"),
-        "dep.python.old": ("Python %@ 太旧（需要 %@ 或更新）；系统的 /usr/bin/python3 没有这些包",
-                           "Python %@ is too old (need %@ or newer); the system /usr/bin/python3 has none of these packages"),
+        "dep.python.old": ("Python %@ 太旧（需要 3.9 或更新）；这个解释器没有构建需要的包",
+                           "Python %@ is too old (need 3.9 or newer); it lacks the packages the build needs"),
+        "dep.python.none": ("没找到可用的 Python（%@ 不行）——点右侧「安装」，App 会下载 3.12 并静默装到自己的目录",
+                           "No usable Python found (%@ will not run) — press Install and the app fetches 3.12 into its own folder"),
+        "dep.python.downloading": ("正在下载并安装 Python 3.12…（约 26 MB，装到 App 自己的目录）",
+                          "Downloading and installing Python 3.12… (about 26 MB, into the app's own folder)"),
+        "dep.python.done": ("Python 已安装：%@", "Python installed: %@"),
 
         // ---- progress ----
         "prog.title": ("构建进度", "Build progress"),
