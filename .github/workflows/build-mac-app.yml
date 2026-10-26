@@ -1,0 +1,88 @@
+# Build the native SwiftUI macOS app and attach it to a release.
+#
+# This exists because the app used to be assembled by hand (swift build, copy the binary into
+# the bundle, plutil the version, codesign, ditto) and uploaded by hand — and one release went
+# out without it. The native app is the one macOS users actually run, so "the release has no
+# NS-Port-Builder-macOS-arm64.zip" is not a cosmetic gap: the app's own updater looks for exactly
+# that asset name (ContentView.checkAppUpdate), finds a newer tag with no such asset, and reports
+# "up to date" — a silent failure of the update path for every existing install.
+#
+#   - push a tag vX.Y.Z  → builds and attaches the app to that release
+#   - workflow_dispatch  → artifact only
+name: Build NS Port Builder (native macOS)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from the tag
+        id: ver
+        shell: bash
+        run: |
+          # The app reads its version from ContentView.appVersion, and the bundle plist must agree
+          # or the updater compares the wrong number. Take the tag, and fail loudly on a mismatch
+          # rather than shipping a bundle that calls itself something else.
+          tag="${{ github.ref_name }}"
+          v="${tag#v}"
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            v=$(sed -n 's/.*static let appVersion = "\(.*\)".*/\1/p' frontend/Sources/NSPortBuilder/ContentView.swift)
+            echo "not a tag: taking the version from the source ($v)"
+          fi
+          src=$(sed -n 's/.*static let appVersion = "\(.*\)".*/\1/p' frontend/Sources/NSPortBuilder/ContentView.swift)
+          if [ "$v" != "$src" ]; then
+            echo "::error::tag says $v but ContentView.appVersion says $src — bump the source first"
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        working-directory: frontend
+        run: swift build -c release
+
+      - name: Assemble the bundle
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="NS Port Builder.app"
+          test -d "$APP" || { echo "::error::$APP is missing from the checkout"; exit 1; }
+          cp .build/release/NSPortBuilder "$APP/Contents/MacOS/NSPortBuilder"
+          V="${{ steps.ver.outputs.version }}"
+          plutil -replace CFBundleShortVersionString -string "$V" "$APP/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$V" "$APP/Contents/Info.plist"
+          # Ad-hoc: the app is distributed as a zip and the user right-clicks → Open once, which is
+          # what the README says. A real Developer ID would need a certificate this repo has none of.
+          codesign --force --deep --sign - "$APP"
+          codesign -v "$APP"
+          plutil -p "$APP/Contents/Info.plist" | grep -i version
+
+      - name: Package
+        working-directory: frontend
+        shell: bash
+        run: ditto -c -k --keepParent "NS Port Builder.app" NS-Port-Builder-macOS-arm64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NS-Port-Builder-macOS-arm64
+          path: frontend/NS-Port-Builder-macOS-arm64.zip
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "NS Port Builder $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" frontend/NS-Port-Builder-macOS-arm64.zip --clobber

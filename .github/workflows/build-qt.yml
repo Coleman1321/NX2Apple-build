@@ -1,34 +1,24 @@
-# Build the Qt front end for Windows and macOS and attach it to a release.
+# Build the Qt front end for Windows, as a testing artifact.
 #
-# PyInstaller cannot cross-compile: a Windows .exe must be built on Windows and a Mac .app on
-# macOS. This workflow runs both on GitHub's runners, so a release carries both without anyone
-# needing a local toolchain.
+# PyInstaller cannot cross-compile, so this has to run on a Windows runner. The macOS half is
+# gone: the native SwiftUI app (build-mac-app.yml) is strictly better on the same machine, so a
+# second macOS download only offered a way to pick the worse one.
 #
-#   - push a tag vX.Y.Z           → both builds run, attached to that release
-#   - workflow_dispatch           → both builds run, uploaded as workflow artifacts only
-name: Build NS Port Builder (Qt)
+# Nothing here touches a release. The Windows build is still in testing — it is built on every
+# tag so the artifact is always available under Actions, and it becomes a release download only
+# once the reports from real hardware are clean.
+#
+#   - push a tag vX.Y.Z / workflow_dispatch → build, upload as a workflow artifact
+name: Build NS Port Builder (Qt, Windows testing)
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: NS-Port-Builder-qt-windows-x64
-            sep: ';'
-          - os: macos-latest
-            artifact: NS-Port-Builder-qt-macos-arm64
-            sep: ':'
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -121,49 +111,30 @@ jobs:
         shell: bash
         run: |
           # PyInstaller's Qt hooks copy libraries that shiboken links against even when the app
-          # never imports them. QtPdf (6.9 MB), QtQuick (5.8) and QtQml (4.6) reference each
-          # other and nothing we use, so they go. QtDBus stays: QtGui itself links it (removing
-          # it makes the app die at import with "Library not loaded: @rpath/QtDBus").
+          # never imports them. QtPdf, QtQuick and QtQml reference each other and nothing we use,
+          # so they go.
           cd frontend-qt/dist
-          if [ -d "NS Port Builder.app" ]; then
-            L="NS Port Builder.app/Contents/Frameworks/PySide6/Qt/lib"
-            for drop in QtPdf QtQuick QtQuickWidgets QtQml QtQmlModels QtQmlWorkerScript QtVirtualKeyboard; do
-              rm -rf "$L/$drop.framework" 2>/dev/null || true
-            done
-          fi
-          if [ -d "NS Port Builder" ]; then
-            for drop in Qt6Pdf Qt6Quick Qt6QuickWidgets Qt6Qml Qt6QmlModels Qt6QmlWorkerScript Qt6VirtualKeyboard; do
-              rm -f "NS Port Builder/$drop.dll" 2>/dev/null || true
-            done
-          fi
-          du -sh "NS Port Builder.app" "NS Port Builder" 2>/dev/null || true
+          for drop in Qt6Pdf Qt6Quick Qt6QuickWidgets Qt6Qml Qt6QmlModels Qt6QmlWorkerScript Qt6VirtualKeyboard; do
+            rm -f "NS Port Builder/$drop.dll" 2>/dev/null || true
+          done
+          du -sh "NS Port Builder" 2>/dev/null || true
 
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
+      - name: Package
         shell: bash
         run: |
           cd frontend-qt/dist
-          powershell -Command "Compress-Archive -Path 'NS Port Builder' -DestinationPath '../${{ matrix.artifact }}.zip'"
-
-      - name: Package (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cd frontend-qt/dist
-          ditto -c -k --keepParent "NS Port Builder.app" "../${{ matrix.artifact }}.zip"
+          powershell -Command "Compress-Archive -Path 'NS Port Builder' -DestinationPath '../NS-Port-Builder-qt-windows-x64.zip'"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: frontend-qt/${{ matrix.artifact }}.zip
+          name: NS-Port-Builder-qt-windows-x64
+          path: frontend-qt/NS-Port-Builder-qt-windows-x64.zip
           if-no-files-found: error
 
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Qt front end build"
-          gh release upload "$GITHUB_REF_NAME" "frontend-qt/${{ matrix.artifact }}.zip" --clobber
+      # Deliberately NOT attached to the release. Two reasons, both from real reports:
+      #  - the Windows build is still in testing. Shipping it on every tag put a 84 MB download
+      #    in front of users who could not use it, and it contradicted the release notes that
+      #    said the Windows front end was not ready;
+      #  - the Qt macOS build has no advantage over the native SwiftUI app on the same machine,
+      #    so a second macOS download only creates a way to pick the worse one.
+      # The artifacts above stay available under Actions for anyone testing the Windows path.
