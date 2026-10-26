@@ -345,19 +345,25 @@ def patch_build_ipa(t):
 '''
     if old not in t: fail('dm/ios/tools/build_ipa.sh: APP anchor missing (upstream moved the app definition)')
     t = t.replace(old, old + ENT, 1)
-    old2 = '''MAPS+=("$P/romfs=$ROMFS")
-t "pack IPA (already-compressed game files stored, everything else deflated)"'''
-    if old2 not in t: fail('dm/ios/tools/build_ipa.sh: pack anchor missing')
-    return done('build_ipa.sh slim + entitlements', t.replace(old2, '''# DM_FULL_ROMFS=1 packs the RomFS into the package (upstream behaviour; only sensible for small
+    # The slim package: DM_FULL_ROMFS unset leaves the RomFS out. Upstream #279 (incremental packs)
+    # moved the map from its own MAPS+= line into `P=Payload/DmIOS.app; MAPS=(...)`: each shape gets
+    # its block, and the new one initialises MAPS (the AOC / PSO / MSL and app maps follow either way).
+    comment = """# DM_FULL_ROMFS=1 packs the RomFS into the package (upstream behaviour; only sensible for small
 # games — a full package of a large game is many GB and iOS refuses to install it with
 # PackageExtractionFailed). The default is the slim package: the app reads the game files from
 # Documents/romfs (a directory tree, or a ROMFSARC archive: romfs.idx + romfs.NN shards).
-if [ -n "${DM_FULL_ROMFS:-}" ]; then
-  MAPS+=("$P/romfs=$ROMFS")
-  t "pack full IPA with RomFS (already-compressed game files stored, everything else deflated)"
-else
-  t "pack slim IPA without RomFS (game files come from Documents/romfs; DM_FULL_ROMFS=1 packs them)"
-fi''', 1))
+"""
+    full_t = '  t "pack full IPA with RomFS (already-compressed game files stored, everything else deflated)"\n'
+    slim_t = '  t "pack slim IPA without RomFS (game files come from Documents/romfs; DM_FULL_ROMFS=1 packs them)"\n'
+    new_map = 'P=Payload/DmIOS.app; MAPS=("$P/romfs=$ROMFS")\n'
+    if new_map in t:
+        block = comment + 'if [ -n "${DM_FULL_ROMFS:-}" ]; then\n  MAPS=("$P/romfs=$ROMFS")\n' + full_t + 'else\n  MAPS=()\n' + slim_t + 'fi\n'
+        return done('build_ipa.sh slim + entitlements', t.replace(new_map, 'P=Payload/DmIOS.app\n' + block, 1))
+    old_map = '''MAPS+=("$P/romfs=$ROMFS")
+t "pack IPA (already-compressed game files stored, everything else deflated)"'''
+    if old_map not in t: fail('dm/ios/tools/build_ipa.sh: pack anchor missing')
+    block = comment + 'if [ -n "${DM_FULL_ROMFS:-}" ]; then\n  MAPS+=("$P/romfs=$ROMFS")\n' + full_t + 'else\n' + slim_t + 'fi'
+    return done('build_ipa.sh slim + entitlements', t.replace(old_map, block, 1))
 
 def patch_nsp(t):
     P = []
