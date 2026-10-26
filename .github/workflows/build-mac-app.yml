@@ -54,12 +54,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The .app is in .gitignore (it is a build product), so a fresh checkout has none: the
+          # bundle is generated here. That is the point of this workflow — the previous hand-built
+          # bundle is exactly what went missing from a release.
           APP="NS Port Builder.app"
-          test -d "$APP" || { echo "::error::$APP is missing from the checkout"; exit 1; }
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp .build/release/NSPortBuilder "$APP/Contents/MacOS/NSPortBuilder"
+          cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
           V="${{ steps.ver.outputs.version }}"
-          plutil -replace CFBundleShortVersionString -string "$V" "$APP/Contents/Info.plist"
-          plutil -replace CFBundleVersion -string "$V" "$APP/Contents/Info.plist"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>NSPortBuilder</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>CFBundleIdentifier</key><string>org.nxnative.NSPortBuilder</string>
+            <key>CFBundleName</key><string>NS Port Builder</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$V</string>
+            <key>CFBundleVersion</key><string>$V</string>
+            <key>LSMinimumSystemVersion</key><string>13.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
           # Ad-hoc: the app is distributed as a zip and the user right-clicks → Open once, which is
           # what the README says. A real Developer ID would need a certificate this repo has none of.
           codesign --force --deep --sign - "$APP"
