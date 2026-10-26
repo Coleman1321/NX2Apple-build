@@ -187,10 +187,35 @@ def ios_sdk_ok() -> bool:
     return _runs('/usr/bin/xcrun', ['--sdk', 'iphoneos', '--show-sdk-version'])
 
 
+def xcode_developer_dir() -> str:
+    """The selected developer directory (`xcode-select -p`), or '' when none is selected.
+
+    Asked rather than assumed: an Xcode **beta** lives at /Applications/Xcode-beta.app, and the
+    hard-coded /Applications/Xcode.app check reported "no Xcode" to anyone whose only install is
+    a beta (issue #21). `xcode-select` is the same source of truth xcodebuild and xcrun use, so
+    agreeing with it is what makes the panel match what the build will actually do.
+    """
+    if IS_WIN:
+        return ''
+    try:
+        r = subprocess.run(['/usr/bin/xcode-select', '-p'], capture_output=True, text=True,
+                           timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return (r.stdout or '').strip() if r.returncode == 0 else ''
+
+
 def xcode_ok() -> bool:
     if IS_WIN:
         return False        # Xcode is macOS-only; Windows uses the cross toolchain instead
-    return Path('/Applications/Xcode.app').is_dir() and Path('/usr/bin/xcodebuild').is_file()
+    # A selected developer directory that exists is the real condition: it covers Xcode.app,
+    # Xcode-beta.app, a custom location, and a Command Line Tools-only setup (which selects
+    # /Library/Developer/CommandLineTools and has no xcodebuild-driven iOS build at all — that
+    # case is caught by the iOS SDK probe below, which is what the row reports).
+    dev = xcode_developer_dir()
+    if not dev or not Path(dev).is_dir():
+        return False
+    return Path('/usr/bin/xcodebuild').is_file()
 
 
 # ---------------------------------------------------------------- process helpers

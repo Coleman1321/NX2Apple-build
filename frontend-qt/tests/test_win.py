@@ -1157,6 +1157,61 @@ class PythonInstallTest(unittest.TestCase):
             self.assertFalse(ok)      # the packages are not installed in it (yet)
 
 
+class XcodeBetaTest(unittest.TestCase):
+    """Xcode detection asks xcode-select, not a fixed /Applications/Xcode.app path.
+
+    Issue #21: an Xcode **beta** lives at /Applications/Xcode-beta.app, so the hard-coded check
+    reported "no Xcode" on a machine that could build perfectly well — xcodebuild and xcrun both
+    follow xcode-select, and that is what the panel has to agree with.
+    """
+
+    def test_xcode_ok_follows_xcode_select(self) -> None:
+        from nspb_qt import platform_util as pu
+        if pu.IS_WIN:
+            self.skipTest('macOS only')
+        with tempfile.TemporaryDirectory() as td:
+            beta = Path(td) / 'Xcode-beta.app' / 'Contents' / 'Developer'
+            beta.mkdir(parents=True)
+            with mock.patch.object(pu, 'IS_WIN', False), \
+                    mock.patch.object(pu, 'xcode_developer_dir', return_value=str(beta)), \
+                    mock.patch.object(pu.Path, 'is_file', return_value=True):
+                self.assertTrue(pu.xcode_ok())
+
+    def test_xcode_ok_rejects_a_stale_selection(self) -> None:
+        """xcode-select can point at a deleted Xcode (uninstalled without re-selecting)."""
+        from nspb_qt import platform_util as pu
+        with mock.patch.object(pu, 'IS_WIN', False), \
+                mock.patch.object(pu, 'xcode_developer_dir', return_value='/nope/Xcode.app/Contents/Developer'):
+            self.assertFalse(pu.xcode_ok())
+
+    def test_xcode_ok_rejects_no_selection(self) -> None:
+        from nspb_qt import platform_util as pu
+        with mock.patch.object(pu, 'IS_WIN', False), \
+                mock.patch.object(pu, 'xcode_developer_dir', return_value=''):
+            self.assertFalse(pu.xcode_ok())
+
+    def test_developer_dir_is_empty_on_windows(self) -> None:
+        from nspb_qt import platform_util as pu
+        with mock.patch.object(pu, 'IS_WIN', True):
+            self.assertEqual(pu.xcode_developer_dir(), '')
+
+    def test_developer_dir_reads_xcode_select_output(self) -> None:
+        from nspb_qt import platform_util as pu
+        fake = subprocess.CompletedProcess([], 0, '/Applications/Xcode-beta.app/Contents/Developer\n', '')
+        with mock.patch.object(pu, 'IS_WIN', False), \
+                mock.patch.object(pu.subprocess, 'run', return_value=fake):
+            self.assertEqual(pu.xcode_developer_dir(),
+                             '/Applications/Xcode-beta.app/Contents/Developer')
+
+    def test_developer_dir_ignores_a_failing_xcode_select(self) -> None:
+        """A machine with no Xcode at all: xcode-select exits non-zero."""
+        from nspb_qt import platform_util as pu
+        fake = subprocess.CompletedProcess([], 2, '', 'xcode-select: error: unable to get active developer directory')
+        with mock.patch.object(pu, 'IS_WIN', False), \
+                mock.patch.object(pu.subprocess, 'run', return_value=fake):
+            self.assertEqual(pu.xcode_developer_dir(), '')
+
+
 class SdkLongPathsTest(unittest.TestCase):
     """The SDK clone carries core.longpaths: a swiftinterface in the SDK tree tops Windows'
     260-character MAX_PATH and the sparse checkout died with "Filename too long"."""

@@ -186,7 +186,8 @@ enum L10n {
         "dep.openAppStore": ("打开 App Store", "Open App Store"),
 
         "dep.xcode": ("Xcode + iOS SDK", "Xcode + iOS SDK"),
-        "dep.xcode.hint": ("App Store 安装，约 12 GB", "from the App Store, about 12 GB"),
+        "dep.xcode.hint": ("App Store 安装（Beta 版也行，用 xcode-select 指向它），约 12 GB",
+                           "from the App Store (a beta works too — point xcode-select at it), about 12 GB"),
         "dep.xcode.noSDK": ("Xcode 已装，但 iOS SDK 未下载（Xcode 15 起 iOS 平台是单独下载的）",
                             "Xcode is installed but the iOS SDK is not downloaded (a separate download since Xcode 15)"),
         "dep.metal": ("Metal Toolchain", "Metal Toolchain"),

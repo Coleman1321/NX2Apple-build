@@ -1086,13 +1086,35 @@ final class BuildModel: ObservableObject {
         return ("dotnet", false)
     }
 
+    /// Whether the selected developer directory exists (`xcode-select -p`), which is the same
+    /// source of truth xcodebuild and xcrun use — so an Xcode beta, a custom location, or a
+    /// Command Line Tools-only setup is reported for what it is instead of "no Xcode".
+    nonisolated static func developerDirExists() -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+        p.arguments = ["-p"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return false }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0,
+              let dir = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !dir.isEmpty else { return false }
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: dir, isDirectory: &isDir) && isDir.boolValue
+    }
+
     nonisolated static func detectDepsSync() -> [Dep] {
         var out: [Dep] = []
 
         // Xcode.app alone is not enough: since Xcode 15 the iOS platform ships as a separate
         // download, so a fresh install has xcodebuild but no iOS SDK and the build dies deep in
         // xcodebuild. Ask for the SDK version itself — that is the check that matches the name.
-        let xcodePresent = FileManager.default.fileExists(atPath: "/Applications/Xcode.app")
+        // And ask xcode-select where Xcode is, not a fixed path: a beta lives at
+        // /Applications/Xcode-beta.app and the hard-coded check called that "no Xcode" (#21).
+        let xcodePresent = Self.developerDirExists()
             && FileManager.default.isExecutableFile(atPath: "/usr/bin/xcodebuild")
         let iosSDK = xcodePresent && runOK("/usr/bin/xcrun", ["--sdk", "iphoneos", "--show-sdk-version"])
         out.append(Dep(id: "xcode", name: "dep.xcode", hint: "dep.xcode.hint",
