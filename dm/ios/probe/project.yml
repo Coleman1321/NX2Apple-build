@@ -14,6 +14,13 @@ targets:
     platform: iOS
     sources:
       - path: src/probe_main.m
+    # Embed the framework into DmProbe.app/Frameworks/ — the probe's dlopen targets
+    # @executable_path/Frameworks/Probe.framework, so without this the app reports a FALSE
+    # "BLOCKED: no such file" (the framework would be built but never shipped inside the bundle).
+    dependencies:
+      - target: Probe
+        embed: true
+        codeSign: true
     info:
       path: probe-Info.plist
       properties:

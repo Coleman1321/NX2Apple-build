@@ -7,9 +7,35 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2013F6CD064EE80DD5843D45 /* Probe.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FE4AE6108123D746C5393ED7 /* Probe.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		418AA9F224215885616DF281 /* probe.c in Sources */ = {isa = PBXBuildFile; fileRef = 9D35A9F8119FFBEE2C503AAD /* probe.c */; };
+		7A77ECBDCAD18AF9F0479F18 /* Probe.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE4AE6108123D746C5393ED7 /* Probe.framework */; };
 		E87D64C1AB95AA2BE70D72EF /* probe_main.m in Sources */ = {isa = PBXBuildFile; fileRef = FB06C46F0E8AB6B859924E6A /* probe_main.m */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FF0604D39539FFF1AF62F0FC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 665957B2F37792FAF81F0760 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A4AE636FE4AFD6115D14AF3;
+			remoteInfo = Probe;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0B5D80247451CC6CD1A2E376 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				2013F6CD064EE80DD5843D45 /* Probe.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		43150F93F9204EF615D94F11 /* DmProbe.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = DmProbe.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -17,6 +43,17 @@
 		FB06C46F0E8AB6B859924E6A /* probe_main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = probe_main.m; sourceTree = "<group>"; };
 		FE4AE6108123D746C5393ED7 /* Probe.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Probe.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3A942D989AEB0836E1497A36 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A77ECBDCAD18AF9F0479F18 /* Probe.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		667940E40ADC709A064A55E0 /* src */ = {
@@ -53,10 +90,13 @@
 			buildConfigurationList = FB9912A086081F2D19165946 /* Build configuration list for PBXNativeTarget "DmProbe" */;
 			buildPhases = (
 				FACD769F731E7788343A6BD1 /* Sources */,
+				3A942D989AEB0836E1497A36 /* Frameworks */,
+				0B5D80247451CC6CD1A2E376 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				365E35C0C35C86A7263A02CE /* PBXTargetDependency */,
 			);
 			name = DmProbe;
 			packageProductDependencies = (
@@ -131,6 +171,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		365E35C0C35C86A7263A02CE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A4AE636FE4AFD6115D14AF3 /* Probe */;
+			targetProxy = FF0604D39539FFF1AF62F0FC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		010EAC4E2D1CD340BE7A9DE8 /* Debug */ = {
