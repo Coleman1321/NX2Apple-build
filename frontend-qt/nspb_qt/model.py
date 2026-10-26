@@ -94,6 +94,17 @@ class Model(QObject):
         self._proc: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
         self._line_buf = ''
+        # Every log line also goes to a file, so a user on a handheld can send one file instead of
+        # copying text out of the window. One file per run, overwritten at start; the path is shown
+        # in the log's first line so it can be found.
+        try:
+            base = (Path(os.environ['LOCALAPPDATA']) / 'NS Port Builder' / 'logs') if pu.IS_WIN \
+                else (Path.home() / 'Library' / 'Logs' / 'NS Port Builder')
+            base.mkdir(parents=True, exist_ok=True)
+            self.log_path = base / 'last-run.log'
+            self.log_path.write_text('', encoding='utf-8')
+        except OSError:
+            self.log_path = None
 
     # ---- strings
 
@@ -315,32 +326,32 @@ class Model(QObject):
         if not git:
             if not pu.IS_WIN:
                 self.repoChanged.emit()
-                self.logAppended.emit(self.t('repo.gitMissing') + '\n')
+                self.log(self.t('repo.gitMissing') + '\n')
                 return
             # Windows with no git at all: fetch PortableGit, then carry on with the clone. This is
             # the one case where "one click" has to install something first; it needs no
             # administrator rights and no installer.
             self.repo_busy = True
             self.repoChanged.emit()
-            self.logAppended.emit(self.t('repo.gitInstalling') + '\n')
+            self.log(self.t('repo.gitInstalling') + '\n')
 
             def install_then_clone() -> None:
                 ok = False
                 try:
                     from .win import fetch as wf
-                    path = wf.install_git(log=lambda s: self.logAppended.emit(str(s) + '\n'),
-                                          progress=lambda d, t_: self.logAppended.emit(
+                    path = wf.install_git(log=lambda s: self.log(str(s) + '\n'),
+                                          progress=lambda d, t_: self.log(
                                               f'  {d // 1048576} MB' +
                                               (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
                     ok = Path(path).is_file()
                 except Exception as e:
-                    self.logAppended.emit(self.t('repo.gitInstallFail', str(e)) + '\n')
+                    self.log(self.t('repo.gitInstallFail', str(e)) + '\n')
                 self.repo_busy = False
                 self.repoChanged.emit()
                 if ok:
                     self.clone_repo(dest)      # now git exists: the normal path
                 else:
-                    self.logAppended.emit(self.t('repo.gitMissing') + '\n')
+                    self.log(self.t('repo.gitMissing') + '\n')
 
             threading.Thread(target=install_then_clone, daemon=True).start()
             return
@@ -350,11 +361,11 @@ class Model(QObject):
                 self.repo_path = target
                 self.repoChanged.emit()
             else:
-                self.logAppended.emit(self.t('repo.destBusy', target) + '\n')
+                self.log(self.t('repo.destBusy', target) + '\n')
             return
         self.repo_busy = True
         self.repoChanged.emit()
-        self.logAppended.emit(f'$ git clone --depth 1 {self.REPO_URL} {target}\n')
+        self.log(f'$ git clone --depth 1 {self.REPO_URL} {target}\n')
 
         def work() -> None:
             ok = False
@@ -365,11 +376,11 @@ class Model(QObject):
                                      errors='replace', env=pu.child_env(), **pu.no_window_kwargs())
                 assert p.stdout is not None
                 for line in p.stdout:
-                    self.logAppended.emit(line.replace('\r', '\n'))
+                    self.log(line.replace('\r', '\n'))
                 p.wait()
                 ok = p.returncode == 0
             except OSError as e:
-                self.logAppended.emit(f'{e}\n')
+                self.log(f'{e}\n')
             self.repo_busy = False
             if ok and self.is_repo(target):
                 self.repo_path = target
@@ -400,7 +411,7 @@ class Model(QObject):
                 out, self.repo_status = str(e), self.t('repo.pullFail')
             self.repo_busy = False
             if out:
-                self.logAppended.emit(out + '\n')
+                self.log(out + '\n')
             self.repoChanged.emit()
 
         threading.Thread(target=work, daemon=True).start()
@@ -436,114 +447,48 @@ class Model(QObject):
     # ---- installing what is missing ----
 
     def install_all_missing(self) -> None:
-        """Walk the dependency rows and run each one's install command in turn.
+        """Install every missing dependency, one at a time, in order.
 
-        Sequential on purpose: the installers compete for the same package manager and the
-        output is far easier to follow one tool at a time.
+        Genuinely sequential: each installer runs on its own thread, so an earlier version
+        started them all at once and their downloads interleaved in the log (reported from a
+        handheld: LLVM and SDK lines mixed). Order also matters for correctness — the SDK is
+        fetched with git, which the git row may be installing.
         """
-        for d in list(self.deps):
-            if not d.ok and d.install:
-                self.install_dep(d)
-
-    def install_dep(self, dep: Dep) -> None:
-        """Run a dependency's fix on a thread, streaming its output to the log."""
-        if not dep.install:
+        pending = [d for d in self.deps if not d.ok and d.install]
+        if not pending or getattr(self, '_install_all_running', False):
             return
-        # A Windows toolchain row carries a marker instead of a command line: the download is
-        # in-process (nspb_qt.win.fetch), so there is nothing to spawn.
-        if dep.install[0].startswith('__win__:'):
-            self._install_win(dep, dep.install[0].split(':', 1)[1])
-            return
-        dep.installing = True
-        self.depsChanged.emit()
+        self._install_all_running = True
 
-        def work() -> None:
-            ok = True
-            if dep.id == 'python':
-                ok = self._make_venv(self.python_path)
-            else:
-                self.logAppended.emit('$ ' + ' '.join(dep.install) + '\n')
-                try:
-                    p = subprocess.Popen(dep.install, stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, text=True,
-                                         errors='replace', env=pu.child_env(),
-                                         **pu.no_window_kwargs())
-                    assert p.stdout is not None
-                    for line in p.stdout:
-                        self.logAppended.emit(line)
-                    p.wait()
-                    ok = p.returncode == 0
-                except OSError as e:
-                    self.logAppended.emit(f'{e}\n')
-                    ok = False
-            dep.installing = False
-            self.depsChanged.emit()
-            self.check_deps()
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _install_win(self, dep: Dep, what: str) -> None:
-        """Download and unpack a Windows toolchain piece, with progress in the log.
-
-        Runs on a thread. Every failure names the step and what to do by hand, because a
-        download can fail for reasons the app cannot fix (a proxy, a proxy that blocks GitHub,
-        an Apple ID needed for the Metal tools).
-        """
-        dep.installing = True
-        self.depsChanged.emit()
-
-        def work() -> None:
-            ok = False
+        def run_all() -> None:
             try:
-                from .win import fetch as wf, toolchain as wtc
-                if what == 'llvm':
-                    self.logAppended.emit(self.t('dep.llvm.downloading') + '\n')
-                    path = wf.install_llvm(log=lambda s: self.logAppended.emit(str(s) + '\n'),
-                                           progress=lambda d, t_: self.logAppended.emit(
-                                               f'  {d // 1048576} MB' + (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
-                    self.logAppended.emit(self.t('dep.llvm.done', str(path)) + '\n')
-                    ok = True
-                elif what == 'ios_sdk':
-                    self.logAppended.emit(self.t('dep.iossdk.downloading') + '\n')
-                    from .win import sdk_fetch as sf
-                    path = sf.clone_sdk(log=lambda s: self.logAppended.emit(str(s) + '\n'))
-                    self.logAppended.emit(self.t('dep.iossdk.done', str(path)) + '\n')
-                    ok = True
-            except Exception as e:      # DownloadError, OSError, a missing attribute: all reported
-                self.logAppended.emit(self.t('dep.install.fail', str(e)) + '\n')
-                ok = False
-            dep.installing = False
-            self.depsChanged.emit()
-            self.check_deps()
+                for d in pending:
+                    self.log(f'--- {self.t(d.title_key)} ---\n')
+                    self.install_dep(d)
+                    waited = 0.0
+                    while d.installing and waited < 1800:
+                        time.sleep(0.25)
+                        waited += 0.25
+                    if d.installing:
+                        self.log(self.t('dep.installTimeout') + '\n')
+                self.check_deps()      # one refresh at the end, with everything in place
+            finally:
+                self._install_all_running = False
 
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=run_all, daemon=True).start()
 
-    def _make_venv(self, base: str) -> bool:
-        vpy = pu.venv_python()
-        if not Path(vpy).is_file():
-            vdir = pu.venv_dir()
-            vdir.parent.mkdir(parents=True, exist_ok=True)
-            self.logAppended.emit(f'$ {base} -m venv {vdir}\n')
-            if not pu._runs(base, ['-m', 'venv', str(vdir)]):
-                self.logAppended.emit('venv creation failed\n')
-                return False
-        ver = pu._ver_tuple(pu._python_version(vpy))
-        pkgs = ['lz4', 'capstone', 'fonttools', 'nsz']
-        if ver < (3, 14):
-            pkgs.insert(3, 'backports.zstd')
-        self.logAppended.emit(f'$ {vpy} -m pip install {" ".join(pkgs)}\n')
-        try:
-            p = subprocess.Popen([vpy, '-m', 'pip', 'install'] + pkgs, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT, text=True, errors='replace',
-                                 env=pu.child_env(), **pu.no_window_kwargs())
-            assert p.stdout is not None
-            for line in p.stdout:
-                self.logAppended.emit(line)
-            p.wait()
-            return p.returncode == 0
-        except OSError as e:
-            self.logAppended.emit(f'{e}\n')
-            return False
+    def log(self, s: str) -> None:
+        """Append to the window's log and to the log file.
+
+        The file is what makes a bug report possible from a handheld, where copying text out of
+        the window is painful: one path, one file, sent as-is.
+        """
+        self.logAppended.emit(s)
+        if getattr(self, 'log_path', None):
+            try:
+                with open(self.log_path, 'a', encoding='utf-8', errors='replace') as f:
+                    f.write(s)
+            except OSError:
+                self.log_path = None      # one failure disables the file, not the app
 
     # ---- inputs
 
@@ -619,7 +564,7 @@ class Model(QObject):
         compressed = any(Path(f).suffix.lower() in ('.nsz', '.xcz')
                          for f in all_files if f)
         if compressed and not pu._runs(py, ['-c', 'import nsz']):
-            self.logAppended.emit(self.t('msg.installingNsz') + '\n')
+            self.log(self.t('msg.installingNsz') + '\n')
             if not pu._runs(py, ['-m', 'pip', 'install', 'nsz']):
                 self.finished.emit(False, self.t('msg.nszFailed', py))
                 return
@@ -638,7 +583,7 @@ class Model(QObject):
         if has_work_dir:
             args += ['--work-dir', work_dir]
         else:
-            self.logAppended.emit(self.t('msg.noWorkDir') + '\n')
+            self.log(self.t('msg.noWorkDir') + '\n')
         if self.out_dir:
             args += ['-o', str(Path(self.out_dir, f'{tid_hex}.ipa'))]
         self.effective_work_dir = work_dir if has_work_dir else str(Path(input_dir, f'{tid_hex}_build'))
@@ -648,7 +593,7 @@ class Model(QObject):
         self.stages = []
         self.log_tail = ''
         self.stagesChanged.emit()
-        self.logAppended.emit(self.t('msg.running', py + ' ' + ' '.join(args)) + '\n')
+        self.log(self.t('msg.running', py + ' ' + ' '.join(args)) + '\n')
 
         env = pu.child_env()
         droot = pu.dotnet_root(self.dotnet_path) if self.dotnet_ok else None
@@ -665,9 +610,9 @@ class Model(QObject):
                 env = wshim.build_env(env, python_exe=py)
                 ok_shim, why = wshim.verify_shim(env)
                 if not ok_shim:
-                    self.logAppended.emit(f'[shim] {why}\n')
+                    self.log(f'[shim] {why}\n')
             except Exception as e:      # a broken shim must be visible, not fatal
-                self.logAppended.emit(f'[shim] could not prepare the Windows shim: {e}\n')
+                self.log(f'[shim] could not prepare the Windows shim: {e}\n')
             env['NSPB_REPO'] = self.repo_path
 
         def work() -> None:
@@ -683,7 +628,7 @@ class Model(QObject):
                 self._proc.wait()
                 ok = self._proc.returncode == 0
             except OSError as e:
-                self.logAppended.emit(f'{e}\n')
+                self.log(f'{e}\n')
             finally:
                 self._proc = None
             self._flush_lines()
@@ -711,7 +656,7 @@ class Model(QObject):
     def _on_line(self, line: str) -> None:
         """Feed one line of the build's output: stage lines move the stage list, everything
         else goes to the log (which is what the window shows)."""
-        self.logAppended.emit(line + '\n')
+        self.log(line + '\n')
         if line.startswith('output IPA:'):
             self.ipa_path = line.split(':', 1)[1].strip()
         low = line.lower()
@@ -765,11 +710,11 @@ class Model(QObject):
                                      **pu.no_window_kwargs())
                 assert p.stdout is not None
                 for line in p.stdout:
-                    self.logAppended.emit(line)
+                    self.log(line)
                 p.wait()
                 ok = p.returncode == 0
             except OSError as e:
-                self.logAppended.emit(f'{e}\n')
+                self.log(f'{e}\n')
                 ok = False
             if self.stages:
                 self.stages[-1].state = 'done' if ok else 'failed'

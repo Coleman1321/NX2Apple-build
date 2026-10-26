@@ -226,6 +226,17 @@ class MainWindow(QMainWindow):
         lay.addLayout(self.stages_container)
 
     def _build_log(self) -> None:
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        self.log_path_label = QLabel('')
+        self.log_path_label.setObjectName('note')
+        self.log_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.log_path_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        head.addWidget(self.log_path_label, 1)
+        self.export_btn = QPushButton(self.m.t('log.export'))
+        self.export_btn.clicked.connect(self._export_log)
+        head.addWidget(self.export_btn)
+        self.body.addLayout(head)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(self._mono)
@@ -282,6 +293,8 @@ class MainWindow(QMainWindow):
         busy = self.m.repo_busy or self.m.running
         for b in (self.download_btn, self.check_btn, self.pull_btn, self.choose_btn):
             b.setEnabled(not busy)
+        if getattr(self.m, 'log_path', None):
+            self.log_path_label.setText(self.m.t('log.at', str(self.m.log_path)))
         self._refresh_inputs()
         self._refresh_deps()
 
@@ -476,6 +489,26 @@ class MainWindow(QMainWindow):
             if path not in self.m.dlc_paths:
                 self.m.dlc_paths.append(path)
         self.m.repoChanged.emit()
+
+    def _export_log(self) -> None:
+        """Save the log to a file the user picks, defaulting to the Desktop.
+
+        The window's log is also written to disk as it grows (m.model.log_path); this is for
+        sending a copy somewhere, e.g. attaching it to an issue from a handheld where copying text
+        out of the window is awkward.
+        """
+        default = str(Path.home() / 'Desktop' / 'ns-port-builder-log.txt')
+        path, _ = QFileDialog.getSaveFileName(self, self.m.t('log.export'), default,
+                                             'Text (*.txt);;All files (*)')
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.log.toPlainText(), encoding='utf-8')
+            self.footer.setText(self.m.t('log.exported', path))
+            self.footer.setStyleSheet(f'color: {GREEN};')
+        except OSError as e:
+            self.footer.setText(self.m.t('log.exportFail', str(e)))
+            self.footer.setStyleSheet(f'color: {RED};')
 
     def _choose_out(self) -> None:
         d = QFileDialog.getExistingDirectory(self, self.m.t('build.outDir'))

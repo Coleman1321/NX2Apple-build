@@ -51,7 +51,7 @@ def main() -> None:
         '    s = zh if lang is Lang.ZH else en',
         '    if not args:',
         '        return s',
-        '    py = s.replace("%@", "%s").replace("%d", "%d")',
+        '    py = s.replace("%@", "%s")   # %d is the same in both; %@ is Swift-only',
         '    try:',
         '        return py % args',
         '    except (TypeError, ValueError):',

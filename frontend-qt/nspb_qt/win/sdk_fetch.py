@@ -47,7 +47,11 @@ def clone_sdk(version: str = tc.SDK_PINNED, dest: Path | None = None,
     set` pulls only the requested SDK. That is what makes this practical on a normal connection.
     """
     log = log or (lambda s: None)
-    git = shutil.which('git')
+    # toolchain.git_exe() first: the app may have downloaded its own PortableGit, which is not on
+    # PATH. `shutil.which` alone missed it, so the SDK step failed right after a successful git
+    # install (the same "installed but invisible" bug as llvm_dir had).
+    found = tc.git_exe() or shutil.which('git')
+    git = str(found) if found else None
     if not git:
         raise SdkError('git is not installed: get it from https://git-scm.com/download/win, or '
                        'download an Xcode .xip and use the xip route instead')

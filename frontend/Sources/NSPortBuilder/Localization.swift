@@ -155,6 +155,8 @@ enum L10n {
         "dep.optionalMissing": ("可选，未安装", "optional, not installed"),
         "dep.glslang": ("glslangValidator（可选）", "glslangValidator (optional)"),
         "dep.glslang.hint": ("仅 OpenGL 游戏需要", "only needed for OpenGL games"),
+        "dep.installTimeout": ("安装超时（30 分钟）——网络太慢或卡住了",
+                                  "Install timed out (30 minutes) — the network is slow or stuck"),
         "dep.installAll": ("一键安装全部缺失项", "Install all missing"),
         "dep.recheck": ("重新检测", "Check again"),
         "dep.install": ("安装", "Install"),
@@ -195,6 +197,10 @@ enum L10n {
         "prog.noRomfs": ("找不到解出的 RomFS", "no extracted RomFS found"),
 
         // ---- log ----
+        "log.export": ("导出日志…", "Export log…"),
+        "log.exported": ("日志已保存：%@", "Log saved: %@"),
+        "log.exportFail": ("保存失败：%@", "Could not save: %@"),
+        "log.at": ("日志同时写入 %@", "The log is also written to %@"),
         "log.placeholder": ("构建日志会显示在这里", "The build log appears here"),
 
         // ---- footer ----

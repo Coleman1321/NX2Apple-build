@@ -77,6 +77,20 @@ GIT_RELEASE_TAG = 'v2.56.0.windows.4'
 GIT_RELEASE_URL = f'https://github.com/git-for-windows/git/releases/download/{GIT_RELEASE_TAG}'
 
 
+def bundled_tools_dir() -> Path:
+    """Where the app keeps tools it downloaded for itself.
+
+    A frozen build runs from a directory PyInstaller made; `sys._MEIPASS` is that directory
+    (`<app>/_internal` on Windows). A source run uses the frontend-qt folder. Either way this is
+    the same base that fetch.install_llvm unpacks into, which is what keeps the installer and the
+    detector looking at one place.
+    """
+    base = getattr(sys, '_MEIPASS', None)
+    if base:
+        return Path(base) / '.tools'
+    return Path(__file__).resolve().parents[2] / '.tools'
+
+
 def git_dir() -> Path:
     """Where the app keeps its own PortableGit, if it downloaded one."""
     return Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / \
@@ -212,6 +226,10 @@ def llvm_dir() -> Path | None:
         if base:
             cands += sorted(glob.glob(os.path.join(base, 'Programs', 'LLVM')), reverse=True)
             cands += sorted(glob.glob(os.path.join(base, 'llvm-mingw*')), reverse=True)
+    # the app's own download location first: install_llvm() unpacks under
+    # <app>/_internal/.tools, and without this the freshly installed toolchain was invisible to
+    # the next dependency check (the report: "installed, then Check again changed nothing").
+    cands.insert(0, bundled_tools_dir() / f'llvm-mingw-{LLVM_MINGW_VERSION}')
     # a clang already on PATH, if it came from a toolchain with lld beside it
     if w := shutil.which('clang'):
         cands.append(Path(w).parent.parent)
