@@ -293,8 +293,13 @@ class Model(QObject):
     REPO_URL = 'https://github.com/LNPANDY/NX2Apple.git'
 
     def git_binary(self) -> str | None:
-        return pu._which('git', [r'C:\Program Files\Git\cmd\git.exe',
-                                 r'C:\Program Files\Git\bin\git.exe'] if pu.IS_WIN else [])
+        """The git to use: on Windows the app's own PortableGit first (it may have downloaded
+        one), then a system install; on macOS whatever PATH and the usual places give."""
+        if pu.IS_WIN:
+            from .win import toolchain as wtc
+            found = wtc.git_exe()
+            return str(found) if found else None
+        return pu._which('git')
 
     def clone_repo(self, dest: str | None = None) -> None:
         """Shallow-clone the project into ~/NX2Apple (or `dest`) and select it.
@@ -304,8 +309,36 @@ class Model(QObject):
         """
         git = self.git_binary()
         if not git:
+            if not pu.IS_WIN:
+                self.repoChanged.emit()
+                self.logAppended.emit(self.t('repo.gitMissing') + '\n')
+                return
+            # Windows with no git at all: fetch PortableGit, then carry on with the clone. This is
+            # the one case where "one click" has to install something first; it needs no
+            # administrator rights and no installer.
+            self.repo_busy = True
             self.repoChanged.emit()
-            self.logAppended.emit(self.t('repo.gitMissing') + '\n')
+            self.logAppended.emit(self.t('repo.gitInstalling') + '\n')
+
+            def install_then_clone() -> None:
+                ok = False
+                try:
+                    from .win import fetch as wf
+                    path = wf.install_git(log=lambda s: self.logAppended.emit(str(s) + '\n'),
+                                          progress=lambda d, t_: self.logAppended.emit(
+                                              f'  {d // 1048576} MB' +
+                                              (f' / {t_ // 1048576} MB ({d * 100 // t_}%)' if t_ else '') + '\n'))
+                    ok = Path(path).is_file()
+                except Exception as e:
+                    self.logAppended.emit(self.t('repo.gitInstallFail', str(e)) + '\n')
+                self.repo_busy = False
+                self.repoChanged.emit()
+                if ok:
+                    self.clone_repo(dest)      # now git exists: the normal path
+                else:
+                    self.logAppended.emit(self.t('repo.gitMissing') + '\n')
+
+            threading.Thread(target=install_then_clone, daemon=True).start()
             return
         target = dest or str(Path.home() / 'NX2Apple')
         if Path(target).exists():

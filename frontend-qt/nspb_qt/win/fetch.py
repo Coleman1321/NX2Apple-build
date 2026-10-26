@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -203,3 +204,87 @@ def sdk_hint() -> str:
     return (f'the app downloads {tc.SDK_PINNED} from {tc.SDK_REPO}, or use your own '
             'Xcode .xip (needs a free Apple ID)')
 
+
+def install_git(arch: str | None = None, dest: Path | None = None,
+                log: Callable[[str], None] | None = None,
+                progress: Callable[[int, int], None] | None = None) -> Path:
+    """Download PortableGit and unpack it, returning the git.exe to use.
+
+    PortableGit's .7z.exe is a self-extracting 7-Zip archive: `-o<dir> -y -Install` unpacks it
+    without an installer and without administrator rights, which is what makes this work from a
+    normal user account. After unpacking, `cmd/git.exe` sits in the target folder.
+
+    The archive hash is checked when one is pinned; an empty hash means the release was not
+    pinned yet, and the download is accepted with a note in the log rather than failing.
+    """
+    log = log or (lambda s: None)
+    key = arch or (_arch_key())
+    asset = tc.GIT_ASSETS.get(key) or tc.GIT_ASSETS['AMD64']
+    target = Path(dest or tc.git_dir())
+    exe = target / 'cmd' / 'git.exe'
+    if exe.is_file():
+        log(f'git is already installed: {exe}')
+        return exe
+    base = Path(__file__).resolve().parents[2]
+    cache = base / '.tools' / 'downloads'
+    cache.mkdir(parents=True, exist_ok=True)
+    url = f'{tc.GIT_RELEASE_URL}/{asset["name"]}'
+    log(f'downloading {asset["name"]} ({asset["size"] // 1048576 if asset["size"] else "~57"} MB)')
+    if asset['sha256']:
+        zpath = download(url, cache / asset['name'], asset['sha256'], asset['size'] or None,
+                         log=log, progress=progress)
+    else:
+        zpath = _download_unverified(url, cache / asset['name'], log, progress)
+    log(f'unpacking {zpath.name} → {target}')
+    target.mkdir(parents=True, exist_ok=True)
+    # The self-extractor writes the tree directly into -o<dir>; -y answers any prompt, -Install
+    # skips the integration step (no registry, no PATH changes).
+    r = subprocess.run([str(zpath), f'-o{target}', '-y', '-Install'],
+                       capture_output=True, text=True, errors='replace')
+    if r.returncode != 0 or not exe.is_file():
+        raise DownloadError(
+            f'PortableGit unpacking failed (exit {r.returncode}). '
+            f'Unpack {zpath} into {target} by hand, or install git from git-scm.com.'
+            + (f'\n{r.stderr[:300]}' if r.stderr else ''))
+    log(f'git installed: {exe}')
+    return exe
+
+
+def _arch_key() -> str:
+    import platform
+    m = platform.machine().lower()
+    return 'ARM64' if m in ('arm64', 'aarch64') else 'AMD64'
+
+
+def _download_unverified(url: str, dest: Path, log: Callable[[str], None],
+                         progress: Callable[[int, int], None] | None) -> Path:
+    """Fetch a file whose hash is not pinned yet (used only for PortableGit until pinned)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_file() and dest.stat().st_size > 0:
+        log(f'already downloaded: {dest.name}')
+        return dest
+    tmp = dest.with_suffix(dest.suffix + '.part')
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'NS-Port-Builder'})
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, 'wb') as f:
+            total = int(r.headers.get('Content-Length') or 0)
+            done = 0
+            last = 0.0
+            while True:
+                b = r.read(1 << 16)
+                if not b:
+                    break
+                f.write(b)
+                done += len(b)
+                if progress and total:
+                    now = time.time()
+                    if now - last > 0.3:
+                        progress(done, total)
+                        last = now
+        if progress and total:
+            progress(total, total)
+        tmp.replace(dest)
+        return dest
+    except (urllib.error.URLError, OSError) as e:
+        tmp.unlink(missing_ok=True)
+        raise DownloadError(f'download failed: {url}: {e}') from e

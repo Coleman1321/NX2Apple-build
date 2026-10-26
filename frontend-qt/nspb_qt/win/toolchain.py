@@ -61,6 +61,50 @@ LLVM_MINGW_ASSETS = {
 LLVM_MINGW_RELEASE_URL = ('https://github.com/mstorsjo/llvm-mingw/releases/download/'
                           + LLVM_MINGW_VERSION)
 
+#: PortableGit, for a machine with no git at all. This is not a build requirement — the build
+#: only needs it to fetch the repository — but a Windows user who has never installed git should
+#: not have to leave the app. The .7z.exe is a self-extracting archive: running it with
+#: -o<dir> -y unpacks without an installer and without administrator rights. Sizes and hashes are
+#: pinned; a mismatch stops rather than unpacking a partial tree.
+GIT_VERSION = '2.56.0.4'
+GIT_ASSETS = {
+    'AMD64': {
+        'name': f'PortableGit-{GIT_VERSION}-64-bit.7z.exe',
+        'sha256': 'b1f3e52216e2ed6882d1bebfd4d3fdf319bec40d2edbbf9fd26ec4fd3fce7ed1',
+        'size': 57200000,
+    },
+    'ARM64': {
+        'name': f'PortableGit-{GIT_VERSION}-arm64.7z.exe',
+        'sha256': '044110f9d951858452ddb5e4b5415ea0f2b5b2598e794d6fec77fe28b9aa8cc0',
+        'size': 57100000,
+    },
+}
+# The tag is v<version>.windows.<n>, and GIT_VERSION already carries the patch number after the
+# last dot, so the tag is v2.56.0.windows.4 for GIT_VERSION 2.56.0.4 — spelled out here because
+# deriving it from GIT_VERSION would need to know which part is the Windows build number.
+GIT_RELEASE_TAG = 'v2.56.0.windows.4'
+GIT_RELEASE_URL = f'https://github.com/git-for-windows/git/releases/download/{GIT_RELEASE_TAG}'
+
+
+def git_dir() -> Path:
+    """Where the app keeps its own PortableGit, if it downloaded one."""
+    return Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / \
+        'NS Port Builder' / 'git'
+
+
+def git_exe() -> Path | None:
+    """The git to use: the app's own PortableGit first, then a system install."""
+    local = git_dir() / 'cmd' / 'git.exe'
+    if local.is_file():
+        return local
+    for c in (Path(r'C:\Program Files\Git\cmd\git.exe'),
+              Path(r'C:\Program Files\Git\bin\git.exe'),
+              Path(r'C:\Program Files (x86)\Git\cmd\git.exe')):
+        if c.is_file():
+            return c
+    found = shutil.which('git')
+    return Path(found) if found else None
+
 #: The iPhoneOS SDK we pin. `xybp888/iOS-SDKs` is a plain git repository of SDK trees, so a
 #: shallow clone is enough and the commit SHA pins the content. 26.0 is what `dm/ios/project.yml`
 #: targets; 26.5 is accepted too, since a newer SDK still compiles against 26.0.
