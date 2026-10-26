@@ -542,6 +542,20 @@ def rmtree(p):
     if p.is_symlink() or p.is_file(): p.unlink()
     elif p.exists(): shutil.rmtree(p, onerror=_rmtree_enoent)
     if p.exists(): shutil.rmtree(p, onerror=_rmtree_enoent)   # the caller needs it gone (copytree follows)""")]))
+    # A shader-chain bump (an upstream translator update) silently invalidates every cached
+    # library: the row stayed green, the build "worked", and hours of Metal compile looked like a
+    # mystery re-run (the report: "why is it building shaders again, the artifacts are on the
+    # drive"). Say it loudly, with a marker both front ends turn into a user-facing notice.
+    P.append(('chain-change note', "[NOTE] chain-changed", [(
+        """    chain = chain_of(repo)
+    out = sh / 'cache' if mac else ios""",
+        """    chain = chain_of(repo)
+    stale = sorted(d.name for d in (sh / 'cache').glob('b-*') if d.name != f'b-{chain}' and any(d.glob('*_b.metallib'))
+                   ) + sorted(d.name for d in ios.glob('b-*') if d.name != f'b-{chain}' and any(d.glob('*_b.metallib')))
+    if stale: say(f'[NOTE] chain-changed: {", ".join(stale)} -> b-{chain}: the upstream update changed the shader '
+                  'translator, so the cached libraries cannot be reused and this build rebuilds them with it '
+                  '(once per update; later builds reuse as before)')
+    out = sh / 'cache' if mac else ios""")]))
     # Xcode 15 and later download the iOS platform separately: xcodebuild and the Metal compiler can
     # both be present with no iOS SDK, and the failure then surfaced deep inside xcodebuild. Naming
     # the SDK makes the error actionable (found while auditing environment assumptions, 2026-10-26).

@@ -74,6 +74,7 @@ final class BuildModel: ObservableObject {
     ]
     @Published var outDir = ""
     @Published var stages: [Stage] = []
+    private var chainNoteShown = false   // the shader-chain notice shows once per build
     @Published var running = false
     @Published var logTail = ""
     @Published var done = false
@@ -752,6 +753,18 @@ final class BuildModel: ObservableObject {
 
     private func handle(_ line: String) {
         append(line + "\n")
+        // The script marks a shader-chain bump with this tag: the cached libraries cannot be
+        // reused and this build recompiles them. An alert, not a log line — the report's question
+        // ("why is it building shaders again, the artifacts are on the drive") came from exactly
+        // this moment passing unnoticed. Once per build: the pipe delivers arbitrary chunks.
+        if line.contains("[NOTE] chain-changed") && !chainNoteShown {
+            chainNoteShown = true
+            let a = NSAlert()
+            a.messageText = t("msg.chainChanged")
+            a.alertStyle = .informational
+            a.addButton(withTitle: "OK")
+            a.runModal()
+        }
         guard let s = Self.parseStage(line) else { return }
         if let i = stages.firstIndex(where: { $0.id == s.k }) {
             if !s.name.isEmpty { stages[i].name = s.name }
@@ -1662,6 +1675,7 @@ struct ContentView: View {
     // ---- 底部（固定） ----
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 0) {
         HStack(spacing: 14) {
             Button(m.running ? m.t("btn.stop") : (m.done ? m.t("btn.rebuild") : m.t("btn.build"))) {
                 m.running ? m.stop() : m.startBuild()
@@ -1689,8 +1703,18 @@ struct ContentView: View {
                 if d.runModal() == .OK, let u = d.url { m.outDir = u.path }
             }
         }
+        // The report's own mistake, and a reasonable one: the output folder silently decides where
+        // the build cache lives, so changing it threw away a finished build. Say it where the
+        // folder buttons are, all the time.
+        Text(m.t("msg.workdirHint"))
+            .font(.system(size: 10.5))
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .padding(.horizontal, 22)
-        .padding(.vertical, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder private var statusText: some View {

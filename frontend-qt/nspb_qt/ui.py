@@ -265,8 +265,11 @@ class MainWindow(QMainWindow):
 
     def _build_footer(self) -> None:
         wrap = QWidget()
-        row = QHBoxLayout(wrap)
-        row.setContentsMargins(12, 6, 12, 8)
+        outer = QVBoxLayout(wrap)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 6, 12, 4)
         row.setSpacing(10)
         self.build_btn = QPushButton(self.m.t('build.start'))
         self.build_btn.setObjectName('primary')
@@ -287,6 +290,14 @@ class MainWindow(QMainWindow):
         self._translatable.append((self.out_btn, 'build.outDir'))
         self.out_btn.clicked.connect(self._choose_out)
         row.addWidget(self.out_btn)
+        # the output folder silently decides where the build cache lives — the report changed it
+        # and lost a finished build; say it here, all the time
+        hint = QLabel(self.m.t('msg.workdirHint'))
+        hint.setObjectName('note')
+        hint.setWordWrap(True)
+        outer.addLayout(row)
+        outer.addWidget(hint)
+        self._translatable.append((hint, 'msg.workdirHint'))
         self.centralWidget().layout().addWidget(wrap)
 
     @staticmethod
@@ -478,6 +489,14 @@ class MainWindow(QMainWindow):
         self.log.moveCursor(self.log.textCursor().MoveOperation.End)
         self.log.insertPlainText(s)
         self.log.moveCursor(self.log.textCursor().MoveOperation.End)
+        # The script marks a shader-chain bump with this tag: the cached libraries cannot be
+        # reused and this build recompiles them. A popup, not a log line — the report's question
+        # ("why is it building shaders again, the artifacts are on the drive") came from exactly
+        # this moment passing unnoticed. Once per build: the log chunks arrive in pieces.
+        if '[NOTE] chain-changed' in s and not getattr(self, '_chain_note_shown', False):
+            self._chain_note_shown = True
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, 'NS Port Builder', self.m.t('msg.chainChanged'))
 
     def _on_finished(self, ok: bool, note: str) -> None:
         if ok:
