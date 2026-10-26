@@ -255,7 +255,9 @@ the tool offers it. The IPA name and the RomFS archive come out where the macOS 
 
 ## Open risks
 
-Not verifiable without a real Windows machine; check these in order on the first real build:
+The app's own toolchain discovery, downloads and repository handling have now run on a real
+Windows machine (a handheld PC). These are the parts that still have not, and that only a full
+build on Windows plus a device run can settle:
 
 1. **Shader libraries on the device.** They come from the Windows Metal compiler, not Xcode's.
    They must load and render on iOS 26+ (`newLibraryWithURL`). `own_compilers.py` accepts a
