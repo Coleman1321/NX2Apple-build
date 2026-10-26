@@ -18,6 +18,24 @@ struct Stage: Identifiable {
     var state: StepState = .running
     var detail: String = ""
     var percent: Double? = nil
+    var started: Date? = nil   // when the stage began here: its clock runs while the count may stand still
+    var eta: Double? = nil     // the script's estimate of the seconds left, as of etaAt
+    var etaAt: Date? = nil
+
+    /// "3:42" since the stage began, then "1 min left" while the script's estimate, counted down from when it came,
+    /// lasts: the estimate only arrives with a new count, so one taken as it was would stand still with the count.
+    func clock(at now: Date, left: String) -> String {
+        var parts: [String] = []
+        if let started {
+            let t = max(0, Int(now.timeIntervalSince(started)))
+            parts.append(t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60))
+        }
+        if let eta, let etaAt {
+            let remaining = eta - now.timeIntervalSince(etaAt)
+            if remaining >= 1 { parts.append(String(format: left, BuildModel.duration(remaining))) }
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 enum StepState: Equatable {
@@ -33,7 +51,7 @@ enum StepState: Equatable {
     var color: Color {
         switch self {
         case .pending: return .gray
-        case .running: return .orange
+        case .running: return .yellow
         case .done: return .green
         case .failed: return .red
         }
@@ -72,10 +90,13 @@ final class BuildModel: ObservableObject {
         Slot(id: "dlc", kind: .dlc, title: "data.dlc", optional: true),
         Slot(id: "keys", kind: .keys, title: "data.keys", optional: false),
     ]
-    @Published var outDir = ""
+    @Published var outDir = UserDefaults.standard.string(forKey: "buildOutputDirectory") ?? "" {
+        didSet { UserDefaults.standard.set(outDir, forKey: "buildOutputDirectory") }
+    }
     @Published var stages: [Stage] = []
     private var chainNoteShown = false   // the shader-chain notice shows once per build
     @Published var running = false
+    @Published var stopping = false
     @Published var logTail = ""
     @Published var done = false
     @Published var doneNote = ""
@@ -114,16 +135,71 @@ final class BuildModel: ObservableObject {
     @Published var pythonPath = ""
     @Published var dotnetPath = ""
 
-    /// Interface language: the device's at first launch, then whatever the toggle was set to.
-    @Published var lang: Lang = Lang.initial() {
-        didSet { UserDefaults.standard.set(lang.rawValue, forKey: "uiLang") }
-    }
+    /// Interface language: the system's, read at every launch.
+    @Published var lang: Lang = Lang.device()
     func t(_ key: String) -> String { L10n.string(key, lang) }
-    func toggleLang() { lang = lang.other }
 
     private var proc: Process?
     private var lineBuf = ""
     private var staging: String?
+
+    // ---- Process groups: Stop and quitting end the whole build ----
+    // The script runs its tools as children (the shader split with its workers, dotnet, xcodebuild) and cleans
+    // them up only on Ctrl-C: a SIGTERM to the script alone leaves them running, orphaned. So each build process
+    // starts in a process group of its own, and Stop, quitting the app or a SIGTERM to it end the whole group.
+
+    /// The groups of the builds running now (their leaders' PIDs).
+    private static var groups = Set<pid_t>()
+    private static let groupsLock = NSLock()
+    private static let exitHandlers: Void = {
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in endAllGroups() }
+        signal(SIGTERM, SIG_IGN)   // handled below: end the builds, then exit
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        source.setEventHandler { endAllGroups(); exit(0) }
+        source.resume()
+        sigtermSource = source
+    }()
+    private static var sigtermSource: DispatchSourceSignal?
+
+    /// Run `p` as the leader of a new process group: Python sets the group, then execs into the real command.
+    /// It also restores SIGTERM and SIGINT to their defaults first: the app ignores SIGTERM (to end its builds before
+    /// it exits), and an ignored signal is inherited across exec, which would make Stop's SIGTERM do nothing.
+    nonisolated static func inOwnGroup(_ p: Process, python: String) {
+        let command = p.executableURL?.path ?? python
+        let start = "import os, signal, sys; signal.signal(signal.SIGTERM, signal.SIG_DFL); signal.signal(signal.SIGINT, signal.SIG_DFL); "
+            + "os.setpgid(0, 0); os.execv(sys.argv[1], sys.argv[1:])"
+        p.arguments = ["-c", start, command] + (p.arguments ?? [])
+        p.executableURL = URL(fileURLWithPath: python)
+    }
+
+    private static func track(_ p: Process) {
+        _ = exitHandlers
+        groupsLock.lock(); groups.insert(p.processIdentifier); groupsLock.unlock()
+    }
+
+    private static func untrack(_ p: Process) {
+        groupsLock.lock(); groups.remove(p.processIdentifier); groupsLock.unlock()
+    }
+
+    /// SIGTERM to every process of the group, SIGKILL 5 s later to whatever is left of it.
+    nonisolated static func endGroup(_ leader: pid_t) {
+        guard leader > 1 else { return }
+        killpg(leader, SIGTERM)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+            if killpg(leader, 0) == 0 { killpg(leader, SIGKILL) }
+        }
+    }
+
+    private static func endAllGroups() {
+        groupsLock.lock(); let all = groups; groupsLock.unlock()
+        for leader in all {
+            killpg(leader, SIGTERM)
+        }
+        if !all.isEmpty {
+            usleep(1_500_000)   // the app is about to exit: one grace period for the whole set, then kill what remains
+            for leader in all where killpg(leader, 0) == 0 { killpg(leader, SIGKILL) }
+        }
+    }
 
     /// The checkout of this repository the app drives. A released .app ships on its own,
     /// so the path is not known at build time: look next to the app bundle, walk up from
@@ -152,10 +228,12 @@ final class BuildModel: ObservableObject {
         var seeds: [String] = []
         // the app bundle: …/frontend/NS Port Builder.app/Contents/MacOS
         let bundle = Bundle.main.bundleURL.standardizedFileURL
+        seeds.append(bundle.deletingLastPathComponent().path)
         seeds.append(bundle.deletingLastPathComponent().deletingLastPathComponent()
                          .deletingLastPathComponent().deletingLastPathComponent().path)
         seeds.append(FileManager.default.currentDirectoryPath)
         for base in ["/ZCodeProject/", "/", "/Documents/", "/Desktop/"] {
+            seeds.append(NSHomeDirectory() + base + "nxnative")
             seeds.append(NSHomeDirectory() + base + "NX2Apple")
             seeds.append(NSHomeDirectory() + base + "nxnative-romfs-archive")   // clones made before the rename still resolve
         }
@@ -204,11 +282,11 @@ final class BuildModel: ObservableObject {
         return (p.terminationStatus == 0, String(data: data, encoding: .utf8) ?? "")
     }
 
-    /// First-time flow: clone the project to ~/NX2Apple (the discovery seeds cover it) and select it.
+    /// First-time flow: clone the project to ~/nxnative (the discovery seeds cover it) and select it.
     func cloneRepo() {
         guard !running, !repoBusy else { return }
         guard let git = Self.gitBinary() else { repoStatus = t("repo.gitMissing"); return }
-        let dest = NSHomeDirectory() + "/NX2Apple"
+        let dest = NSHomeDirectory() + "/nxnative"
         if FileManager.default.fileExists(atPath: dest) {
             if Self.isRepo(dest) { repoPath = dest; repoStatus = ""; checkRepoUpdates() }
             else { repoStatus = String(format: t("repo.destBusy"), shortPath(dest)) }
@@ -346,8 +424,11 @@ final class BuildModel: ObservableObject {
                 let tag = obj["tag_name"] as? String ?? ""
                 if Self.isNewer(tag, than: Self.appVersion),
                    let assets = obj["assets"] as? [[String: Any]] {
-                    for a in assets where (a["name"] as? String) == "NS-Port-Builder-macOS-arm64.zip" {
-                        if let u = a["browser_download_url"] as? String { found = (tag, u) }
+                    // nxnative-macOS-arm64.zip; releases from before the rename name it NS-Port-Builder-macOS-arm64.zip
+                    for name in ["nxnative-macOS-arm64.zip", "NS-Port-Builder-macOS-arm64.zip"] where found == nil {
+                        for a in assets where (a["name"] as? String) == name {
+                            if let u = a["browser_download_url"] as? String { found = (tag, u) }
+                        }
                     }
                 }
             }
@@ -389,7 +470,9 @@ final class BuildModel: ObservableObject {
             unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
             unzip.arguments = ["-x", "-k", tmp.path, dir.path]
             try? unzip.run(); unzip.waitUntilExit()
-            let newApp = dir.appendingPathComponent("NS Port Builder.app")
+            // The archive holds one app: nxnative.app, or NS Port Builder.app in a release from before the rename
+            let newApp = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+                .first { $0.pathExtension == "app" } ?? dir.appendingPathComponent("nxnative.app")
             guard unzip.terminationStatus == 0, FileManager.default.fileExists(atPath: newApp.path) else {
                 DispatchQueue.main.async { self.appBusy = false; self.appStatus = self.t("app.netFail") }
                 return
@@ -397,7 +480,7 @@ final class BuildModel: ObservableObject {
             // Copy the new bundle in beside the running one first: from there on every step is a
             // same-volume move, and a failure anywhere leaves a working app on disk.
             let cur = Bundle.main.bundleURL
-            let staging = cur.deletingLastPathComponent().appendingPathComponent("NS Port Builder (new).app")
+            let staging = cur.deletingLastPathComponent().appendingPathComponent("nxnative (new).app")
             try? FileManager.default.removeItem(at: staging)
             do {
                 try FileManager.default.copyItem(at: newApp, to: staging)
@@ -531,12 +614,14 @@ final class BuildModel: ObservableObject {
     /// A clone has .git; a GitHub "Download ZIP" copy does not (everything builds, but there is
     /// nothing to fetch or pull — the update buttons hide and the note says to re-download instead).
     var repoIsGit: Bool { FileManager.default.fileExists(atPath: repoPath + "/.git") }
-    var canBuild: Bool { repoOK && !basePath.isEmpty && !keysPath.isEmpty && allDepsPresent && !running }
+    var canBuild: Bool { repoOK && slot("base").ok && slot("keys").ok && allDepsPresent && !running }
 
     // MARK: Build
 
     func startBuild() {
-        running = true; done = false; doneNote = ""; stages = []; logTail = ""; lineBuf = ""
+        guard !running else { return }
+        stopping = false
+        running = true; done = false; doneNote = ""; stages = []; logTail = ""; lineBuf = ""; chainNoteShown = false
         guard repoOK else {
             fail(repoPath.isEmpty ? t("msg.repoInvalidEmpty") : String(format: t("msg.repoInvalid"), shortPath(repoPath)))
             return
@@ -591,7 +676,7 @@ final class BuildModel: ObservableObject {
             }
         }
         var args = [repoPath + "/scripts/build_ipa_from_nsp.py", inputDir, "-k", keysPath,
-                    "--progress", "lines"]
+                    "--progress", "json"]
         // A compatibility switch the player turned on: written to a small env file the pipeline
         // copies into the app bundle (main.m sets one variable per line at boot). Only for an IPA;
         // a Mac app runs on this Mac's GPU, which always has BC support.
@@ -636,13 +721,22 @@ final class BuildModel: ObservableObject {
             denv["DOTNET_ROOT_ARM64"] = droot
         }
         p.environment = denv
+        Self.inOwnGroup(p, python: py)
         let pipe = Pipe()
         p.standardOutput = pipe; p.standardError = pipe
         p.terminationHandler = { [weak self] status in
+            Self.untrack(status)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.running = false
                 self.flushLines()
+                if self.stopping {
+                    self.stopping = false
+                    self.resetProgress()
+                    self.doneNote = self.t("msg.stopped")
+                    self.cleanupStaging()
+                    return
+                }
                 if status.terminationStatus == 0 {
                     self.markAllDone()
                     if self.target == "mac-app" {
@@ -673,7 +767,7 @@ final class BuildModel: ObservableObject {
             DispatchQueue.main.async { self?.ingest(s) }
         }
         proc = p
-        do { try p.run() } catch { fail(String(format: t("msg.launchFailed"), error.localizedDescription)) }
+        do { try p.run(); Self.track(p) } catch { fail(String(format: t("msg.launchFailed"), error.localizedDescription)) }
     }
 
     /// The build's last step is done either way: release the button and show the outcome.
@@ -714,13 +808,17 @@ final class BuildModel: ObservableObject {
     private func fail(_ why: String) { running = false; doneNote = why; say("✗ " + why); cleanupStaging() }
 
     func stop() {
-        proc?.terminate(); running = false
-        doneNote = t("msg.stopped"); cleanupStaging()
+        guard running, !stopping, let proc, proc.isRunning else { return }
+        stopping = true
+        Self.endGroup(proc.processIdentifier)   // the script and every tool it started
     }
 
     private func cleanupStaging() {
         if let s = staging { try? FileManager.default.removeItem(atPath: s); staging = nil }
     }
+
+    /// A stopped build leaves no half-finished stages behind: the progress starts empty again.
+    private func resetProgress() { stages = []; logTail = ""; lineBuf = "" }
 
     private func markAllDone() { for i in stages.indices where stages[i].state != .failed { stages[i].state = .done } }
 
@@ -732,10 +830,11 @@ final class BuildModel: ObservableObject {
         if logTail.count > 12000 { logTail = String(logTail.suffix(9000)) }
     }
 
-    /// Split into lines (the pipe delivers arbitrary chunks) and turn the script's
-    /// progress lines into the stage list. `--progress lines` writes:
+    /// Split into lines (the pipe delivers arbitrary chunks) and turn the script's progress into the stage list.
+    /// `--progress json` writes one event per line (stage, step, progress with done / total / frac / eta, stage_end,
+    /// say), a count change at most every half second; anything else on the pipe (a tool's traceback) is log text.
+    /// The older `--progress lines` form is still understood:
     ///   [12:00:01] [2/7] extract v720896 …
-    ///   [12:00:09] [2/7] extract v720896: 45%, 1.2/3.4 GB, 0:08
     ///   [12:00:20] ✓ [2/7] extract v720896 (0:19): 30,000 files, 3.4 GB
     private func ingest(_ chunk: String) {
         lineBuf += chunk
@@ -752,18 +851,14 @@ final class BuildModel: ObservableObject {
     }
 
     private func handle(_ line: String) {
+        if line.hasPrefix("{"), let data = line.data(using: .utf8),
+           let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let kind = event["ev"] as? String {
+            return handleEvent(kind, event)
+        }
         append(line + "\n")
-        // The script marks a shader-chain bump with this tag: the cached libraries cannot be
-        // reused and this build recompiles them. An alert, not a log line — the report's question
-        // ("why is it building shaders again, the artifacts are on the drive") came from exactly
-        // this moment passing unnoticed. Once per build: the pipe delivers arbitrary chunks.
-        if line.contains("[NOTE] chain-changed") && !chainNoteShown {
-            chainNoteShown = true
-            let a = NSAlert()
-            a.messageText = t("msg.chainChanged")
-            a.alertStyle = .informational
-            a.addButton(withTitle: "OK")
-            a.runModal()
+        noteChainChange(line)
+        if let range = line.range(of: "output IPA: ") {
+            ipaPath = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         guard let s = Self.parseStage(line) else { return }
         if let i = stages.firstIndex(where: { $0.id == s.k }) {
@@ -772,9 +867,88 @@ final class BuildModel: ObservableObject {
             if !s.detail.isEmpty { stages[i].detail = s.detail }
             stages[i].percent = s.percent
         } else if s.state != .pending {
-            stages.append(Stage(id: s.k, name: s.name, state: s.state, detail: s.detail, percent: s.percent))
+            stages.append(Stage(id: s.k, name: s.name, state: s.state, detail: s.detail, percent: s.percent, started: Date()))
             stages.sort { $0.id < $1.id }
         }
+    }
+
+    /// The script marks a shader-chain bump with this tag: the cached libraries cannot be
+    /// reused and this build recompiles them. An alert, not a log line — the report's question
+    /// ("why is it building shaders again, the artifacts are on the drive") came from exactly
+    /// this moment passing unnoticed. Once per build: the pipe delivers arbitrary chunks.
+    /// (A plain line, or the message of a `say` event in `--progress json`.)
+    private func noteChainChange(_ text: String) {
+        guard text.contains("[NOTE] chain-changed"), !chainNoteShown else { return }
+        chainNoteShown = true
+        let a = NSAlert()
+        a.messageText = t("msg.chainChanged")
+        a.alertStyle = .informational
+        a.addButton(withTitle: "OK")
+        a.runModal()
+    }
+
+    /// One event of `--progress json`: the stage list follows it, and the log gets a readable line (no count updates).
+    private func handleEvent(_ kind: String, _ e: [String: Any]) {
+        let k = (e["k"] as? NSNumber)?.intValue ?? 0
+        func stage(_ update: (inout Stage) -> Void) {
+            if let i = stages.firstIndex(where: { $0.id == k }) { update(&stages[i]) }
+            else { var s = Stage(id: k, name: e["name"] as? String ?? ""); update(&s); stages.append(s); stages.sort { $0.id < $1.id } }
+        }
+        switch kind {
+        case "stage":
+            let name = e["name"] as? String ?? "", step = e["step"] as? String ?? ""
+            let n = (e["n"] as? NSNumber)?.intValue ?? 0
+            append("[\(k)/\(n)] \(name)" + (step.isEmpty ? "" : " · \(step)") + " …\n")
+            stage { $0.name = name; $0.state = .running; $0.detail = step; $0.percent = nil; $0.started = Date(); $0.eta = nil }
+        case "step":
+            let step = e["step"] as? String ?? ""
+            append("    · \(step)\n")
+            stage { $0.detail = step; $0.percent = nil; $0.eta = nil }
+        case "progress":
+            let fraction = (e["frac"] as? NSNumber)?.doubleValue
+            let detail = Self.progressDetail(e)
+            let eta = (e["eta"] as? NSNumber)?.doubleValue
+            stage { $0.percent = fraction.map { $0 * 100 }; $0.detail = detail; $0.eta = eta; $0.etaAt = eta == nil ? nil : Date() }
+        case "stage_end":
+            let ok = e["ok"] as? Bool ?? true, summary = e["summary"] as? String ?? ""
+            let elapsed = Self.duration((e["elapsed"] as? NSNumber)?.doubleValue ?? 0)
+            append("\(ok ? "✓" : "✗") \(e["name"] as? String ?? "") (\(elapsed))" + (summary.isEmpty ? "" : ": \(summary)") + "\n")
+            stage { $0.state = ok ? .done : .failed; $0.detail = summary; $0.percent = ok ? 100 : $0.percent; $0.eta = nil }
+        case "say":
+            let msg = e["msg"] as? String ?? ""
+            append(msg + "\n")
+            noteChainChange(msg)
+            if let range = msg.range(of: "output IPA: ") {
+                ipaPath = String(msg[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        default: break
+        }
+    }
+
+    /// "splitting · 1.2 / 3.4 GB", "1,203 / 19,592 shaders", "2,301 files": the step and the count (the time left is the Stage's clock).
+    nonisolated static func progressDetail(_ e: [String: Any]) -> String {
+        let step = e["step"] as? String ?? "", unit = e["unit"] as? String ?? "", note = e["note"] as? String ?? ""
+        let done = (e["done"] as? NSNumber)?.doubleValue, total = (e["total"] as? NSNumber)?.doubleValue
+        let estimate = (e["est"] as? Bool ?? false) ? "~" : ""
+        var count = ""
+        if let done {
+            if unit == "B" {
+                let bytes = { (v: Double) in ByteCountFormatter.string(fromByteCount: Int64(v), countStyle: .file) }
+                count = total.map { "\(bytes(done)) / \(estimate)\(bytes($0))" } ?? bytes(done)
+            } else {
+                let number = { (v: Double) in NumberFormatter.localizedString(from: NSNumber(value: Int(v)), number: .decimal) }
+                count = (total.map { "\(number(done)) / \(estimate)\(number($0))" } ?? number(done)) + (unit.isEmpty ? "" : " \(unit)")
+            }
+        }
+        return [step, count, note].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    nonisolated static func duration(_ seconds: Double) -> String {
+        let f = DateComponentsFormatter()
+        f.unitsStyle = .abbreviated
+        f.allowedUnits = seconds >= 3600 ? [.hour, .minute] : (seconds >= 60 ? [.minute, .second] : [.second])
+        f.maximumUnitCount = 2
+        return f.string(from: max(seconds, 1)) ?? ""
     }
 
     nonisolated static func parseStage(_ line: String) -> (k: Int, name: String, state: StepState, detail: String, percent: Double?)? {
@@ -809,6 +983,7 @@ final class BuildModel: ObservableObject {
     /// <work>/extract/v<N>/RomFS where N is the profile's package version, so take
     /// the highest v* that actually has a RomFS instead of hardcoding one game.
     private func packArchive(workDir: String) {
+        running = true
         let fm = FileManager.default
         let extract = workDir + "/extract"
         let vers = ((try? fm.contentsOfDirectory(atPath: extract)) ?? [])
@@ -817,7 +992,7 @@ final class BuildModel: ObservableObject {
         guard let v = vers.last else {
             stages.append(Stage(id: 1000, name: t("prog.archiveShort"), state: .failed, detail: t("prog.noRomfs")))
             doneNote = String(format: t("msg.archiveSkipped"), extract)
-            cleanupStaging(); return
+            running = false; cleanupStaging(); return
         }
         let romfs = extract + "/" + v + "/RomFS"
         // The output is Documents/games/<title ID>/romfs — the per-game layout the iOS app looks for
@@ -860,31 +1035,36 @@ final class BuildModel: ObservableObject {
         // (base = dest would leave them as siblings of an empty folder)
         p.arguments = [repoPath + "/dm/tools/romfs_arc.py", "pack", romfs, dest + "/romfs", "--shard-mib", "200"]
         p.environment = ["PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "PYTHONPATH": repoPath + "/dm/tools"]
+        Self.inOwnGroup(p, python: p.executableURL!.path)
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
             let d = h.availableData
             guard !d.isEmpty, let s = String(data: d, encoding: .utf8) else { return }
             DispatchQueue.main.async { self?.append(s) }
         }
-        p.terminationHandler = { [weak self] st in DispatchQueue.main.async {
+        p.terminationHandler = { [weak self] st in Self.untrack(st); DispatchQueue.main.async {
             guard let self else { return }
             self.cleanupStaging()
-            if st.terminationStatus == 0 {
+            let cancelled = self.stopping
+            let succeeded = st.terminationStatus == 0 && !cancelled
+            self.stopping = false
+            if succeeded {
                 self.archivePath = dest
                 Self.writeStamp(source: romfs, version: v, to: dest + "/.packstamp")
             }
             if let i = self.stages.firstIndex(where: { $0.id == idx }) {
-                self.stages[i].state = st.terminationStatus == 0 ? .done : .failed
-                self.stages[i].detail = st.terminationStatus == 0
+                self.stages[i].state = succeeded ? .done : .failed
+                self.stages[i].detail = succeeded
                     ? String(format: self.t("prog.archiveDone"), dest)
                     : String(format: self.t("msg.archiveFailed"), st.terminationStatus)
             }
-            let n = ((try? FileManager.default.contentsOfDirectory(atPath: dest)) ?? []).filter { $0.hasPrefix("romfs") }.count
             self.running = false
-            self.done = st.terminationStatus == 0
-            self.doneNote = st.terminationStatus == 0 ? self.t("msg.done") : self.t("msg.archiveIpaOnly")
+            self.done = succeeded
+            if cancelled { self.resetProgress() }
+            self.doneNote = cancelled ? self.t("msg.stopped") : (succeeded ? self.t("msg.done") : self.t("msg.archiveIpaOnly"))
         }}
-        do { try p.run() } catch {
+        proc = p
+        do { try p.run(); Self.track(p) } catch {
             if let i = stages.firstIndex(where: { $0.id == idx }) {
                 stages[i].state = .failed; stages[i].detail = t("msg.archiveNoStart")
             }
@@ -1265,220 +1445,153 @@ final class BuildModel: ObservableObject {
 
 // MARK: - View
 
-struct ContentView: View {
-    @StateObject private var m: BuildModel
-
-    init(model: BuildModel? = nil) {
-        _m = StateObject(wrappedValue: model ?? BuildModel())
-    }
+struct BuilderView: View {
+    @ObservedObject var m: BuildModel
+    @ObservedObject var library: GameLibrary
+    var settings = false
+    var onViewGame: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
+    var onChooseLibraryFolder: () -> Void = {}
+    @State private var extrasOpen = false
+    @State private var logOpen = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: true) { sections }
-            Divider()
-            footer
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 34) {
+                if settings { settingsPage } else { buildPage }
+            }
+            .padding(.horizontal, 40).padding(.top, 40).padding(.bottom, 48)
+            .frame(maxWidth: 900)
+            .frame(maxWidth: .infinity)
         }
-        .frame(minWidth: 720, idealWidth: 880, minHeight: 560, idealHeight: 820)
-        .onAppear {
-            m.checkDeps()
-            if m.repoOK, m.repoIsGit { m.checkRepoUpdates(silent: true) }   // quiet fetch: fills repoBehind, offline is not an error
-            m.checkAppUpdate(silent: true)   // a found update shows the button in the header; quiet otherwise
+        .buttonStyle(LauncherSecondaryButtonStyle())
+    }
+
+    // ---- shared pieces: the library's and the launch options' look ----
+
+    private func pageHeading(_ title: String, note: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.manrope(44, .heavy)).tracking(-1.3)
+            Text(note).font(.manrope(15)).foregroundStyle(.secondary)
         }
     }
 
-    // The scrollable part, split out so it can be rendered on its own for layout checks.
-    var sections: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            repository
-            inputs
-            dependencies
-            if m.done { installGuide }
-            stagesView
-            buildOptions
-            logView
+    /// A titled group: a small tracked label over one card of rows.
+    private func group<Content: View>(_ label: String, footnote: String = "", @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label).font(.manrope(15, .semibold)).foregroundStyle(.secondary)
+                .padding(.leading, 2)
+            VStack(spacing: 0, content: content)
+                .background(LauncherPalette.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.06)))
+            if !footnote.isEmpty {
+                Text(footnote).font(.manrope(12)).foregroundStyle(.secondary).padding(.leading, 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 20)
-        .padding(.bottom, 18)
     }
 
-    // ---- 标题 ----
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "gamecontroller.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(.white)
-                .frame(width: 54, height: 54)
-                .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.green.gradient))
+    /// One line of a card: a status dot (its place kept when there is none, so every title starts on one line),
+    /// the title (with a disclosure chevron beside it when `open` is given), a secondary detail, and its controls,
+    /// whose right edges line up across the card.
+    private func row<Trailing: View>(_ title: String, detail: String = "", dot: Color? = nil, help: String = "", open: Bool? = nil,
+                                     @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 12) {
+            Circle().fill(dot ?? .clear).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 3) {
-                Text("NS Port Builder").font(.system(size: 25, weight: .bold))
-                Text(m.t("app.subtitle"))
-                    .font(.system(size: 13)).foregroundStyle(.secondary)
-                if !m.appStatus.isEmpty {
-                    Text(m.appStatus).font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 0)
-            if let u = m.appUpdate {
-                Button(String(format: m.t("app.updateBtn"), u.tag)) { m.performAppUpdate() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(m.appBusy)
-            }
-            Text("v\(BuildModel.appVersion)")
-                .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(.tertiary)
-                .onTapGesture { m.checkAppUpdate() }
-            Button(m.lang.toggleLabel) { m.toggleLang() }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                .help(m.lang == .zh ? "Switch to English" : "切换到中文")
-        }
-    }
-
-    private func sectionHeader(_ symbol: String, _ title: String, note: String = "") -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
-            Text(title).font(.system(size: 15, weight: .semibold))
-            if !note.isEmpty { Text(note).font(.system(size: 11.5)).foregroundStyle(.tertiary) }
-            Spacer(minLength: 0)
-        }
-    }
-
-    // ---- 仓库 ----
-
-    private var repository: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    sectionHeader("shippingbox", m.t("repo.title"), note: m.t("repo.note"))
-                    Spacer(minLength: 8)
-                    if m.repoOK {
-                        if m.repoIsGit {
-                            if let n = m.repoBehind, n > 0 {
-                                Button(m.t("repo.pull")) { m.pullRepo() }
-                                    .disabled(m.repoBusy || m.running)
-                            }
-                            Button(m.t("repo.check")) { m.checkRepoUpdates() }
-                                .disabled(m.repoBusy || m.running)
-                        } else {
-                            Button(m.t("repo.adopt")) { m.adoptRepoAsGit() }
-                                .disabled(m.repoBusy || m.running)
-                        }
-                    } else {
-                        Button(m.t("repo.download")) { m.cloneRepo() }
-                            .disabled(m.repoBusy || m.running)
-                        Button(m.t("repo.choose")) { pickRepo() }
+                HStack(spacing: 6) {
+                    Text(title).font(.manrope(14))
+                    if let open {
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(open ? 90 : 0))
                     }
                 }
-                HStack(spacing: 10) {
-                    Image(systemName: m.repoOK ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(m.repoOK ? Color.green : Color.red)
-                        .frame(width: 20)
-                    Text(m.repoOK ? m.shortPath(m.repoPath)
-                         : (m.repoPath.isEmpty ? m.t("repo.notFound")
-                            : String(format: m.t("repo.notRepo"), m.shortPath(m.repoPath))))
-                        .font(.system(size: 12.5, design: .monospaced))
-                        .foregroundStyle(m.repoOK ? Color.secondary : Color.orange)
-                        .lineLimit(1).truncationMode(.head)
-                        .help(m.repoPath)
-                    Spacer(minLength: 8)
-                    if m.repoBusy { ProgressView().controlSize(.small) }
+                if !detail.isEmpty {
+                    // A path is technical text: the system's monospaced face; everything else Manrope
+                    Text(detail).font(detail.hasPrefix("/") || detail.hasPrefix("~") ? .mono(12) : .manrope(12.5)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(help.isEmpty ? detail : help)
                 }
-                if !m.repoStatus.isEmpty {
-                    Text(m.repoStatus)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle((m.repoBehind ?? 0) > 0 ? Color.orange : Color.secondary)
-                } else if !m.repoOK {
-                    Text(m.t("repo.firstHint")).font(.system(size: 11.5)).foregroundStyle(.secondary)
-                }
-                if !m.repoOK {
-                    // GitHub does not load everywhere: the manual route (Code → Download ZIP → unzip →
-                    // Choose repository) needs no git at all, and the note says which folder to pick.
-                    HStack(spacing: 4) {
-                        Text(m.t("repo.manualHint")).font(.system(size: 11.5)).foregroundStyle(.secondary)
-                        Link("github.com/LNPANDY/NX2Apple", destination: URL(string: BuildModel.repoURL.replacingOccurrences(of: ".git", with: ""))!)
-                            .font(.system(size: 11.5))
-                        Text(m.t("repo.manualHint2")).font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    }
-                }
-                if m.repoOK, !m.repoIsGit {
-                    Text(m.t("repo.noGit")).font(.system(size: 11.5)).foregroundStyle(.secondary)
-                }
-            }.padding(8)
+            }
+            Spacer(minLength: 12)
+            trailing()
         }
+        .padding(.horizontal, 18).padding(.vertical, 13)
+        .frame(minHeight: 52)
     }
 
-    private func pickRepo() {
-        let d = NSOpenPanel()
-        d.canChooseDirectories = true; d.canChooseFiles = false
-        d.message = m.t("repo.pickMessage")
-        if d.runModal() == .OK, let u = d.url { m.repoPath = u.path }
+    private var divider: some View { Divider().opacity(0.25).padding(.leading, 18) }
+
+    /// A row that opens the rows under it.
+    private func disclosure(_ title: String, detail: String = "", isOpen: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: { withAnimation(.easeInOut(duration: 0.18)) { toggle() } }) {
+            row(title, detail: detail, open: isOpen) { EmptyView() }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
-    // ---- 游戏数据 ----
+    private func reveal(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
 
-    // ---- build options ----
+    // ---- Build game ----
 
-    /// Output-specific switches, sitting on the window background (no card, no heading): they are
-    /// one line of text next to their control, and a boxed card around a single toggle reads
-    /// heavier than the thing it configures. A Mac app runs on this Mac's GPU, which always has BC
-    /// support, so the compatibility option is only shown for an iPhone build.
-    @ViewBuilder private var buildOptions: some View {
-        if m.target == "mac-app" {
-            Text(m.t("opt.macNoBc"))
-                .font(.system(size: 11.5)).foregroundStyle(.secondary)
-        } else {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(m.t("opt.bc")).font(.system(size: 13))
-                    Text(m.t("opt.bc.note"))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder private var buildPage: some View {
+        pageHeading(m.t("build.heading"), note: m.t("build.intro"))
+        if !m.repoOK || !m.allDepsPresent {
+            group(m.t("section.setup")) {
+                row(m.t("library.setupHint"), dot: LauncherPalette.building) {
+                    Button(m.t("build.setup"), action: onOpenSettings)
                 }
-                Spacer(minLength: 12)
-                Toggle("", isOn: $m.bcOnCPU)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .disabled(m.running)
+            }
+        }
+        files.disabled(m.running)
+        target
+        action
+        outcome
+        progress
+    }
+
+    private var files: some View {
+        // The report's own mistake, and a reasonable one: the output folder silently decides where
+        // the build cache lives, so changing it threw away a finished build. Say it under Save to, all the time.
+        group(m.t("section.files"), footnote: m.t("msg.workdirHint")) {
+            Button(action: pickFolder) {
+                row(m.t(m.gameDir.isEmpty ? "build.folderCTA" : "build.folderSelected"),
+                    detail: m.gameDir.isEmpty ? m.t("build.folderNote") : m.shortPath(m.gameDir), help: m.gameDir) {
+                    Text(m.t(m.gameDir.isEmpty ? "data.choose" : "data.change"))
+                        .font(.manrope(13, .semibold)).foregroundStyle(.black)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(LauncherPalette.cream, in: Capsule())
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            ForEach(m.slots.filter { !$0.optional }, id: \.id) { s in divider; slotRow(s) }
+            divider
+            disclosure(m.t("build.options"), isOpen: extrasOpen) { extrasOpen.toggle() }
+            if extrasOpen {
+                ForEach(m.slots.filter(\.optional), id: \.id) { s in divider; slotRow(s) }
+            }
+            divider
+            row(m.t("build.saveTo"), detail: m.outDir.isEmpty ? m.t("build.saveDefault") : m.shortPath(m.outDir), help: m.outDir) {
+                Button(m.t("data.change")) {
+                    let d = NSOpenPanel(); d.canChooseDirectories = true; d.canChooseFiles = false
+                    if d.runModal() == .OK, let u = d.url { m.outDir = u.path }
+                }
             }
         }
     }
 
-    private var inputs: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    sectionHeader("folder", m.t("data.title"), note: m.t("data.note"))
-                    Button(m.t("data.pickFolder")) { pickFolder() }
-                }
-                Text(m.gameDir.isEmpty ? m.t("data.folderHint") : m.shortPath(m.gameDir))
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                VStack(spacing: 9) {
-                    ForEach(m.slots, id: \.id) { s in
-                        HStack(spacing: 10) {
-                            Image(systemName: s.ok ? "checkmark.circle.fill" : (s.optional ? "circle.dashed" : "xmark.circle.fill"))
-                                .font(.system(size: 15))
-                                .foregroundStyle(s.ok ? Color.green : (s.optional ? Color.secondary : Color.red))
-                                .frame(width: 20)
-                            Text(m.t(s.title)).font(.system(size: 14))
-                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                                .frame(width: 160, alignment: .leading)
-                            Text(s.summary(m.t))
-                                .font(.system(size: 12.5, design: .monospaced))
-                                .lineLimit(1).truncationMode(.middle)
-                                .foregroundStyle(s.ok ? Color.secondary : Color.orange)
-                                .help(s.paths.joined(separator: "\n"))
-                            Spacer(minLength: 8)
-                            if !s.paths.isEmpty { Button(m.t("data.clear")) { m.clear(s.id) }.controlSize(.small) }
-                            Button(s.paths.isEmpty ? m.t("data.choose") : m.t("data.change")) { m.pickFiles(kind: s.kind) }
-                        }
-                    }
-                }
-            }.padding(8)
+    private func slotRow(_ s: Slot) -> some View {
+        // An empty prod.keys row says where the file comes from.
+        row(m.t(s.title), detail: s.id == "keys" && s.paths.isEmpty ? m.t("build.keyHint") : s.summary(m.t), dot: s.ok ? LauncherPalette.ready : LauncherPalette.unbuilt,
+            help: s.paths.joined(separator: "\n")) {
+            if !s.paths.isEmpty {
+                Button(m.t("data.clear")) { m.clear(s.id) }.buttonStyle(.plain)
+                    .font(.manrope(13)).foregroundStyle(.secondary)
+            }
+            Button(s.paths.isEmpty ? m.t("data.choose") : m.t("data.change")) { m.pickFiles(kind: s.kind) }
         }
     }
 
@@ -1488,100 +1601,84 @@ struct ContentView: View {
         if d.runModal() == .OK, let u = d.url { m.scan(folder: u.path) }
     }
 
-    // ---- 设备依赖 ----
-
-    private var dependencies: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    // the whole left side toggles the list; only 重新检测 stays a button of its own
-                    Button { withAnimation(.easeInOut(duration: 0.18)) { m.toggleDeps() } } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: m.depsOpen ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 12)
-                            sectionHeader("wrench.and.screwdriver", m.t("dep.title"))
-                            if !m.depsChecked {
-                                ProgressView().controlSize(.small)
-                                Text(m.t("dep.checking")).font(.system(size: 12)).foregroundStyle(.secondary)
-                            } else if m.allDepsPresent {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                                Text(m.t("dep.allReady")).font(.system(size: 12, weight: .medium)).foregroundStyle(.green)
-                            } else {
-                                Text(String(format: m.t("dep.missing"), m.deps.filter { !$0.present }.count))
-                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.orange)
-                            }
+    private var target: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(m.t("section.target")).font(.manrope(15, .semibold)).foregroundStyle(.secondary)
+                .padding(.leading, 2)
+            HStack(spacing: 14) {
+                targetCard("mac-app", symbol: "desktopcomputer", title: "build.mac", note: "build.macNote")
+                targetCard("ios", symbol: "iphone", title: "build.ios", note: "build.iosNote")
+            }
+            // A Mac app runs on this Mac's GPU, which always decodes BC textures: the switch is the iPhone's only.
+            if m.target != "mac-app" {
+                VStack(spacing: 0) {
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(m.t("opt.bc")).font(.manrope(14))
+                            Text(m.t("opt.bc.note")).font(.manrope(12.5)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .contentShape(Rectangle())
+                        Spacer(minLength: 12)
+                        Toggle("", isOn: $m.bcOnCPU).toggleStyle(LauncherSwitchStyle()).labelsHidden().disabled(m.running)
                     }
-                    .buttonStyle(.plain)
-                    .help(m.depsOpen ? (m.lang == .zh ? "收起" : "Collapse") : (m.lang == .zh ? "展开" : "Expand"))
-                    Spacer(minLength: 8)
-                    Button(m.t("dep.recheck")) { m.checkDeps() }.controlSize(.small)
+                    .padding(.horizontal, 18).padding(.vertical, 14)
                 }
-                if m.depsOpen {
-                VStack(spacing: 7) {
-                    ForEach(m.deps, id: \.id) { d in
-                        HStack(spacing: 10) {
-                            if d.installing {
-                                ProgressView().controlSize(.small).frame(width: 20)
-                            } else {
-                                Image(systemName: d.present ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(d.present ? Color.green : Color.red)
-                                    .frame(width: 20)
-                            }
-                            Text(m.t(d.name)).font(.system(size: 13.5))
-                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                                .frame(width: 160, alignment: .leading)
-                            Text(m.shortPath(m.depDetail(d)))
-                                .font(.system(size: 11.5, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle).help(m.t(d.hint))
-                            Spacer(minLength: 8)
-                            if d.installing {
-                                Text(m.t("dep.installing")).font(.system(size: 11.5)).foregroundStyle(.orange)
-                            } else if !d.present {
-                                Button(d.installCmd.isEmpty ? m.t("dep.openAppStore") : m.t("dep.install")) { m.installDep(d) }
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                }
-                }
-            }.padding(8)
+                .background(LauncherPalette.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.06)))
+                .padding(.top, 4)
+            }
         }
     }
 
-    // ---- 安装引导（构建完成后出现） ----
-
-    private func reveal(_ path: String) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    private func targetCard(_ value: String, symbol: String, title: String, note: String) -> some View {
+        let selected = m.target == value
+        return Button { m.target = value } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top) {
+                    Image(systemName: symbol).font(.system(size: 26, weight: .light))
+                        .foregroundStyle(selected ? LauncherPalette.cream : .secondary)
+                    Spacer()
+                    Circle().strokeBorder(selected ? LauncherPalette.cream : Color.white.opacity(0.25), lineWidth: selected ? 5 : 1.5)
+                        .frame(width: 18, height: 18)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(m.t(title)).font(.manrope(16, .semibold))
+                    Text(m.t(note)).font(.manrope(12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? LauncherPalette.cream.opacity(0.05) : LauncherPalette.surface.opacity(0.75), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(selected ? LauncherPalette.cream.opacity(0.7) : Color.white.opacity(0.06), lineWidth: selected ? 1.5 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain).disabled(m.running)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private var installGuide: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                sectionHeader("iphone.gen3", m.t("install.title"))
-                guideRow(m.t("install.step1"))
-                guideRow(m.t("install.step2"))
-                guideRow(m.t("install.step3"))
-                HStack(spacing: 8) {
-                    Text(m.ipaPath).font(.system(size: 11.5, design: .monospaced))
-                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                        .help(m.ipaPath)
-                    Spacer(minLength: 8)
-                    Button(m.t("install.reveal")) { reveal(m.ipaPath) }.controlSize(.small)
+    @ViewBuilder private var outcome: some View {
+        if m.done && m.target == "mac-app" {
+            group(m.t("section.done")) {
+                row(m.t("library.ready"), detail: m.shortPath(m.macAppPath), dot: LauncherPalette.ready, help: m.macAppPath) {
+                    Button(m.t("install.reveal")) { reveal(m.macAppPath) }
+                    Button(m.t("build.showLibrary"), action: onViewGame)
                 }
-                HStack(spacing: 8) {
-                    Text(m.archivePath).font(.system(size: 11.5, design: .monospaced))
-                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                        .help(m.archivePath)
-                    Spacer(minLength: 8)
-                    Button(m.t("install.reveal")) { reveal(m.archivePath) }.controlSize(.small)
+            }
+        }
+        if m.done && m.target != "mac-app" {
+            group(m.t("install.title")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    guideRow(m.t("install.step1")); guideRow(m.t("install.step2")); guideRow(m.t("install.step3"))
                 }
-            }.padding(8)
+                .padding(.horizontal, 18).padding(.vertical, 16)
+                divider
+                row("IPA", detail: m.shortPath(m.ipaPath), dot: LauncherPalette.ready, help: m.ipaPath) {
+                    Button(m.t("install.reveal")) { reveal(m.ipaPath) }
+                }
+                divider
+                row("RomFS", detail: m.shortPath(m.archivePath), dot: LauncherPalette.ready, help: m.archivePath) {
+                    Button(m.t("install.reveal")) { reveal(m.archivePath) }
+                }
+            }
         }
     }
 
@@ -1590,149 +1687,200 @@ struct ContentView: View {
         let parts = s.split(separator: "\t", maxSplits: 1)
         let num = parts.first.map(String.init) ?? ""
         let text = parts.count > 1 ? String(parts[1]) : s
-        return HStack(alignment: .top, spacing: 8) {
-            Text(num).font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.green)
-                .frame(width: 16)
-            Text(text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(num).font(.manrope(13, .bold)).foregroundStyle(LauncherPalette.cream).frame(width: 14)
+            Text(text).font(.manrope(14)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
     }
 
-    // ---- 构建进度（紧凑） ----
-
-    private var stagesView: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    sectionHeader("chart.bar", m.t("prog.title"))
-                    if m.running { ProgressView().controlSize(.small) }
-                    if let p = overallPercent {
-                        Text("\(Int(p))%").font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if m.stages.isEmpty {
-                    Text(m.t("prog.empty"))
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(m.stages, id: \.id) { s in
-                                HStack(spacing: 8) {
-                                    if s.state == .running { ProgressView().controlSize(.mini).frame(width: 14) }
-                                    else {
-                                        Image(systemName: s.state.icon).font(.system(size: 11))
-                                            .foregroundStyle(s.state.color).frame(width: 14)
-                                    }
-                                    Text(s.name).font(.system(size: 12, design: .monospaced)).lineLimit(1)
-                                    if let p = s.percent, s.state == .running {
-                                        ProgressView(value: p / 100).frame(width: 70)
-                                        Text("\(Int(p))%").font(.system(size: 10.5, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer(minLength: 6)
-                                    if !s.detail.isEmpty {
-                                        Text(s.detail).font(.system(size: 10.5))
-                                            .foregroundStyle(.tertiary).lineLimit(1)
-                                    }
-                                }
+    /// The script's own stages once a build has run, and its log behind a disclosure.
+    @ViewBuilder private var progress: some View {
+        if m.running || !m.stages.isEmpty {
+            group(m.t("section.progress")) {
+                ForEach(Array(m.stages.enumerated()), id: \.element.id) { index, s in
+                    if index > 0 { divider }
+                    HStack(spacing: 12) {
+                        if s.state == .running { ProgressView().controlSize(.small).frame(width: 14) }
+                        else { Circle().fill(s.state.color).frame(width: 7, height: 7).frame(width: 14) }
+                        Text(s.name).font(.manrope(14)).lineLimit(1)
+                        Spacer(minLength: 12)
+                        if s.state == .running {
+                            TimelineView(.periodic(from: Date(), by: 1)) { context in
+                                Text([s.detail, s.clock(at: context.date, left: m.t("prog.eta"))].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.manrope(12)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
                             }
+                        } else if !s.detail.isEmpty { Text(s.detail).font(.manrope(12)).foregroundStyle(.secondary).lineLimit(1) }
+                        if s.state == .running {
+                            LauncherProgressBar(value: s.percent.map { $0 / 100 }, height: 6).frame(width: 180)
+                            Text(s.percent.map { "\(Int($0))%" } ?? "").font(.manrope(13, .semibold)).monospacedDigit()
+                                .foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
                         }
                     }
-                    .frame(height: 78)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
                 }
-            }.padding(8)
+                if m.stages.isEmpty && m.running {
+                    row(m.t("library.preparing")) { ProgressView().controlSize(.small) }
+                }
+                divider
+                disclosure(m.t("build.log"), isOpen: logOpen) { logOpen.toggle() }
+                if logOpen { logView.padding(.horizontal, 14).padding(.bottom, 14) }
+            }
         }
     }
-
-    private var overallPercent: Double? {
-        let ps = m.stages.compactMap { $0.state == .done ? 100.0 : ($0.state == .running ? $0.percent : nil) }
-        guard !ps.isEmpty else { return nil }
-        return ps.reduce(0, +) / Double(ps.count)
-    }
-
-    // ---- 日志（紧凑） ----
 
     private var logView: some View {
         ScrollViewReader { sp in
             ScrollView {
                 Text(m.logTail.isEmpty ? m.t("log.placeholder") : m.logTail)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.mono(11))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .foregroundStyle(.secondary)
-                    .padding(6)
+                    .padding(12)
                     .id("end")
             }
-            .frame(height: 88)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+            .frame(height: 220)
+            .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
             .onChange(of: m.logTail) { _ in sp.scrollTo("end", anchor: .bottom) }
+            .onAppear { sp.scrollTo("end", anchor: .bottom) }
         }
     }
 
-    // ---- 底部（固定） ----
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 14) {
-            Button(m.running ? m.t("btn.stop") : (m.done ? m.t("btn.rebuild") : m.t("btn.build"))) {
-                m.running ? m.stop() : m.startBuild()
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .font(.system(size: 14, weight: .semibold))
-            .disabled(!m.running && !m.canBuild)
-
+    /// The page's conclusion, at the end of its column: what is still missing, and the button.
+    private var action: some View {
+        HStack(spacing: 18) {
             statusText
-            Spacer(minLength: 8)
-            // Output target. Two different outputs of one pipeline; an iPhone IPA is the default
-            // because that is what most people build.
-            Picker("", selection: $m.target) {
-                Text(m.t("target.ios")).tag("ios")
-                Text(m.t("target.mac")).tag("mac-app")
+            Spacer(minLength: 12)
+            Button {
+                m.running ? m.stop() : m.startBuild()
+            } label: {
+                Label(m.running ? m.t(m.stopping ? "library.stopping" : "btn.stop") : (m.done ? m.t("btn.rebuild") : m.t("build.startGame")),
+                      systemImage: m.running ? "stop.fill" : "hammer.fill")
+                    .font(.manrope(15, .semibold)).padding(.horizontal, 24).padding(.vertical, 13)
+                    .foregroundStyle(.black).background(m.running ? LauncherPalette.building : LauncherPalette.cream, in: Capsule())
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 240)
-            .disabled(m.running)
-            .help(m.t("target.tip"))
-            Button(m.t("btn.outDir")) {
-                let d = NSOpenPanel(); d.canChooseDirectories = true; d.canChooseFiles = false
-                if d.runModal() == .OK, let u = d.url { m.outDir = u.path }
-            }
+            .buttonStyle(.plain)
+            .disabled(m.stopping || (!m.running && !m.canBuild))
+            .opacity(m.stopping || (!m.running && !m.canBuild) ? 0.4 : 1)
+            .keyboardShortcut(.return, modifiers: .command)
         }
-        // The report's own mistake, and a reasonable one: the output folder silently decides where
-        // the build cache lives, so changing it threw away a finished build. Say it where the
-        // folder buttons are, all the time.
-        Text(m.t("msg.workdirHint"))
-            .font(.system(size: 10.5))
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 22)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
+        .padding(.top, 2)
     }
 
     @ViewBuilder private var statusText: some View {
         if !m.doneNote.isEmpty {
-            Text(m.doneNote).font(.system(size: 12))
-                .foregroundStyle(m.done ? Color.green : Color.orange).lineLimit(2)
+            Text(m.doneNote).font(.manrope(13))
+                .foregroundStyle(m.done ? LauncherPalette.ready : LauncherPalette.building).lineLimit(2)
         } else if !m.depsChecked {
-            Text(m.t("status.checkingDeps")).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(m.t("status.checkingDeps")).font(.manrope(13)).foregroundStyle(.secondary)
         } else if !m.allDepsPresent {
-            Text(m.t("status.installFirst")).font(.system(size: 12)).foregroundStyle(.orange)
+            Text(m.t("status.installFirst")).font(.manrope(13)).foregroundStyle(LauncherPalette.building)
         } else if !m.repoOK {
-            Text(m.t("status.chooseRepo")).font(.system(size: 12)).foregroundStyle(.orange)
-        } else if m.basePath.isEmpty || m.keysPath.isEmpty {
-            Text(m.t("status.needInputs")).font(.system(size: 12)).foregroundStyle(.orange)
+            Text(m.t("status.chooseRepo")).font(.manrope(13)).foregroundStyle(LauncherPalette.building)
+        } else if !m.slot("base").ok || !m.slot("keys").ok {
+            Text(m.t("status.needInputs")).font(.manrope(13)).foregroundStyle(.secondary)
         } else {
             Text(String(format: m.t("status.output"), m.shortPath(m.outDir.isEmpty ? (m.basePath as NSString).deletingLastPathComponent : m.outDir)))
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                .font(.manrope(13)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
         }
+    }
+
+    // ---- Settings ----
+
+    @ViewBuilder private var settingsPage: some View {
+        pageHeading(m.t("settings.heading"), note: m.t("settings.note"))
+        group(m.t("section.library"), footnote: m.t("library.folderHint")) {
+            row(m.t("library.folderTitle"), detail: library.folder.isEmpty ? m.t("library.folderUnset") : m.shortPath(library.folder),
+                dot: library.folder.isEmpty ? LauncherPalette.unbuilt : LauncherPalette.ready, help: library.folder) {
+                if library.scanning { ProgressView().controlSize(.small) }
+                if !library.folder.isEmpty {
+                    Button(m.t("library.rescan")) { library.discover() }.disabled(library.scanning)
+                }
+                Button(m.t("library.chooseFolder"), action: onChooseLibraryFolder)
+            }
+        }
+        tools
+        group(m.t("section.app"), footnote: m.appStatus) {
+            row("nxnative", detail: String(format: m.t("app.version"), BuildModel.appVersion)) {
+                if let u = m.appUpdate {
+                    Button(String(format: m.t("app.updateBtn"), u.tag)) { m.performAppUpdate() }.disabled(m.appBusy)
+                } else {
+                    Button(m.t("repo.check")) { m.checkAppUpdate() }.disabled(m.appBusy)
+                }
+            }
+        }
+    }
+
+    private var tools: some View {
+        group(m.t("section.tools"), footnote: m.repoStatus.isEmpty ? (m.repoOK ? "" : m.t("repo.firstHint")) : m.repoStatus) {
+            row(m.t("repo.title"),
+                detail: m.repoOK ? m.shortPath(m.repoPath)
+                    : (m.repoPath.isEmpty ? m.t("repo.notFound") : String(format: m.t("repo.notRepo"), m.shortPath(m.repoPath))),
+                dot: m.repoOK ? LauncherPalette.ready : LauncherPalette.building, help: m.repoPath) {
+                if m.repoBusy { ProgressView().controlSize(.small) }
+                if m.repoOK {
+                    if m.repoIsGit {
+                        if let n = m.repoBehind, n > 0 {
+                            Button(m.t("repo.pull")) { m.pullRepo() }.disabled(m.repoBusy || m.running)
+                        }
+                        Button(m.t("repo.check")) { m.checkRepoUpdates() }.disabled(m.repoBusy || m.running)
+                    } else {
+                        Button(m.t("repo.adopt")) { m.adoptRepoAsGit() }.disabled(m.repoBusy || m.running)
+                    }
+                } else {
+                    Button(m.t("repo.choose")) { pickRepo() }
+                    Button(m.t("repo.download")) { m.cloneRepo() }.disabled(m.repoBusy || m.running)
+                }
+            }
+            if !m.repoOK {
+                // GitHub does not load everywhere: the manual route (Code → Download ZIP → unzip →
+                // Choose repository) needs no git at all, and the note says which folder to pick.
+                HStack(spacing: 4) {
+                    Text(m.t("repo.manualHint")).foregroundStyle(.secondary)
+                    Link("github.com/LNPANDY/NX2Apple", destination: URL(string: BuildModel.repoURL.replacingOccurrences(of: ".git", with: ""))!)
+                    Text(m.t("repo.manualHint2")).foregroundStyle(.secondary)
+                }
+                .font(.manrope(12)).padding(.horizontal, 18).padding(.bottom, 12)
+            }
+            if m.repoOK, !m.repoIsGit {
+                Text(m.t("repo.noGit")).font(.manrope(12)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 18).padding(.bottom, 12)
+            }
+            divider
+            Button(action: { withAnimation(.easeInOut(duration: 0.18)) { m.toggleDeps() } }) {
+                row(m.t("dep.title"),
+                    detail: !m.depsChecked ? m.t("dep.checking")
+                        : (m.allDepsPresent ? m.t("dep.allReady") : String(format: m.t("dep.missing"), m.deps.filter { !$0.present }.count)),
+                    dot: !m.depsChecked ? LauncherPalette.unbuilt : (m.allDepsPresent ? LauncherPalette.ready : LauncherPalette.building),
+                    open: m.depsOpen) {
+                    if !m.depsChecked { ProgressView().controlSize(.small) }
+                    Button(m.t("dep.recheck")) { m.checkDeps() }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if m.depsOpen {
+                ForEach(m.deps, id: \.id) { d in
+                    divider
+                    row(m.t(d.name), detail: m.shortPath(m.depDetail(d)), dot: d.present ? LauncherPalette.ready : LauncherPalette.building,
+                        help: m.t(d.hint)) {
+                        if d.installing {
+                            ProgressView().controlSize(.small)
+                            Text(m.t("dep.installing")).font(.manrope(12)).foregroundStyle(LauncherPalette.building)
+                        } else if !d.present {
+                            Button(d.installCmd.isEmpty ? m.t("dep.openAppStore") : m.t("dep.install")) { m.installDep(d) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func pickRepo() {
+        let d = NSOpenPanel()
+        d.canChooseDirectories = true; d.canChooseFiles = false
+        d.message = m.t("repo.pickMessage")
+        if d.runModal() == .OK, let u = d.url { m.repoPath = u.path }
     }
 }

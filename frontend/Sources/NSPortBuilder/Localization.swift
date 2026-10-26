@@ -1,8 +1,8 @@
 import Foundation
 
-// The app's interface language. At first launch it follows the device: any Chinese variant
-// (zh-Hans, zh-Hant, zh-HK, zh-TW…) gets Chinese, everything else gets English. The EN / 中文
-// button in the title bar overrides that and the choice is remembered.
+// The app's interface language follows the system at every launch: any Chinese variant
+// (zh-Hans, zh-Hant, zh-HK, zh-TW…) gets Chinese, everything else gets English. There is no
+// switch in the app: it follows the system's language settings.
 //
 // Every user-visible string lives in the table below, so the two languages cannot drift apart:
 // `L10n.selfCheck()` walks it at launch and logs any key that is empty on either side.
@@ -10,28 +10,106 @@ import Foundation
 enum Lang: String {
     case zh, en
 
-    /// The language to start in: the saved choice, else the device's.
-    static func initial() -> Lang {
-        if let saved = UserDefaults.standard.string(forKey: "uiLang"), let l = Lang(rawValue: saved) { return l }
-        return device()
-    }
-
     /// Chinese only when the device's first preferred language is Chinese; every other
     /// device gets English.
     static func device() -> Lang {
         guard let first = Locale.preferredLanguages.first?.lowercased() else { return .en }
         return first.hasPrefix("zh") ? .zh : .en
     }
-
-    var other: Lang { self == .zh ? .en : .zh }
-
-    /// What the toggle button says: the language you would switch to.
-    var toggleLabel: String { self == .zh ? "EN" : "中文" }
 }
 
 enum L10n {
     /// key: (Chinese, English)
     static let table: [String: (zh: String, en: String)] = [
+        "library.readyIOS": ("\u{53ef}\u{7528}\u{4e8e} iPhone", "Ready for iPhone"),
+        "library.showIOS": ("\u{663e}\u{793a} iPhone \u{6784}\u{5efa}", "Show iPhone build"),
+        "library.stopping": ("\u{6b63}\u{5728}\u{505c}\u{6b62}…", "Stopping…"),
+        "build.setup": ("\u{5b8c}\u{6210}\u{8bbe}\u{7f6e}", "Finish setup"),
+        "library.chooseFolder": ("\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{5939}\u{2026}", "Change folder…"),
+        "library.folderTitle": ("\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{5939}", "Your games folder"),
+        "library.folderHint": ("\u{5728}\u{6b64}\u{5904}\u{67e5}\u{627e}\u{5df2}\u{6784}\u{5efa}\u{7684}\u{6e38}\u{620f}\u{3002}\u{65b0}\u{6784}\u{5efa}\u{4e5f}\u{5c06}\u{4fdd}\u{5b58}\u{5728}\u{8fd9}\u{91cc}\u{3002}", "We\u{2019}ll find finished games here and use this folder for new builds, too."),
+        "library.rescan": ("\u{5237}\u{65b0}", "Refresh"),
+        "library.clearSearch": ("\u{6e05}\u{9664}\u{641c}\u{7d22}", "Clear search"),
+        "settings.heading": ("\u{8bbe}\u{7f6e}", "Settings"),
+        "settings.note": ("\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{5939}\u{3001}\u{6784}\u{5efa}\u{5de5}\u{5177}\u{548c}\u{5e94}\u{7528}\u{66f4}\u{65b0}\u{ff0c}\u{90fd}\u{5728}\u{8fd9}\u{91cc}\u{3002}", "Library location, build tools and updates."),
+        "settings.appNote": ("\u{4e3a} Apple \u{8bbe}\u{5907}\u{6784}\u{5efa}\u{6e38}\u{620f}", "Build your games for Apple devices"),
+        "build.compatibility": ("\u{517c}\u{5bb9}\u{6027}\u{9009}\u{9879}", "Older iPhone support"),
+        "build.macNote": ("\u{5728}\u{8fd9}\u{53f0} Mac \u{4e0a}\u{76f4}\u{63a5}\u{8fd0}\u{884c}\u{3002}", "Play directly on this Mac."),
+        "build.iosNote": ("\u{4e3a}\u{4f60}\u{7684} iPhone \u{6216} iPad \u{521b}\u{5efa}\u{5e94}\u{7528}\u{3002}", "Create an app for your iPhone or iPad."),
+        "build.folderCTA": ("\u{9009}\u{62e9}\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{5939}", "Choose game folder"),
+        "build.folderSelected": ("\u{5df2}\u{9009}\u{62e9}\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{5939}", "Game folder selected"),
+        // ---- Launcher and guided builds ----
+        "prog.eta": ("\u{8fd8}\u{5269} %@", "%@ left"),
+        "activity.mac": ("\u{6b63}\u{5728}\u{6784}\u{5efa} Mac \u{7248}", "Mac build in progress"),
+        "activity.ios": ("\u{6b63}\u{5728}\u{6784}\u{5efa} iPhone \u{7248}", "iPhone build in progress"),
+        "section.files": ("\u{6e38}\u{620f}\u{6587}\u{4ef6}", "Game files"),
+        "section.target": ("\u{5728}\u{54ea}\u{91cc}\u{73a9}", "Play on"),
+        "section.progress": ("\u{6784}\u{5efa}\u{8fdb}\u{5ea6}", "Progress"),
+        "section.setup": ("\u{8bbe}\u{7f6e}", "Setup"),
+        "section.done": ("\u{5df2}\u{5b8c}\u{6210}", "Done"),
+        "section.library": ("\u{6e38}\u{620f}\u{5e93}", "Library"),
+        "section.tools": ("\u{6784}\u{5efa}\u{5de5}\u{5177}", "Build tools"),
+        "section.app": ("\u{5e94}\u{7528}", "App"),
+        "build.saveTo": ("\u{4fdd}\u{5b58}\u{5230}", "Save to"),
+        "build.saveDefault": ("\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{65c1}\u{8fb9}", "Next to the game files"),
+        "build.log": ("\u{6784}\u{5efa}\u{65e5}\u{5fd7}", "Build log"),
+        "library.folderUnset": ("\u{5c1a}\u{672a}\u{8bbe}\u{7f6e}", "Not set"),
+        "app.version": ("\u{7248}\u{672c} %@", "Version %@"),
+        "library.scrollBack": ("\u{5411}\u{524d}\u{6eda}\u{52a8}", "Scroll back"),
+        "library.scrollForward": ("\u{5411}\u{540e}\u{6eda}\u{52a8}", "Scroll forward"),
+        "launch.title": ("\u{542f}\u{52a8}\u{9009}\u{9879}", "Launch options"),
+        "launch.reset": ("\u{6062}\u{590d}\u{6d4b}\u{8bd5}\u{9ed8}\u{8ba4}\u{503c}", "Reset to tested defaults"),
+        "launch.done": ("\u{5b8c}\u{6210}", "Done"),
+        "launch.applied": ("\u{4e0b}\u{6b21}\u{4ece}\u{8fd9}\u{91cc}\u{5f00}\u{59cb}\u{6e38}\u{620f}\u{65f6}\u{751f}\u{6548}\u{3002}", "Applied the next time you press Play here."),
+        "launch.none": ("\u{8fd9}\u{4e2a}\u{7248}\u{672c}\u{6ca1}\u{6709}\u{9644}\u{5e26}\u{542f}\u{52a8}\u{9009}\u{9879}\u{5217}\u{8868}\u{3002}", "This build carries no list of launch options."),
+        "launch.section.Game": ("\u{6e38}\u{620f}", "Game"),
+        "launch.section.Controls": ("\u{63a7}\u{5236}", "Controls"),
+        "launch.section.Performance": ("\u{6027}\u{80fd}", "Performance"),
+        "nav.library": ("\u{6e38}\u{620f}\u{5e93}", "Library"),
+        "nav.builds": ("\u{6784}\u{5efa}", "Builds"),
+        "nav.settings": ("\u{8bbe}\u{7f6e}", "Settings"),
+        "library.setupHint": ("\u{9996}\u{6b21}\u{6784}\u{5efa}\u{524d}\u{ff0c}\u{8bf7}\u{5b8c}\u{6210}\u{4ee5}\u{4e0b}\u{8bbe}\u{7f6e}\u{3002}", "Before your first build, finish the setup below."),
+        "library.ready": ("\u{53ef}\u{5728} Mac \u{4e0a}\u{8fd0}\u{884c}", "Ready on Mac"),
+        "library.building": ("\u{6b63}\u{5728}\u{6784}\u{5efa}", "Building"),
+        "library.notBuilt": ("\u{5c1a}\u{672a}\u{6784}\u{5efa}", "Not built yet"),
+        "library.play": ("\u{5f00}\u{59cb}\u{6e38}\u{620f}", "Play"),
+        "library.buildForMac": ("\u{4e3a} Mac \u{6784}\u{5efa}", "Build for Mac"),
+        "library.newBuild": ("\u{6784}\u{5efa}\u{6e38}\u{620f}", "Build game"),
+        "library.firstBuild": ("\u{6784}\u{5efa}\u{7b2c}\u{4e00}\u{4e2a}\u{6e38}\u{620f}", "Build your first game"),
+        "library.welcome": ("\u{8ba9}\u{6e38}\u{620f}\u{539f}\u{751f}\u{8fd0}\u{884c}\u{3002}", "Library"),
+        "library.welcomeNote": ("\u{9009}\u{62e9}\u{4f60}\u{81ea}\u{5df1}\u{7684}\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{ff0c}\u{6211}\u{4eec}\u{5c06}\u{5f15}\u{5bfc}\u{4f60}\u{6784}\u{5efa}\u{9002}\u{7528}\u{4e8e} Mac \u{6216} iPhone \u{7684}\u{6e38}\u{620f}\u{3002}\u{5b8c}\u{6210}\u{7684}\u{6e38}\u{620f}\u{4f1a}\u{81ea}\u{52a8}\u{51fa}\u{73b0}\u{5728}\u{8fd9}\u{91cc}\u{3002}", "Build a game or choose a folder containing finished Mac apps."),
+        "library.localNote": ("\u{4f7f}\u{7528}\u{4f60}\u{81ea}\u{5df1}\u{7684}\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{6784}\u{5efa}", "Local library"),
+        "library.collection": ("\u{4f60}\u{7684}\u{6e38}\u{620f}", "Your collection"),
+        "library.gameCount": ("%d \u{4e2a}\u{6e38}\u{620f}", "%d games"),
+        "library.search": ("\u{641c}\u{7d22}\u{6e38}\u{620f}\u{2026}", "Search games\u{2026}"),
+        "library.noResults": ("\u{672a}\u{627e}\u{5230}\u{5339}\u{914d}\u{7684}\u{6e38}\u{620f}\u{3002}", "No games match your search."),
+        "library.manage": ("\u{7ba1}\u{7406}", "Manage"),
+        "library.buildAgain": ("\u{91cd}\u{65b0}\u{6784}\u{5efa}\u{2026}", "Build again\u{2026}"),
+        "library.changeArtwork": ("\u{66f4}\u{6362}\u{56fe}\u{7247}\u{2026}", "Change artwork\u{2026}"),
+        "library.resetArtwork": ("\u{4f7f}\u{7528}\u{9ed8}\u{8ba4}\u{56fe}\u{7247}", "Use default artwork"),
+        "library.artworkHint": ("\u{9009}\u{62e9}\u{6e38}\u{620f}\u{7684}\u{5bbd}\u{5e45}\u{56fe}\u{7247}\u{3002}\u{56fe}\u{7247}\u{5c06}\u{4fdd}\u{7559}\u{5728}\u{539f}\u{6765}\u{7684}\u{4f4d}\u{7f6e}\u{3002}", "Choose a wide image for this game. The image stays in its original location."),
+        "library.viewBuild": ("\u{67e5}\u{770b}\u{6784}\u{5efa}", "View build"),
+        "library.preparing": ("\u{6b63}\u{5728}\u{51c6}\u{5907}\u{6e38}\u{620f}\u{2026}", "Preparing your game\u{2026}"),
+        "library.remove": ("\u{4ece}\u{6e38}\u{620f}\u{5e93}\u{79fb}\u{9664}", "Remove from collection"),
+        "library.removeQuestion": ("\u{4ece}\u{6e38}\u{620f}\u{5e93}\u{79fb}\u{9664}\u{8fd9}\u{4e2a}\u{6e38}\u{620f}\u{ff1f}", "Remove this game from your collection?"),
+        "library.removeNote": ("\u{6e38}\u{620f}\u{548c}\u{6e90}\u{6587}\u{4ef6}\u{5c06}\u{4fdd}\u{7559}\u{5728}\u{78c1}\u{76d8}\u{4e0a}\u{3002}", "Your game and source files will stay on disk."),
+        "library.error": ("\u{65e0}\u{6cd5}\u{5b8c}\u{6210}\u{64cd}\u{4f5c}", "Couldn\u{2019}t complete the action"),
+        "library.ok": ("\u{597d}", "OK"),
+        "build.heading": ("\u{6784}\u{5efa}\u{6e38}\u{620f}", "Build game"),
+        "build.intro": ("\u{9009}\u{62e9}\u{6e38}\u{620f}\u{6587}\u{4ef6}\u{548c}\u{8fd0}\u{884c}\u{8bbe}\u{5907}\u{3002}", "Choose game files and an output."),
+        "build.files": ("1. \u{9009}\u{62e9}\u{6e38}\u{620f}\u{6587}\u{4ef6}", "1. Choose your game files"),
+        "build.folderNote": ("\u{9009}\u{62e9}\u{5305}\u{542b}\u{6e38}\u{620f}\u{7684}\u{6587}\u{4ef6}\u{5939}\u{ff0c}\u{6216}\u{9010}\u{4e2a}\u{9009}\u{62e9}\u{6587}\u{4ef6}\u{3002}", "Choose the folder containing your game, or select the files below."),
+        "build.options": ("\u{66f4}\u{65b0}\u{548c}\u{9644}\u{52a0}\u{5185}\u{5bb9}\u{ff08}\u{53ef}\u{9009}\u{ff09}", "Updates & add-on content (optional)"),
+        "build.details": ("\u{6784}\u{5efa}\u{8be6}\u{60c5}", "Build details"),
+        "build.output": ("2. \u{9009}\u{62e9}\u{8fd0}\u{884c}\u{8bbe}\u{5907}", "2. Choose where to play"),
+        "build.mac": ("\u{8fd9}\u{53f0} Mac", "This Mac"),
+        "build.ios": ("iPhone / iPad", "iPhone / iPad"),
+        "build.keyHint": ("\u{4f7f}\u{7528}\u{4ece}\u{4f60}\u{81ea}\u{5df1}\u{7684} Switch \u{5bfc}\u{51fa}\u{7684} prod.keys \u{6587}\u{4ef6}\u{3002}", "Use the prod.keys file from your own Switch."),
+        "build.startGame": ("\u{6784}\u{5efa}\u{6e38}\u{620f}", "Build game"),
+        "build.resultIOS": ("iPhone \u{6784}\u{5efa}\u{5df2}\u{5b8c}\u{6210}", "iPhone build complete"),
+        "build.resultMac": ("Mac \u{6784}\u{5efa}\u{5df2}\u{5b8c}\u{6210}", "Mac build complete"),
+        "build.showLibrary": ("\u{67e5}\u{770b}\u{6e38}\u{620f}", "View game"),
+
         // ---- title ----
         "app.subtitle": ("Switch 游戏 → iPhone IPA · 归档分片 · 大内存",
                          "Switch games → iPhone IPA · archive shards · large memory"),
@@ -46,8 +124,8 @@ enum L10n {
         "repo.pickMessage": ("选择本项目（含 dm/tools/nx_extract/Program.cs）的文件夹",
                              "Pick this project's folder (the one holding dm/tools/nx_extract/Program.cs)"),
         "repo.download": ("下载仓库", "Download repository"),
-        "repo.downloading": ("正在下载到 ~/NX2Apple…（进度见下方日志，约一分钟）",
-                             "Downloading to ~/NX2Apple… (progress in the log below, about a minute)"),
+        "repo.downloading": ("正在下载到 ~/nxnative…（进度见下方日志，约一分钟）",
+                             "Downloading to ~/nxnative… (progress in the log below, about a minute)"),
         "repo.downloadDone": ("仓库已下载到 %@", "Repository downloaded to %@"),
         "repo.downloadFail": ("下载失败——网络不顺？用下面的手动方法",
                               "Download failed — flaky network? Use the manual route below"),

@@ -1,0 +1,584 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+enum LauncherPage: String, CaseIterable {
+    case library, builds, settings
+    var symbol: String {
+        switch self {
+        case .library: return "gamecontroller"
+        case .builds: return "shippingbox"
+        case .settings: return "slider.horizontal.3"
+        }
+    }
+}
+
+enum LauncherPalette {
+    static let background = Color(red: 0.055, green: 0.055, blue: 0.06)
+    static let surface = Color(red: 0.10, green: 0.10, blue: 0.11)
+    static let cream = Color(red: 1, green: 0.94, blue: 0.84)
+    static let ready = Color(red: 0.25, green: 0.84, blue: 0.47)
+    static let building = Color(red: 1, green: 0.78, blue: 0.24)
+    static let unbuilt = Color(red: 0.57, green: 0.58, blue: 0.61)
+}
+
+struct ContentView: View {
+    @StateObject private var m: BuildModel
+    @StateObject private var library: GameLibrary
+    @State private var page: LauncherPage = .library
+    @State private var search = ""
+    @State private var searching = false
+    @FocusState private var searchFocused: Bool
+    @State private var artwork: [UUID: NSImage] = [:]
+    @State private var activeBuildID: UUID?
+    @State private var launching = false
+    @State private var launchError: String?
+    @State private var removing: LibraryGame?
+    @State private var optionsFor: UUID?
+    @StateObject private var row = RowScroller()
+    private var performStartupChecks: Bool
+    @Environment(\.scenePhase) private var scenePhase
+
+    init(model: BuildModel? = nil, library: GameLibrary? = nil, initialPage: LauncherPage = .library,
+         activeBuildID: UUID? = nil, performStartupChecks: Bool = true, search: String? = nil) {
+        if let search { _search = State(initialValue: search); _searching = State(initialValue: true) }   // visual QA: the bar with its field open
+        _m = StateObject(wrappedValue: model ?? BuildModel())
+        _library = StateObject(wrappedValue: library ?? GameLibrary())
+        _page = State(initialValue: initialPage)
+        _activeBuildID = State(initialValue: activeBuildID)
+        self.performStartupChecks = performStartupChecks
+    }
+
+    private var filteredGames: [LibraryGame] {
+        library.games.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            topBar
+            Divider().opacity(0.3)
+            if page == .library {
+                libraryPage
+            } else {
+                BuilderView(m: m, library: library, settings: page == .settings, onViewGame: { page = .library },
+                            onOpenSettings: { page = .settings }, onChooseLibraryFolder: chooseLibraryFolder)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if m.running || page == .library { activityBar }
+        }
+        .background(LauncherPalette.background)
+        .background(LauncherWindowChrome())
+        .ignoresSafeArea(.container, edges: .top)
+        .preferredColorScheme(.dark)
+        .tint(LauncherPalette.cream)
+        .font(.manrope(13))   // the default for text without a font of its own
+        .frame(minWidth: 900, idealWidth: 1280, minHeight: 680, idealHeight: 900)
+        .onAppear {
+            refreshArtwork()
+            if performStartupChecks { library.discover(); fetchArtwork() }
+            if performStartupChecks {
+                m.checkDeps()
+                if m.repoOK && m.repoIsGit { m.checkRepoUpdates(silent: true) }
+                m.checkAppUpdate(silent: true)
+            }
+        }
+        .onChange(of: library.games) { _ in
+            refreshArtwork()
+            if performStartupChecks { fetchArtwork() }
+        }
+        .onChange(of: m.repoPath) { _ in refreshArtwork() }
+        .onReceive(m.$running.removeDuplicates()) { running in
+            if running && activeBuildID == nil { activeBuildID = library.rememberInputs(m) }
+            if !running {
+                DispatchQueue.main.async {
+                    if m.done { recordBuild() }
+                    activeBuildID = nil
+                }
+            }
+        }
+        .onReceive(m.$done.removeDuplicates()) { done in
+            if done { DispatchQueue.main.async { recordBuild() } }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { library.objectWillChange.send() }
+        }
+        .alert(m.t("library.error"), isPresented: Binding(
+            get: { launchError != nil || library.error != nil },
+            set: { if !$0 { launchError = nil; library.error = nil } }
+        )) {
+            Button(m.t("library.ok")) { launchError = nil; library.error = nil }
+        } message: { Text(launchError ?? library.error ?? "") }
+        .confirmationDialog(m.t("library.removeQuestion"), isPresented: Binding(
+            get: { removing != nil }, set: { if !$0 { removing = nil } }
+        ), titleVisibility: .visible) {
+            Button(m.t("library.remove"), role: .destructive) {
+                if let game = removing { library.remove(game.id) }
+                removing = nil
+            }
+        } message: { Text(m.t("library.removeNote")) }
+        .sheet(isPresented: Binding(get: { optionsFor != nil }, set: { if !$0 { optionsFor = nil } })) {
+            if let id = optionsFor { LaunchOptionsView(m: m, library: library, gameID: id) }
+        }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 6) {
+            Text("nxnative").font(.manrope(27, .bold)).tracking(-0.8)
+                .padding(.trailing, 34)
+            ForEach(LauncherPage.allCases, id: \.self) { destination in
+                Button { page = destination } label: {
+                    Label(m.t("nav." + destination.rawValue), systemImage: destination.symbol)
+                        .font(.manrope(15, page == destination ? .bold : .medium))
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(page == destination ? Color.white.opacity(0.10) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 9))
+                        .contentShape(RoundedRectangle(cornerRadius: 9))   // the whole pill takes the click, not only its text
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(page == destination ? .isSelected : [])
+            }
+            Spacer(minLength: 8)
+            searchField
+            Button { newBuild() } label: {
+                Label(m.t("library.newBuild"), systemImage: "plus")
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.1)))
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(.leading, 12)
+            .buttonStyle(.plain).disabled(m.running)
+        }
+        .padding(.leading, 90).padding(.trailing, 24)
+        .frame(height: 64)
+    }
+
+    /// The magnifier opens into a search field in the bar itself; Esc, or leaving it empty, closes it again.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { searching = true; page = .library }
+                searchFocused = true
+            } label: {
+                Image(systemName: "magnifyingglass").font(.system(size: searching ? 13 : 16, weight: .medium))
+                    .foregroundStyle(searching ? Color.secondary : Color.primary)
+                    .frame(width: searching ? 16 : 40, height: searching ? 16 : 40).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help(m.t("library.search")).accessibilityLabel(m.t("library.search"))
+            if searching {
+                TextField(m.t("library.search"), text: $search)
+                    .textFieldStyle(.plain).font(.manrope(14))
+                    .focused($searchFocused)
+                    .onSubmit { if search.isEmpty { closeSearch() } }
+                    .onExitCommand { closeSearch() }
+                    .frame(width: 210)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                Button { closeSearch() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain).help(m.t("library.clearSearch")).accessibilityLabel(m.t("library.clearSearch"))
+            }
+        }
+        .padding(.horizontal, searching ? 12 : 0)
+        .frame(height: 36)
+        .background(searching ? Color.white.opacity(0.07) : .clear, in: Capsule())
+        .overlay(Capsule().strokeBorder(searching ? Color.white.opacity(searchFocused ? 0.22 : 0.10) : .clear))
+        .onChange(of: searchFocused) { focused in
+            if !focused && search.isEmpty { closeSearch() }
+        }
+    }
+
+    private func closeSearch() {
+        search = ""
+        searchFocused = false
+        withAnimation(.easeOut(duration: 0.2)) { searching = false }
+    }
+
+    private var libraryPage: some View {
+        GeometryReader { geometry in
+            if library.games.isEmpty {
+                emptyLibrary
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let game = library.selected {
+                            hero(game, width: geometry.size.width, height: max(240, geometry.size.height - 274))
+                        }
+                        collection(width: geometry.size.width)
+                    }
+                }
+            }
+        }
+    }
+
+    private var emptyLibrary: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            Spacer()
+            Image(systemName: "gamecontroller").font(.system(size: 44, weight: .light))
+                .foregroundStyle(LauncherPalette.cream)
+            Text(m.t("library.welcome")).font(.manrope(54, .bold)).tracking(-1.8)
+            Text(m.t("library.welcomeNote")).font(.manrope(17)).foregroundStyle(.secondary)
+                .frame(maxWidth: 490, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            Button { newBuild() } label: {
+                Label(m.t("library.firstBuild"), systemImage: "plus")
+                    .font(.manrope(16, .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 15)
+                    .foregroundStyle(.black).background(LauncherPalette.cream, in: Capsule())
+            }
+            .buttonStyle(.plain).padding(.top, 8)
+            Button(action: chooseLibraryFolder) {
+                Label(m.t("library.chooseFolder"), systemImage: "folder")
+                    .font(.manrope(14)).foregroundStyle(.secondary)
+            }.buttonStyle(.plain)
+            Spacer()
+            Text(m.t("library.localNote")).font(.manrope(12)).foregroundStyle(.secondary)
+        }
+        .padding(48).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private func hero(_ game: LibraryGame, width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            if let image = artwork[game.id] {
+                Image(nsImage: image).resizable().scaledToFill()
+                    .frame(width: width, height: height).clipped()
+            } else {
+                LauncherPalette.surface
+                Image(systemName: "gamecontroller").font(.system(size: 160, weight: .ultraLight))
+                    .foregroundStyle(Color.white.opacity(0.05))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(60)
+            }
+            LinearGradient(stops: [.init(color: .clear, location: 0.25),
+                                   .init(color: .black.opacity(0.25), location: 0.45),
+                                   .init(color: LauncherPalette.background, location: 1)],
+                           startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.black.opacity(0.24), .clear], startPoint: .leading, endPoint: .trailing)
+            VStack(alignment: .leading, spacing: 14) {
+                status(game, prominent: true)
+                Text(game.name).font(.manrope(min(68, width * 0.052), .heavy))
+                    .tracking(-1.6).lineLimit(2).shadow(color: .black.opacity(0.25), radius: 12)
+                HStack(spacing: 18) {
+                    Button { primaryAction(game) } label: {
+                        Label(m.t(game.isReady ? "library.play" : (game.hasIOSBuild ? "library.showIOS" : "library.newBuild")),
+                              systemImage: game.isReady ? "play.fill" : (game.hasIOSBuild ? "iphone" : "hammer.fill"))
+                            .font(.manrope(18, .bold))
+                            .foregroundStyle(.black).padding(.horizontal, 30).padding(.vertical, 14)
+                            .frame(minWidth: 164)
+                            .background(LauncherPalette.cream, in: Capsule())
+                    }
+                    .buttonStyle(.plain).disabled(launching || (m.running && !game.isReady))
+                    .keyboardShortcut(.return, modifiers: [])
+                    if game.isReady {
+                        Button { optionsFor = game.id } label: {
+                            Image(systemName: "slider.horizontal.3").font(.system(size: 17))
+                                .frame(width: 48, height: 48)
+                                .background(Color.white.opacity(0.10), in: Circle())
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.14)))
+                        }
+                        .buttonStyle(.plain).help(m.t("launch.title")).accessibilityLabel(m.t("launch.title"))
+                    }
+                    Menu {
+                        Button(m.t("library.buildAgain")) { configureBuild(game) }.disabled(m.running || game.inputs["base", default: []].isEmpty)
+                        if game.isReady { Button(m.t("launch.title")) { optionsFor = game.id } }
+                        Button(m.t("library.changeArtwork")) { chooseArtwork(game) }
+                        if !game.artworkPath.isEmpty {
+                            Button(m.t("library.resetArtwork")) { library.setArtwork("", for: game.id) }
+                        }
+                        if !game.appPath.isEmpty {
+                            Button(m.t("install.reveal")) {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: game.appPath)])
+                            }
+                        }
+                        Divider()
+                        Button(m.t("library.remove"), role: .destructive) { removing = game }.disabled(game.id == activeBuildID)
+                    } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: "ellipsis.circle").font(.system(size: 27, weight: .ultraLight))
+                            Text(m.t("library.manage")).font(.manrope(13))
+                        }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().foregroundStyle(.white)
+                }
+            }
+            .padding(.horizontal, 34).padding(.bottom, 34)
+        }
+        .frame(width: width, height: height).clipped()
+    }
+
+    private func collection(width: CGFloat) -> some View {
+        let cardWidth = min(300, max(190, (width - 124) / 5))
+        let step = cardWidth + 14
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text(m.t("library.collection")).font(.manrope(28, .bold)).tracking(-0.6)
+                Spacer()
+                Text(String(format: m.t("library.gameCount"), library.games.count))
+                    .font(.manrope(12)).foregroundStyle(.secondary)
+            }
+            if filteredGames.isEmpty {
+                Text(m.t("library.noResults")).foregroundStyle(.secondary).padding(.vertical, 28)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 14) {
+                            ForEach(filteredGames) { game in
+                                Button { library.selectedID = game.id } label: {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        ZStack {
+                                            if let image = artwork[game.id] {
+                                                Image(nsImage: image).resizable().scaledToFill()
+                                            } else {
+                                                LauncherPalette.surface
+                                                Image(systemName: "gamecontroller").font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .frame(width: cardWidth, height: cardWidth / 1.8).clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
+                                            game.id == library.selectedID ? LauncherPalette.cream : .clear, lineWidth: 2))
+                                        Text(game.name).font(.manrope(16, .semibold)).lineLimit(1)
+                                        status(game)
+                                        Capsule().fill(game.id == library.selectedID ? LauncherPalette.cream : .clear)
+                                            .frame(height: 3).padding(.top, 4)
+                                    }
+                                    .frame(width: cardWidth, alignment: .leading).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(game.id == library.selectedID ? .isSelected : [])
+                            }
+                        }
+                        .padding(.bottom, 5)
+                        .background(EnclosingScrollView(row: row))
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if row.canBack {
+                            pager("chevron.left", height: cardWidth / 1.8) { row.page(-1, step: step) }.offset(x: -22)
+                        }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if row.canForward {
+                            pager("chevron.right", height: cardWidth / 1.8) { row.page(1, step: step) }.offset(x: 22)
+                        }
+                    }
+            }
+        }
+        .padding(.horizontal, 34).padding(.top, 8).padding(.bottom, 22)
+    }
+
+    /// A round button floating over the row's edge, centred on the artwork, shown while the row scrolls that way.
+    private func pager(_ symbol: String, height: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Color.black.opacity(0.72), in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.16)))
+                .shadow(color: .black.opacity(0.4), radius: 10)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(height: height)
+        .accessibilityLabel(m.t(symbol == "chevron.left" ? "library.scrollBack" : "library.scrollForward"))
+        .transition(.opacity)
+    }
+
+    private func status(_ game: LibraryGame, prominent: Bool = false) -> some View {
+        let building = m.running && activeBuildID == game.id
+        let color = building ? LauncherPalette.building : ((game.isReady || game.hasIOSBuild) ? LauncherPalette.ready : LauncherPalette.unbuilt)
+        let key = building ? "library.building" : (game.isReady ? "library.ready" : (game.hasIOSBuild ? "library.readyIOS" : "library.notBuilt"))
+        return HStack(spacing: 7) {
+            Circle().fill(color).frame(width: prominent ? 9 : 7, height: prominent ? 9 : 7)
+            Text(prominent ? m.t(key).uppercased() : m.t(key))
+                .font(prominent ? .manrope(12, .bold) : .manrope(13, .medium))
+                .tracking(prominent ? 1.3 : 0)   // the eyebrow: the same face, in tracked capitals
+                .foregroundStyle(color)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var activityBar: some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.3)
+            HStack(spacing: 22) {
+                if m.running {
+                    Image(systemName: "wrench.and.screwdriver").font(.system(size: 22, weight: .light)).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(m.t(m.target == "mac-app" ? "activity.mac" : "activity.ios")).font(.manrope(15, .bold))
+                        TimelineView(.periodic(from: Date(), by: 1)) { context in   // the clock ticks while a count may stand still
+                            Text(m.stages.last(where: { $0.state == .running })
+                                    .map { [$0.name, $0.detail, $0.clock(at: context.date, left: m.t("prog.eta"))].filter { !$0.isEmpty }.joined(separator: " · ") }
+                                 ?? m.t("library.preparing"))
+                                .font(.manrope(13)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                    .frame(minWidth: 180, alignment: .leading)
+                    LauncherProgressBar(value: buildProgress).frame(maxWidth: 480)
+                    Text(buildProgress.map { "\(Int($0 * 100))%" } ?? "")
+                        .font(.manrope(14, .semibold)).monospacedDigit().foregroundStyle(.secondary).frame(width: 46, alignment: .leading)
+                    Spacer(minLength: 8)
+                    Button(m.t("library.viewBuild")) { page = .builds }.buttonStyle(LauncherSecondaryButtonStyle())
+                    Button(m.t(m.stopping ? "library.stopping" : "btn.stop")) { m.stop() }
+                        .buttonStyle(LauncherSecondaryButtonStyle(accent: LauncherPalette.building)).disabled(m.stopping)
+                } else {
+                    Image(systemName: "desktopcomputer").foregroundStyle(.secondary)
+                    Text(m.t("library.localNote")).font(.manrope(13)).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+            .padding(.horizontal, 30).frame(height: 84)
+        }
+    }
+
+    private var buildProgress: Double? {
+        // The script reports a percentage for the current step, not for all remaining work.
+        guard let percent = m.stages.last(where: { $0.state == .running })?.percent else { return nil }
+        return percent / 100
+    }
+
+    private func newBuild() {
+        guard !m.running else { page = .builds; return }
+        for index in m.slots.indices { m.slots[index].paths = []; m.slots[index].problem = "" }
+        m.gameDir = ""; m.done = false; m.doneNote = ""; m.macAppPath = ""; m.ipaPath = ""; m.stages = []
+        if m.outDir.isEmpty && !library.folder.isEmpty { m.outDir = library.folder }
+        page = .builds
+    }
+
+    private func configureBuild(_ game: LibraryGame) {
+        guard !m.running else { page = .builds; return }
+        for index in m.slots.indices {
+            m.slots[index].paths = game.inputs[m.slots[index].id] ?? []
+            m.slots[index].problem = ""
+        }
+        m.gameDir = (m.basePath as NSString).deletingLastPathComponent
+        m.outDir = game.outputDirectory
+        m.done = false; m.doneNote = ""; m.stages = []
+        m.target = game.lastTarget
+        page = .builds
+    }
+
+    private func primaryAction(_ game: LibraryGame) {
+        if !game.isReady && game.hasIOSBuild {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: game.ipaPath)])
+            return
+        }
+        guard game.isReady else { configureBuild(game); return }
+        do {
+            _ = try MacGameBundle.read(URL(fileURLWithPath: game.appPath))
+            launching = true
+            let configuration = NSWorkspace.OpenConfiguration()
+            // The launch options; the app's launcher (dm/mac/launcher.c) keeps a variable that is already set.
+            if let settings = LaunchSetting.read(app: game.appPath) { configuration.environment = game.launchEnvironment(settings) }
+            NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: game.appPath), configuration: configuration) { _, error in
+                DispatchQueue.main.async {
+                    launching = false
+                    if let error { launchError = error.localizedDescription }
+                }
+            }
+        } catch { launchError = error.localizedDescription }
+    }
+
+    private func recordBuild() {
+        guard m.done, let id = activeBuildID else { return }
+        if m.target == "mac-app" { library.recordCompletedApp(path: m.macAppPath, for: id) }
+        else { library.recordCompletedIOS(ipa: m.ipaPath, archive: m.archivePath, for: id) }
+        refreshArtwork()
+    }
+
+    private func refreshArtwork() {
+        artwork = Dictionary(uniqueKeysWithValues: library.games.compactMap { game in
+            GameLibrary.artwork(for: game, repo: m.repoPath).map { (game.id, $0) }
+        })
+    }
+
+    /// The eShop key art of the games that have none yet; the cards and the hero redraw as it arrives.
+    private func fetchArtwork() {
+        let ids = library.games.map(\.titleID)
+        Task {
+            let added = await ArtworkStore.shared.fetchMissing(ids)
+            if !added.isEmpty { await MainActor.run { refreshArtwork() } }
+        }
+    }
+
+    private func chooseArtwork(_ game: LibraryGame) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .heic]
+        panel.message = m.t("library.artworkHint")
+        if panel.runModal() == .OK, let url = panel.url, NSImage(contentsOf: url) != nil {
+            library.setArtwork(url.path, for: game.id)
+        }
+    }
+
+    private func chooseLibraryFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.message = m.t("library.folderHint")
+        if !library.folder.isEmpty { panel.directoryURL = URL(fileURLWithPath: library.folder) }
+        if panel.runModal() == .OK, let url = panel.url {
+            library.setFolder(url)
+            if !m.running { m.outDir = url.path }
+        }
+    }
+}
+
+/// The collection row's scroll state, read from its NSScrollView: SwiftUI's horizontal ScrollView does not
+/// report its offset on macOS 13, so the pager chevrons follow the clip view's bounds instead.
+final class RowScroller: ObservableObject {
+    @Published private(set) var canBack = false
+    @Published private(set) var canForward = false
+    private weak var scrollView: NSScrollView?
+    private var observers: [NSObjectProtocol] = []
+
+    func attach(_ view: NSScrollView) {
+        guard view !== scrollView else { return update() }
+        observers.forEach(NotificationCenter.default.removeObserver)
+        scrollView = view
+        let clip = view.contentView
+        clip.postsBoundsChangedNotifications = true
+        clip.postsFrameChangedNotifications = true
+        view.documentView?.postsFrameChangedNotifications = true
+        observers = [(NSView.boundsDidChangeNotification, clip), (NSView.frameDidChangeNotification, clip),
+                     (NSView.frameDidChangeNotification, view.documentView as Any)].map { name, object in
+            NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in self?.update() }
+        }
+        update()
+    }
+
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+    private func update() {
+        guard let view = scrollView, let document = view.documentView else { return }
+        let x = view.contentView.bounds.minX, end = document.frame.width - view.contentView.bounds.width
+        if canBack != (x > 1) { canBack = x > 1 }
+        if canForward != (x < end - 1) { canForward = x < end - 1 }
+    }
+
+    /// Scroll by the whole cards that fit in the row.
+    func page(_ direction: CGFloat, step: CGFloat) {
+        guard let view = scrollView, let document = view.documentView else { return }
+        let clip = view.contentView
+        let distance = max(step, (clip.bounds.width / step).rounded(.down) * step)
+        let target = min(max(0, clip.bounds.minX + direction * distance), max(0, document.frame.width - clip.bounds.width))
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.35
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            clip.animator().setBoundsOrigin(NSPoint(x: target, y: clip.bounds.minY))
+        }
+        view.reflectScrolledClipView(clip)
+    }
+}
+
+/// Hands the NSScrollView around this background view to the row's scroller once it is in a window.
+private struct EnclosingScrollView: NSViewRepresentable {
+    let row: RowScroller
+    final class Probe: NSView {
+        var row: RowScroller?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                if let view = self?.enclosingScrollView { self?.row?.attach(view) }
+            }
+        }
+    }
+    func makeNSView(context: Context) -> Probe { let probe = Probe(); probe.row = row; return probe }
+    func updateNSView(_ probe: Probe, context: Context) {
+        probe.row = row
+        DispatchQueue.main.async { if let view = probe.enclosingScrollView { row.attach(view) } }
+    }
+}

@@ -3,13 +3,14 @@
 # This exists because the app used to be assembled by hand (swift build, copy the binary into
 # the bundle, plutil the version, codesign, ditto) and uploaded by hand — and one release went
 # out without it. The native app is the one macOS users actually run, so "the release has no
-# NS-Port-Builder-macOS-arm64.zip" is not a cosmetic gap: the app's own updater looks for exactly
-# that asset name (ContentView.checkAppUpdate), finds a newer tag with no such asset, and reports
-# "up to date" — a silent failure of the update path for every existing install.
+# nxnative-macOS-arm64.zip" is not a cosmetic gap: the app's own updater looks for exactly that
+# asset name (ContentView.checkAppUpdate), finds a newer tag with no such asset, and reports
+# "up to date" — a silent failure of the update path for every existing install. Copies from before
+# the app was renamed (NS Port Builder) look for NS-Port-Builder-macOS-arm64.zip, so that one goes up too.
 #
 #   - push a tag vX.Y.Z  → builds and attaches the app to that release
 #   - workflow_dispatch  → artifact only
-name: Build NS Port Builder (native macOS)
+name: Build nxnative (native macOS)
 
 on:
   push:
@@ -57,7 +58,7 @@ jobs:
           # The .app is in .gitignore (it is a build product), so a fresh checkout has none: the
           # bundle is generated here. That is the point of this workflow — the previous hand-built
           # bundle is exactly what went missing from a release.
-          APP="NS Port Builder.app"
+          APP="nxnative.app"
           rm -rf "$APP"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp .build/release/NSPortBuilder "$APP/Contents/MacOS/NSPortBuilder"
@@ -71,7 +72,8 @@ jobs:
             <key>CFBundleExecutable</key><string>NSPortBuilder</string>
             <key>CFBundleIconFile</key><string>AppIcon</string>
             <key>CFBundleIdentifier</key><string>org.nxnative.NSPortBuilder</string>
-            <key>CFBundleName</key><string>NS Port Builder</string>
+            <key>CFBundleName</key><string>nxnative</string>
+            <key>CFBundleDisplayName</key><string>nxnative</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>$V</string>
             <key>CFBundleVersion</key><string>$V</string>
@@ -90,12 +92,18 @@ jobs:
       - name: Package
         working-directory: frontend
         shell: bash
-        run: ditto -c -k --keepParent "NS Port Builder.app" NS-Port-Builder-macOS-arm64.zip
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent nxnative.app nxnative-macOS-arm64.zip
+          # The same app under the old names, for copies from before the rename: their self-update looks for this
+          # asset and for "NS Port Builder.app" in it, and swaps the new app in at their own path
+          mkdir -p legacy && ditto nxnative.app "legacy/NS Port Builder.app"
+          (cd legacy && ditto -c -k --keepParent "NS Port Builder.app" ../NS-Port-Builder-macOS-arm64.zip)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NS-Port-Builder-macOS-arm64
-          path: frontend/NS-Port-Builder-macOS-arm64.zip
+          name: nxnative-macOS-arm64
+          path: frontend/nxnative-macOS-arm64.zip
           if-no-files-found: error
 
       - name: Attach to the release
@@ -105,5 +113,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "NS Port Builder $GITHUB_REF_NAME"
-          gh release upload "$GITHUB_REF_NAME" frontend/NS-Port-Builder-macOS-arm64.zip --clobber
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "nxnative $GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" frontend/nxnative-macOS-arm64.zip frontend/NS-Port-Builder-macOS-arm64.zip --clobber
