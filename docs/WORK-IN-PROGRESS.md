@@ -33,11 +33,11 @@ Windows machine.
 
 ## B. Half-done, finish without your input
 
-- [ ] **BC texture decode** (from d2r-mobile: `bcdec.h` + 58-line `nvn_bcdec.c` glue). The code
-      is identified and read; **not yet copied into the tree**. Plan: `dm/third_party/bcdec/`,
-      `dm/gfx/tex/nvn_bcdec.{c,h}`, hook in `nvn_fmt_mtl.c`, verified by decoding a known BC
-      block and comparing bytes. Default off, enabled per profile, so nobody is affected until
-      it is proven on an A15/A16 device (which neither of us has).
+- [x] **BC texture decode** — DONE (`7d2e044`, `840b58b`). `dm/third_party/bcdec/` (public
+      domain), `dm/gfx/tex/nvn_bcdec.{c,h}`, `tex_bc_cpu` profile key, device check in
+      `nvn_mtl.m`, CPU expansion in `pkg_upload_`. Unit test `t_bcdec.c` passes (BC1 matches an
+      independent DXT1 decoder byte for byte). **Still needs an A15/A16 device to prove the
+      rendered result** — neither of us has one.
 - [ ] **Launcher architecture A**: `Documents/games/<titleID>/{romfs,msl,save,temp}` layout,
       `main.m romfs_locate` extended to look there, `DM_ROMFS`/`DM_MSL_DIR`/`DM_SAVE` set from the
       chosen game. This is what makes an external drive work. The runtime-profile part
