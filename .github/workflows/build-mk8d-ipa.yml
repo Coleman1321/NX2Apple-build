@@ -56,6 +56,25 @@ jobs:
           megatools dl --path game "$MEGA_LINK"
           ls -la game/
 
+      # The MEGA folder holds zips, not raw NSPs, and the build script
+      # takes an NSP folder. Unzip base + update, delete each zip after
+      # extraction to keep disk down, and drop the Booster Course DLC
+      # zip entirely (DLC is not usable in this build path).
+      - name: Unzip game inputs (drop DLC)
+        if: inputs.input_source == 'mega'
+        run: |
+          cd game
+          for z in *.zip; do
+            case "$z" in
+              *Booster*) rm -f "$z" ;;
+              *) unzip -o "$z" && rm -f "$z" ;;
+            esac
+          done
+          cd ..
+          ls -la game/
+          find game -maxdepth 3 -name '*.nsp' | head -20
+          df -h
+
       - name: Fetch game inputs (split release assets, reassemble)
         if: inputs.input_source == 'release'
         env:
