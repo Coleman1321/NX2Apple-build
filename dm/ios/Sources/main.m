@@ -43,7 +43,7 @@ static NSString *romfs_locate(void) {
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
     // Per-game first: Documents/games/<id>/romfs — what the launcher-style layout produces, and what
     // lets a user keep several games' data side by side (or on an external drive).
-    NSString *per_game = [game_dir_for(DM_GAME_ID) stringByAppendingPathComponent:@"romfs"];
+    NSString *per_game = [game_dir_for(dm_profile()->id) stringByAppendingPathComponent:@"romfs"];
     if ([fm fileExistsAtPath:per_game] && romfs_dir_ok(per_game)) return per_game;
     for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]]) {
         if (romfs_dir_ok(d)) return d;
@@ -92,7 +92,7 @@ static int boot_env(void) {
     // (so two games in one app never share a save folder), else the old Documents/{save,temp}. An
     // env file still wins — DM_SAVE/DM_TEMP set there are already in the environment and
     // setenv(..., 0) leaves them alone.
-    NSString *gdir = game_dir_for(DM_GAME_ID);
+    NSString *gdir = game_dir_for(dm_profile()->id);
     // Tie the data folder to where the game files actually came from: if romfs_locate fell back to
     // Documents/romfs, the saves must stay beside it (a game folder without romfs is not in use).
     BOOL per_game = [romfs hasPrefix:gdir];
