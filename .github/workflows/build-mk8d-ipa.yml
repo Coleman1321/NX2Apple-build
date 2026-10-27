@@ -40,7 +40,11 @@ jobs:
         run: |
           brew install xcodegen zstd spirv-cross megatools
           brew install --cask dotnet-sdk
-          python3 -m pip install lz4 capstone fonttools backports.zstd
+          # Homebrew's Python is PEP 668 externally-managed, so a plain
+          # pip install is refused. --break-system-packages is safe here:
+          # the runner is throwaway, and the build scripts call system
+          # python3 (a venv would leave those calls without the packages).
+          python3 -m pip install --break-system-packages lz4 capstone fonttools backports.zstd
 
       # MEGA route (chosen 2026-10-26): the share link carries the
       # decryption key, so it lives in the MEGA_LINK secret, never as
