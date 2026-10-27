@@ -1,0 +1,48 @@
+name: Dry run - MEGA pull and disk check
+
+# Dry run only: verifies the runner can pull the game files from MEGA
+# and how much disk headroom remains. No keys, no build, no outputs.
+# Run this before the full build workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_source:
+        description: "Where the game files come from"
+        required: true
+        type: choice
+        options: [mega, release]
+        default: mega
+
+jobs:
+  dryrun:
+    runs-on: macos-15   # arm64 M1, same runner as the full build
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check disk
+        run: df -h
+
+      # Same cleanup the full build uses (14 GB standard runner).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          df -h
+
+      - name: Install megatools
+        run: brew install megatools
+
+      # MEGA route: the share link carries the decryption key, so it
+      # lives in the MEGA_LINK secret, never as a workflow input or
+      # in the repo. megatools dl needs no login for a public link.
+      - name: Pull game inputs from MEGA
+        if: inputs.input_source == 'mega'
+        env:
+          MEGA_LINK: ${{ secrets.MEGA_LINK }}
+        run: |
+          mkdir -p game
+          megatools dl --path game "$MEGA_LINK"
+          ls -la game/
+          du -sh game/*
+          df -h

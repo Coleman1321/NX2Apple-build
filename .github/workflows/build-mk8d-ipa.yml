@@ -1,0 +1,104 @@
+name: Build MK8D IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_source:
+        description: "Where the game files come from"
+        required: true
+        type: choice
+        options: [mega, release]
+        default: mega
+      input_release_tag:
+        description: "Private-repo release tag holding the game files (release source only)"
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: macos-15   # arm64 M1; the toolchain needs Apple Silicon
+    timeout-minutes: 180
+    permissions:
+      contents: write   # to upload outputs as a draft release
+    env:
+      GAME_ID: "0100152000022000"   # Mario Kart 8 Deluxe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check disk
+        run: df -h
+
+      # Likely necessary on the 14 GB standard runner (peak build
+      # footprint is ~15-17 GB): free simulator runtimes before the pull.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          df -h
+
+      - name: Install dependencies
+        run: |
+          brew install xcodegen zstd spirv-cross megatools
+          brew install --cask dotnet-sdk
+          python3 -m pip install lz4 capstone fonttools backports.zstd
+
+      # MEGA route (chosen 2026-10-26): the share link carries the
+      # decryption key, so it lives in the MEGA_LINK secret, never as
+      # a workflow input or in the repo. megatools dl needs no login
+      # for a public link. Free-transfer quota can throttle a ~7 GB
+      # pull; if it stalls, splitting the base file is the fallback.
+      - name: Fetch game inputs from MEGA
+        if: inputs.input_source == 'mega'
+        env:
+          MEGA_LINK: ${{ secrets.MEGA_LINK }}
+        run: |
+          mkdir -p game
+          megatools dl --path game "$MEGA_LINK"
+          ls -la game/
+
+      - name: Fetch game inputs (split release assets, reassemble)
+        if: inputs.input_source == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p game
+          # Release holds: mk8d-base.part-aa/ab/ac/ad, mk8d-update.nsp
+          gh release download "${{ inputs.input_release_tag }}" \
+            --dir game --pattern 'mk8d-*'
+          cat game/mk8d-base.part-* > game/base.nsp
+          rm game/mk8d-base.part-*
+          ls -la game/
+
+      - name: Write prod.keys from secret (never printed)
+        env:
+          PROD_KEYS_B64: ${{ secrets.PROD_KEYS_B64 }}
+        run: |
+          mkdir -p keys
+          printf '%s' "$PROD_KEYS_B64" | base64 -d > keys/prod.keys
+          chmod 600 keys/prod.keys
+
+      - name: Build slim IPA
+        run: |
+          python3 scripts/build_ipa_from_nsp.py game -k keys/prod.keys
+
+      - name: Pack RomFS archive shards
+        run: |
+          ROMFS_DIR=$(find game -maxdepth 4 -type d -name RomFS | head -1)
+          echo "RomFS at: $ROMFS_DIR"
+          mkdir -p out
+          python3 dm/tools/romfs_arc.py pack "$ROMFS_DIR" out/romfs --shard-mib 200
+          python3 dm/tools/romfs_arc.py verify out/romfs "$ROMFS_DIR"
+
+      - name: Collect IPA and clean up bulk inputs
+        run: |
+          find game -maxdepth 2 -name '*.ipa' -exec cp {} out/ \;
+          rm -rf game keys
+          ls -la out/
+
+      - name: Publish outputs as draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "mk8d-build-${{ github.run_number }}" \
+            --draft --title "MK8D iOS build #${{ github.run_number }}" \
+            out/*.ipa out/romfs.idx out/romfs.*
