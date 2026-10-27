@@ -36,6 +36,13 @@ jobs:
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
           df -h
 
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          # The runner's default Python is 3.14, and backports.zstd has no
+          # 3.14 distribution (build #2 failed on it). 3.13 keeps the
+          # project's documented pip set installable as-is.
       - name: Install dependencies
         run: |
           brew install xcodegen zstd spirv-cross megatools
