@@ -13,11 +13,16 @@ on:
         description: "Private-repo release tag holding the game files (release source only)"
         required: false
         type: string
+      pack_romfs:
+        description: "Also rebuild RomFS shards (leave off when reusing the same game's installed RomFS)"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
     runs-on: xcode-27   # Apple Silicon runner with the iOS 27.1 toolchain
-    timeout-minutes: 180
+    timeout-minutes: 360
     permissions:
       contents: write   # to upload outputs as a draft release
     env:
@@ -121,30 +126,51 @@ jobs:
         run: |
           python3 scripts/build_ipa_from_nsp.py game -k keys/prod.keys
 
-      - name: Pack RomFS archive shards
-        run: |
-          ROMFS_DIR=$(find game -maxdepth 4 -type d -name RomFS | head -1)
-          [ -n "$ROMFS_DIR" ] && [ -d "$ROMFS_DIR" ] || { echo "RomFS not found under game/"; exit 1; }
-          echo "RomFS at: $ROMFS_DIR"
-          df -h
-          mkdir -p out
-          python3 dm/tools/romfs_arc.py pack "$ROMFS_DIR" out/romfs --shard-mib 200
-          python3 dm/tools/romfs_arc.py verify out/romfs "$ROMFS_DIR"
-
       - name: Prepare SideStore IPA and external shaders
         run: |
           IPA=$(find game -maxdepth 2 -name '*.ipa' -print -quit)
           [ -n "$IPA" ] || { echo "Built IPA not found"; exit 1; }
           python3 scripts/prepare_sidestore_ipa.py "$IPA" --out out --game "$GAME_ID"
           python3 scripts/check_ipa_sdk.py out/*-SideStore.ipa --minimum 27.1 --report out/sdk-verification.json
-          rm -rf game keys
           ls -la out/
 
-      - name: Publish outputs as draft release
+      # Preserve the expensive build before optional RomFS packaging. Draft
+      # release assets keep the same access as previous build outputs.
+      - name: Save IPA and shaders as draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "mk8d-build-${{ github.run_number }}" \
             --draft --title "MK8D iOS build #${{ github.run_number }}" \
-            out/*.ipa out/*-shaders.zip out/INSTALL-SideStore.txt out/romfs.* out/sdk-verification.json
+            out/*.ipa out/*-shaders.zip out/INSTALL-SideStore.txt out/sdk-verification.json
+
+      - name: Pack RomFS archive shards
+        if: inputs.pack_romfs
+        run: |
+          ROMFS_DIR=$(find game -maxdepth 4 -type d -name RomFS | head -1)
+          [ -n "$ROMFS_DIR" ] && [ -d "$ROMFS_DIR" ] || { echo "RomFS not found under game/"; exit 1; }
+          echo "RomFS at: $ROMFS_DIR"
+          # Shards duplicate the extracted RomFS on disk. Fail before writing
+          # partial shards if this runner cannot fit the full second copy.
+          python3 - "$ROMFS_DIR" <<'PY'
+          from pathlib import Path
+          import shutil
+          import sys
+          required = sum(p.stat().st_size for p in Path(sys.argv[1]).rglob('*') if p.is_file())
+          available = shutil.disk_usage('.').free
+          if available < required + 2 * 1024**3:
+              raise SystemExit(f'RomFS packing needs {required / 1024**3:.2f} GiB plus 2 GiB headroom; only {available / 1024**3:.2f} GiB free. IPA and shaders are already saved in the draft release.')
+          PY
+          python3 dm/tools/romfs_arc.py pack "$ROMFS_DIR" out/romfs --shard-mib 200
+          python3 dm/tools/romfs_arc.py verify out/romfs "$ROMFS_DIR"
+
+      - name: Add RomFS shards to draft release
+        if: inputs.pack_romfs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "mk8d-build-${{ github.run_number }}" out/romfs.*
+
+      - name: Remove temporary build inputs
+        run: rm -rf game keys
 
