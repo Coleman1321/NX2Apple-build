@@ -139,9 +139,11 @@ jobs:
           python3 dm/tools/romfs_arc.py pack "$ROMFS_DIR" out/romfs --shard-mib 200
           python3 dm/tools/romfs_arc.py verify out/romfs "$ROMFS_DIR"
 
-      - name: Collect IPA and clean up bulk inputs
+      - name: Prepare SideStore IPA and external shaders
         run: |
-          find game -maxdepth 2 -name '*.ipa' -exec cp {} out/ \;
+          IPA=$(find game -maxdepth 2 -name '*.ipa' -print -quit)
+          [ -n "$IPA" ] || { echo "Built IPA not found"; exit 1; }
+          python3 scripts/prepare_sidestore_ipa.py "$IPA" --out out --game "$GAME_ID"
           rm -rf game keys
           ls -la out/
 
@@ -151,4 +153,5 @@ jobs:
         run: |
           gh release create "mk8d-build-${{ github.run_number }}" \
             --draft --title "MK8D iOS build #${{ github.run_number }}" \
-            out/*.ipa out/romfs.*
+            out/*.ipa out/*-shaders.zip out/INSTALL-SideStore.txt out/romfs.*
+
