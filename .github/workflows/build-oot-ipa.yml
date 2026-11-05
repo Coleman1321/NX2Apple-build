@@ -17,16 +17,19 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 360
     env:
-      GH_TOKEN: ${{ github.token }}
       INPUT_TAG: ${{ inputs.input_release_tag }}
       ENGINE_SHA: b0f6a7a3bb0cb41c8e9a64caad08c50e14501f99
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Verify toolchain and available capacity
         run: |
           set -euo pipefail
           xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+          SDK_VERSION=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iOS SDK: $SDK_VERSION"
+          python3 -c 'import sys; assert tuple(map(int,sys.argv[1].split("."))) >= (27,1), "iOS SDK 27.1 or newer required"' "$SDK_VERSION"
           test "$(uname -m)" = arm64
           df -h .
           du -sh /Applications/Xcode*.app /Library/Developer/CoreSimulator /Library/Developer/CommandLineTools 2>/dev/null || true
@@ -41,6 +44,7 @@ jobs:
         if: ${{ !inputs.preflight_only }}
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: vinifloriano/nxnative
           ref: b0f6a7a3bb0cb41c8e9a64caad08c50e14501f99
           path: engine
@@ -55,6 +59,8 @@ jobs:
           brew install --cask dotnet-sdk
           python3 -m pip install lz4 'capstone>=5,<6' fonttools backports.zstd
       - name: Restore private input parts
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: ${{ !inputs.preflight_only }}
         run: |
           set -euo pipefail
@@ -90,10 +96,14 @@ jobs:
               if z.testzip(): raise SystemExit('IPA CRC check failed')
           PYCODE
       - name: Save IPA before large resource upload
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: ${{ !inputs.preflight_only }}
         run: |
           gh release create "oot-build-${{ github.run_number }}" --draft --title 'Ocarina Switch 2 experimental IPA' --notes 'Experimental, untested on iPhone. Pinned upstream PR #1387. Copy the matching reassembled RomFS image to the app Documents/romfs.img; do not reuse Mario Kart resources.' out/*.ipa out/sdk-verification.json
       - name: Upload RomFS in bounded parts
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: ${{ !inputs.preflight_only }}
         run: |
           set -euo pipefail
@@ -114,6 +124,8 @@ jobs:
           subprocess.run(['gh','release','upload','oot-build-${{ github.run_number }}',str(p)],check=True)
           PYCODE
       - name: Preserve diagnostic logs privately
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: ${{ failure() && !inputs.preflight_only }}
         run: |
           mkdir -p out
