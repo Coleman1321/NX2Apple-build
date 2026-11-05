@@ -29,6 +29,7 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           test "$(uname -m)" = arm64
           df -h .
+          du -sh /Applications/Xcode*.app /Library/Developer/CoreSimulator /Library/Developer/CommandLineTools 2>/dev/null || true
           python3 - <<'PYCODE'
           import shutil
           free = shutil.disk_usage('.').free
