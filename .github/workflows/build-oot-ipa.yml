@@ -1,0 +1,122 @@
+name: Build Ocarina Switch 2 IPA (experimental)
+on:
+  workflow_dispatch:
+    inputs:
+      preflight_only:
+        description: Check runner capacity without transferring or building game data
+        type: boolean
+        default: true
+      input_release_tag:
+        description: Owner-only draft release containing oot-input.part-* and oot-input.json
+        type: string
+        default: oot-switch2-input-v131072
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_TAG: ${{ inputs.input_release_tag }}
+      ENGINE_SHA: b0f6a7a3bb0cb41c8e9a64caad08c50e14501f99
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify toolchain and available capacity
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          test "$(uname -m)" = arm64
+          df -h .
+          python3 - <<'PYCODE'
+          import shutil
+          free = shutil.disk_usage('.').free
+          print(f'Available: {free / 2**30:.2f} GiB')
+          if free < 80 * 2**30:
+              raise SystemExit('Ocarina needs at least 80 GiB free for the 25 GB NUP, RomFS image and shader build. No game files transferred.')
+          PYCODE
+      - name: Check out pinned experimental engine
+        if: ${{ !inputs.preflight_only }}
+        uses: actions/checkout@v4
+        with:
+          repository: vinifloriano/nxnative
+          ref: b0f6a7a3bb0cb41c8e9a64caad08c50e14501f99
+          path: engine
+      - uses: actions/setup-python@v5
+        if: ${{ !inputs.preflight_only }}
+        with:
+          python-version: '3.13'
+      - name: Install build dependencies
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          brew install xcodegen zstd spirv-cross glslang meson ninja
+          brew install --cask dotnet-sdk
+          python3 -m pip install lz4 'capstone>=5,<6' fonttools backports.zstd
+      - name: Restore private input parts
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          set -euo pipefail
+          mkdir -p game out
+          gh release view "$INPUT_TAG" --json isDraft --jq '.isDraft' | grep -qx true
+          gh release download "$INPUT_TAG" --dir game --pattern 'oot-input*'
+          python3 - <<'PYCODE'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('game'); manifest=json.loads((root/'oot-input.json').read_text())
+          with (root/'Ocarina.nup').open('wb') as out:
+              for part in manifest['parts']:
+                  p=root/part['name']; h=hashlib.sha256(); count=0
+                  with p.open('rb') as f:
+                      while block:=f.read(8*1024**2):
+                          h.update(block); count+=len(block); out.write(block)
+                  if count!=part['size'] or h.hexdigest()!=part['sha256']:
+                      raise SystemExit('Input part failed verification: '+p.name)
+                  p.unlink()
+          if (root/'Ocarina.nup').stat().st_size!=manifest['size']:
+              raise SystemExit('Reassembled input size mismatch')
+          PYCODE
+      - name: Build unsigned IPA with external RomFS
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          python3 engine/scripts/build_ipa_from_nsp.py game/Ocarina.nup --romfs separate --work-dir game/build --app-name 'Zelda Ocarina of Time' -o out/ZeldaOcarinaOfTime.ipa
+          python3 scripts/check_ipa_sdk.py out/ZeldaOcarinaOfTime.ipa --minimum 27.1 --report out/sdk-verification.json
+          python3 - <<'PYCODE'
+          import zipfile
+          with zipfile.ZipFile('out/ZeldaOcarinaOfTime.ipa') as z:
+              if len(z.infolist())>=65535:
+                  raise SystemExit('IPA still exceeds the SideStore entry limit')
+              if z.testzip(): raise SystemExit('IPA CRC check failed')
+          PYCODE
+      - name: Save IPA before large resource upload
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          gh release create "oot-build-${{ github.run_number }}" --draft --title 'Ocarina Switch 2 experimental IPA' --notes 'Experimental, untested on iPhone. Pinned upstream PR #1387. Copy the matching reassembled RomFS image to the app Documents/romfs.img; do not reuse Mario Kart resources.' out/*.ipa out/sdk-verification.json
+      - name: Upload RomFS in bounded parts
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          set -euo pipefail
+          ROMFS=game/build/extract/v131072/RomFS.img
+          test -f "$ROMFS"
+          python3 - "$ROMFS" <<'PYCODE'
+          import hashlib,json,subprocess,sys
+          from pathlib import Path
+          src=Path(sys.argv[1]); parts=[]
+          with src.open('rb') as f:
+              i=0
+              while block:=f.read(1024**3):
+                  p=Path(f'out/romfs.img.part-{i:03d}');p.write_bytes(block)
+                  parts.append(dict(name=p.name,size=len(block),sha256=hashlib.sha256(block).hexdigest()))
+                  subprocess.run(['gh','release','upload','oot-build-${{ github.run_number }}',str(p)],check=True)
+                  p.unlink();i+=1
+          p=Path('out/romfs-parts.json');p.write_text(json.dumps(dict(output='romfs.img',size=src.stat().st_size,parts=parts),indent=2))
+          subprocess.run(['gh','release','upload','oot-build-${{ github.run_number }}',str(p)],check=True)
+          PYCODE
+      - name: Preserve diagnostic logs privately
+        if: ${{ failure() && !inputs.preflight_only }}
+        run: |
+          mkdir -p out
+          if test -d game/build/logs; then
+            tar -czf out/build-logs.tar.gz -C game/build logs
+            gh release create "oot-diagnostics-${{ github.run_number }}" --draft --title 'Ocarina failed build diagnostics' out/build-logs.tar.gz
+          fi
