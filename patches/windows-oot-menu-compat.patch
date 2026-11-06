@@ -1,0 +1,26 @@
+diff --git a/frontend-qt/nspb_qt/win/ios/Launcher.m b/frontend-qt/nspb_qt/win/ios/Launcher.m
+index c5aa1c9..173d54d 100644
+--- a/frontend-qt/nspb_qt/win/ios/Launcher.m
++++ b/frontend-qt/nspb_qt/win/ios/Launcher.m
+@@ -601,7 +601,7 @@ extern int dm_pad_layout(void);
+ extern bool dm_pad_layout_offered(int layout);
+ extern void dm_pad_layout_set(int layout);
+ extern bool dm_setting_live(const char *env, const char *value);
+-extern void *dm_quit_menu(void);
++// The pinned engine GameMenu.swift has controller/settings rows only; no quit-menu API.
+ 
+ static NspbModel *g_game_menu_model;
+ 
+@@ -686,11 +686,7 @@ static NSArray<UIMenuElement *> *nspb_game_menu_items(void) {
+     if (!placed) {
+         [items insertObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[layout]] atIndex:0];
+     }
+-    void *quit = dm_quit_menu();
+-    if (quit) {
+-        UIMenu *qm = CFBridgingRelease(quit);
+-        if (qm) [items addObject:qm];
+-    }
++    // Match this engine's in-game menu without referencing a newer engine export.
+     return items;
+ }
+ 
