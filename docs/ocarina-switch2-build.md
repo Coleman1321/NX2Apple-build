@@ -19,7 +19,7 @@ The GitHub workflow runs a capacity check only. The build now uses the local Win
 
 Pinned source: vinifloriano/nxnative `b0f6a7a3bb0cb41c8e9a64caad08c50e14501f99`, upstream PR https://github.com/seedds/nxnative/pull/1387.
 This is an unmerged bring-up branch, not the stable engine. Its v131072 profile reached the Mac opening sequence, with no validated gameplay or iPhone run.
-Related Mac gameplay report: https://github.com/seedds/nxnative/pull/1299 (different build/source). That report describes a 6.2 GiB heap and 13â€“14.3 GB resident memory. These are compatibility concerns, not validated iPhone requirements.
+Related Mac gameplay report: https://github.com/seedds/nxnative/pull/1299 (different build/source). That report describes a 6.2 GiB heap and 13Ã¢â‚¬â€œ14.3 GB resident memory. These are compatibility concerns, not validated iPhone requirements.
 
 ## Current blocker
 
@@ -56,3 +56,11 @@ The only remaining required dependency is Apple's Metal Developer Tools for Wind
 `scripts/build_oot_windows.py` imports that ZIP from Downloads, checks the toolchain, launches the official Windows driver, and verifies the finished IPA's actual SDK, ZIP entry count and CRC. It preserves the registered Ocarina memory profile with `--no-heap-check`, rather than applying the Windows provisional heap estimate. Its status JSON and logs go to the chosen output directory. `--wait-for-metal` optionally waits for the download before starting. A launcher was started locally with a one-hour wait for that dependency; shader compilation has not started while Metal is missing.
 
 Local source paths and process IDs are recorded only in the local output folder, not in Git. The game data is not uploaded to GitHub.
+
+### Metal installed and build started (2026-11-06)
+
+Apple supplied an EXE self-extracting installer, not a ZIP: `Metal_Developer_Tools6.2Windows.exe`, 339,551,184 bytes. Its Authenticode signature verified as valid, signed by Apple Inc. It was unpacked into the local builder tool folder and configured with the official toolchain helper.
+
+Metal reports `Apple metal version 32023.850 (metalfe-custom-windows)`. The real shader probe produced a 3,136-byte iOS metallib. All required doctor probes passed.
+
+The local Windows IPA pipeline started at 09:59 Eastern. It reused the prepared RomFS and reached stage 2/6, rewriting main, subsdk0 and sdk. The launcher logs progress and verifies the SDK/ZIP after a successful build. This milestone is not a completed IPA or an iPhone compatibility test.
