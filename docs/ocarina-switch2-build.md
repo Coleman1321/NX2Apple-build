@@ -64,3 +64,11 @@ Apple supplied an EXE self-extracting installer, not a ZIP: `Metal_Developer_Too
 Metal reports `Apple metal version 32023.850 (metalfe-custom-windows)`. The real shader probe produced a 3,136-byte iOS metallib. All required doctor probes passed.
 
 The local Windows IPA pipeline started at 09:59 Eastern. It reused the prepared RomFS and reached stage 2/6, rewriting main, subsdk0 and sdk. The launcher logs progress and verifies the SDK/ZIP after a successful build. This milestone is not a completed IPA or an iPhone compatibility test.
+
+### Completed Windows IPA (2026-11-06)
+
+The IPA completed at 13:37 Eastern, with actual linked SDK 27.2.0. It contains the shader resource image and external RomFS identity; the 24.44 GiB RomFS remains outside the IPA. Independent SDK and ZIP checks are recorded in the local output folder. No device test has been performed. Three shaders failed (two Metal compile failures, one unsupported Ampere instruction), so rendering remains experimental.
+
+The newer Windows launcher called `dm_quit_menu`, which the pinned experimental engine does not export. Weak import alone did not satisfy the Mach-O link. The local UIKit menu was matched to that engine's existing GameMenu.swift controller/settings-only menu, without adding a missing-function stub or altering the game host. The reproducible source-only diff is `patches/windows-oot-menu-compat.patch`. The shader caches and all 262 unaffected object files were reused.
+
+This patch belongs to the Windows builder checkout, not the engine. Do not apply it when an updated engine already exports the quit-menu API.
